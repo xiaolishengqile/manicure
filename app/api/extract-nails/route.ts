@@ -1,5 +1,7 @@
 import OpenAI, { toFile } from "openai";
 import {
+  ACCESSORY_TRYON_PROMPT,
+  MODEL_TRYON_PROMPT,
   parseGenerationMode,
   promptsForMode,
   type GenerationMode,
@@ -29,6 +31,12 @@ function getImageModel(): string {
   return process.env.OPENAI_IMAGE_MODEL?.trim() || "gpt-image-1.5";
 }
 
+function extFromMime(mime: string): string {
+  if (mime === "image/png") return "png";
+  if (mime === "image/webp") return "webp";
+  return "jpg";
+}
+
 async function editOnce(
   openai: OpenAI,
   buffer: Buffer,
@@ -53,6 +61,62 @@ async function editOnce(
   return firstImageUrl(res);
 }
 
+/** 第一张：场景（模特或饰品陈列），第二张：美甲产品 */
+async function editDualSceneNails(
+  openai: OpenAI,
+  sceneBuffer: Buffer,
+  sceneMime: string,
+  nailsBuffer: Buffer,
+  nailsMime: string,
+  prompt: string,
+): Promise<string | null> {
+  const sceneExt = extFromMime(sceneMime);
+  const nailsExt = extFromMime(nailsMime);
+  const sceneFile = await toFile(sceneBuffer, `scene.${sceneExt}`, {
+    type: sceneMime,
+  });
+  const nailsFile = await toFile(nailsBuffer, `nails.${nailsExt}`, {
+    type: nailsMime,
+  });
+  const imageModel = getImageModel();
+  const res = await openai.images.edit({
+    model: imageModel,
+    image: [sceneFile, nailsFile],
+    prompt,
+    n: 1,
+    size: "1024x1024",
+    quality: "high",
+    background: "opaque",
+    output_format: "png",
+    input_fidelity: "high",
+    stream: false,
+  });
+  return firstImageUrl(res);
+}
+
+async function validateImageFile(
+  entry: FormDataEntryValue | null,
+  fieldLabel: string,
+): Promise<
+  | { ok: true; buffer: Buffer; mime: string }
+  | { ok: false; error: string }
+> {
+  if (!entry || !(entry instanceof File)) {
+    return { ok: false, error: `${fieldLabel}缺失或无效。` };
+  }
+  if (!entry.type.startsWith("image/")) {
+    return { ok: false, error: `${fieldLabel}必须是图片格式。` };
+  }
+  const buffer = Buffer.from(await entry.arrayBuffer());
+  if (buffer.length > MAX_BYTES) {
+    return {
+      ok: false,
+      error: `${fieldLabel}过大，请使用小于 ${MAX_BYTES / 1024 / 1024}MB 的文件。`,
+    };
+  }
+  return { ok: true, buffer, mime: entry.type || "image/jpeg" };
+}
+
 export async function POST(request: Request) {
   const apiKey = getApiKey();
   if (!apiKey) {
@@ -72,33 +136,78 @@ export async function POST(request: Request) {
     return Response.json({ error: "无法解析上传内容。" }, { status: 400 });
   }
 
-  const file = formData.get("image");
-  if (!file || !(file instanceof File)) {
-    return Response.json({ error: "请选择一张美甲图片（字段名 image）。" }, { status: 400 });
-  }
-
-  if (!file.type.startsWith("image/")) {
-    return Response.json({ error: "文件必须是图片格式。" }, { status: 400 });
-  }
-
-  const buffer = Buffer.from(await file.arrayBuffer());
-  if (buffer.length > MAX_BYTES) {
-    return Response.json(
-      { error: `图片过大，请使用小于 ${MAX_BYTES / 1024 / 1024}MB 的文件。` },
-      { status: 400 },
-    );
-  }
-
   const mode: GenerationMode = parseGenerationMode(formData.get("mode"));
-
-  const mime = file.type || "image/jpeg";
-  const ext =
-    mime === "image/png" ? "png" : mime === "image/webp" ? "webp" : "jpg";
 
   const openai = new OpenAI({
     apiKey,
     baseURL: getBaseURL(),
   });
+
+  if (mode === "model_tryon" || mode === "accessory_tryon") {
+    const nailsRes = await validateImageFile(
+      formData.get("image"),
+      "美甲产品图（字段 image）",
+    );
+    if (!nailsRes.ok) {
+      return Response.json({ error: nailsRes.error }, { status: 400 });
+    }
+
+    const secondKey = mode === "model_tryon" ? "modelImage" : "accessoryImage";
+    const secondLabel =
+      mode === "model_tryon"
+        ? "模特图（字段 modelImage）"
+        : "饰品场景图（字段 accessoryImage）";
+    let sceneRes = await validateImageFile(formData.get(secondKey), secondLabel);
+    if (!sceneRes.ok && mode === "accessory_tryon") {
+      sceneRes = await validateImageFile(
+        formData.get("foodImage"),
+        "饰品场景图（兼容旧字段 foodImage，建议改用 accessoryImage）",
+      );
+    }
+    if (!sceneRes.ok) {
+      return Response.json({ error: sceneRes.error }, { status: 400 });
+    }
+
+    const prompt =
+      mode === "model_tryon" ? MODEL_TRYON_PROMPT : ACCESSORY_TRYON_PROMPT;
+    const label =
+      mode === "model_tryon" ? "试戴效果图" : "饰品场景试戴图";
+
+    try {
+      const url = await editDualSceneNails(
+        openai,
+        sceneRes.buffer,
+        sceneRes.mime,
+        nailsRes.buffer,
+        nailsRes.mime,
+        prompt,
+      );
+      if (!url) {
+        return Response.json(
+          { error: "模型未返回图片（既无 url 也无 b64_json）。" },
+          { status: 502 },
+        );
+      }
+      return Response.json({
+        imageUrls: [url],
+        labels: [label],
+        imageUrl: url,
+        mode,
+      });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "图像编辑接口调用失败";
+      return Response.json({ error: message }, { status: 502 });
+    }
+  }
+
+  const nailsOnly = await validateImageFile(formData.get("image"), "美甲图片（字段 image）");
+  if (!nailsOnly.ok) {
+    return Response.json({ error: nailsOnly.error }, { status: 400 });
+  }
+
+  const buffer = nailsOnly.buffer;
+  const mime = nailsOnly.mime;
+  const ext = extFromMime(mime);
 
   const jobs = promptsForMode(mode);
   const imageUrls: string[] = [];
