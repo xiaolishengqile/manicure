@@ -116,28 +116,61 @@ Output a single square high-resolution photograph.`;
 /** 十张单甲各一图 → 合成一张 2×5 白底栅格（多图 edit 一次） */
 export const TEN_SINGLES_GRID_PROMPT = `You receive EXACTLY TEN separate input images, in fixed order from the FIRST image (index 1) through the TENTH image (index 10). Each input should depict ONE artificial press-on nail tip (or one nail plate crop), possibly on a neutral background, finger, or tool.
 
-TASK — single composite product sheet:
-1) From EACH input, isolate ONLY that one nail tip with clean, crisp edges. Remove skin, tweezers, card stock, text, and busy backgrounds.
-2) Composite all TEN isolated nails onto ONE new canvas with a pure solid white background (#FFFFFF) only — no gradients, no props, no watermark, no typography.
-3) Layout: exactly 2 rows × 5 columns, even spacing, centered in the frame, catalog symmetry. Placement by upload order:
-   - TOP row, left to right = nails from inputs 1, 2, 3, 4, 5 in that order.
-   - BOTTOM row, left to right = nails from inputs 6, 7, 8, 9, 10 in that order.
-4) ANATOMICAL SIZE GRADIENT (each row = one hand, thumb → pinky left to right): Within EACH row of five, the leftmost nail must read as THUMB (largest width/length), the rightmost as PINKY (smallest), with the three middle nails stepping down smoothly. You MAY uniformly scale and slightly rotate each placed nail within its cell so this graduation looks natural EVEN IF the source photos were similar sizes. Do not swap which source image goes into which column — keep the 1→5 and 6→10 mapping; only adjust scale/position/rotation inside the cell for believable proportions.
-5) Preserve every nail’s artwork, colors, gloss, chrome, tiny 3D charms, and French edges with high fidelity to its source image (input_fidelity intent). Do not invent a different design for any slot.
-6) E-commerce studio lighting: soft, even; optional very subtle contact shadow only.
+TASK — single composite product sheet (Amazon / Taobao catalog grade):
+
+LOCKED SLOT ORDER (non-negotiable):
+- TOP row columns 1→5 MUST use ONLY the artwork from inputs 1, 2, 3, 4, 5 respectively (input 2 → column 2 only, never column 3).
+- BOTTOM row columns 1→5 MUST use ONLY inputs 6, 7, 8, 9, 10 respectively.
+- Never permute, swap, or “sort” nails across columns. Distinctive motifs (e.g. a flower on input 2) MUST stay in column 2 of the top row exactly.
+
+AXIS-ALIGNED PLACEMENT (no tilt):
+- Every nail must be perfectly upright: its long axis parallel to the canvas vertical; rotation in the image plane = 0° (no diagonal lean, no cocked angles).
+- Center each nail within its own invisible grid cell.
+
+UNIFORM MODULAR GRID (equal spacing):
+- Build a strict 2×5 layout on pure white #FFFFFF: identical horizontal gap between every pair of adjacent nails in the same row; identical vertical gap between the two rows; equal margins to the frame edges so the block looks like a spreadsheet / Figma auto-layout.
+- Do NOT use irregular “organic” spacing — gutters must look mechanically even.
+
+SIZE GRADIENT WITHOUT BREAKING ORDER:
+- Within each row, apparent nail-plate width (and length) must decrease monotonically from column 1 (thumb) to column 5 (pinky). Column 4 must NOT be wider than column 3; column 2 must NOT be narrower than column 3 in a way that breaks the sequence.
+- Achieve this ONLY by uniform per-nail SCALE inside the cell — never by swapping which input occupies which column.
+
+1) From EACH input, isolate ONLY that nail tip with crisp edges; remove skin, tools, cards, text, backgrounds.
+2) Preserve every nail’s artwork, colors, gloss, 3D charms with high fidelity (input_fidelity). No invented designs.
+3) Soft even studio light; optional minimal contact shadow only.
 
 Return ONE single square high-resolution product-ready image.`;
 
 const COMPLETE_GRID_PROMPT = `Edit the provided reference photo of press-on / stick-on nails (they may sit on a display card, be held by a hand, or appear on a noisy background).
 
+GOAL — output must read like a machine-placed Amazon/Taobao SKU packshot: orthographic front view, not a casual re-photo of the messy layout.
+
 IMAGE EDITING TASK:
 1) Identify every individual artificial nail tip in the photo. Ignore human skin, fingers, display card, printed text, logos, packaging, and environment.
 2) Cut out ONLY the nail pieces with crisp, clean edges (no leftover card, skin, harsh cast shadows, or background texture).
 3) Composite them onto a new canvas with a pure solid white background (#FFFFFF only).
-4) Arrange EXACTLY 10 nail tips in a perfectly regular grid of 2 rows × 5 columns (two rows, five columns), equal spacing, centered in the frame. Each nail upright/natural orientation. Preserve original colors, finishes, and nail-art details for every nail that exists in the source.
-   ANATOMICAL SIZE RULE (each row = one hand, thumb → pinky left to right): Within EACH row of five, reading left to right, nail plate WIDTH and LENGTH must decrease monotonically — the leftmost nail is the THUMB (largest and widest), the rightmost is the PINKY (smallest and narrowest). The three middle nails step down realistically between them. Apply this rule to BOTH rows (one hand per row). When you invent missing nails, assign sizes and shapes so the finished grid obeys this real-world press-on sizing convention, not five equal-sized copies.
-5) If fewer than 10 nails are clearly visible in the source, you MUST invent additional matching press-on nails to reach exactly 10: keep the same collection aesthetic (palette, motifs, chrome/3D accents, illustration style) so the added nails look like they belong to the same product set. Do not leave empty slots. Invented nails MUST respect the thumb→pinky size gradient above in whichever columns you place them.
-6) E-commerce studio look: no props, no watermark, no busy shadows.
+
+LOCKED READING ORDER (do not permute designs):
+- If the source shows a 2×5 card or tray, map nails to the output grid in the SAME left-to-right, top-to-bottom order as they appear on that card: top-row slot 1 = leftmost nail of the top row in the reference, etc. A distinctive design on “reference column 2” MUST land in output column 2 of that row — never shift it to column 3 or 4.
+- If nails are scattered or one hand holds the set, order them consistently (e.g. by the reference’s implied product layout); do NOT re-sort columns in a way that swaps which artwork sits where.
+
+RECTIFY GEOMETRY — DO NOT COPY CASUAL TILT FROM THE SOURCE:
+- Even if nails in the reference photo are tilted, overlapping, or unevenly spaced, the OUTPUT must IGNORE that geometry. Re-pose each extracted nail as if placed on a drafting table: long axis parallel to the canvas vertical, yaw = 0° in the image plane (no diagonal lean, no “dynamic” tilt, no Dutch angle).
+- Do NOT preserve the reference’s random rotations “for realism” — commercial grids require rectified, upright nails only.
+
+UNIFORM MODULAR GRID + COLUMN ALIGNMENT:
+- EXACTLY 10 tips in 2 rows × 5 columns. Imagine five invisible vertical columns spanning BOTH rows: the center of column k in the top row MUST align with the center of column k in the bottom row (same x-position per column). The two rows share one rigid column grid — no horizontal drift or “staircase” offset between rows.
+- Identical horizontal gutter between every adjacent pair within a row; identical vertical gutter between row 1 and row 2; symmetric equal margins left/right/top/bottom around the whole 2×5 block — mechanically even, like Figma auto-layout or Excel merged cells, NOT organic hand-scattered spacing.
+
+CELL PLACEMENT:
+- Center each nail inside its cell. Equal perceived cell width per column (allow only uniform scale per nail to vary footprint). No nail may protrude into a neighbor’s gutter in a way that breaks even spacing.
+
+ANATOMICAL SIZE RULE (thumb → pinky per row):
+- Within EACH row, left to right, nail plate WIDTH and LENGTH decrease monotonically (thumb largest, pinky smallest). Column 4 must not appear wider than column 3; keep the step-down smooth.
+- Achieve sizing ONLY by uniform per-nail scale inside the cell — never swap which cutout occupies which column.
+
+5) If fewer than 10 nails are clearly visible, invent additional matching press-ons for empty slots only; invented nails respect the size gradient and column order logic above.
+6) E-commerce studio look: soft even light; no props, no watermark, no busy shadows; optional minimal uniform contact shadow acceptable if identical under every nail.
 
 Return a single square product-ready image.`;
 
@@ -150,8 +183,13 @@ Requirements:
 - Isolate the press-on nail set on a pure solid white background (#FFFFFF).
 - Soft, even studio lighting; minimal gentle contact shadow acceptable.
 - Straight-on front / camera-facing symmetrical view suitable for a product listing main image.
-- If the reference implies a full set, show up to 10 nails in a clean 2 rows × 5 columns grid; otherwise show every distinct nail from the reference in a tidy layout. When using two rows of five, each row must follow real sizing: leftmost = thumb (largest/widest), rightmost = pinky (smallest/narrowest), with a smooth decrease across the middle three fingers.
-- Preserve each nail’s artwork, colors, and 3D/metallic details with high fidelity (input_fidelity intent).
+- If the reference implies a full set, show up to 10 nails in a clean 2 rows × 5 columns grid; otherwise show every distinct nail from the reference in a tidy layout.
+- LOCK order: preserve the same left-to-right, top-to-bottom sequence of designs as on the reference card/tray — do not permute columns so distinctive patterns jump to wrong slots.
+- UNIFORM spacing: equal horizontal gutters between all neighbors in a row, equal vertical gutter between rows, even margins (modular grid).
+- NO tilt: every nail axis-aligned vertical (0° rotation), centered in cell.
+- Each row: thumb→pinky monotonic width decrease left to right; use per-nail scale only, never swap slots.
+
+Preserve each nail’s artwork, colors, and 3D/metallic details with high fidelity (input_fidelity intent).
 
 Single square frame, catalog-ready.`,
   },
@@ -173,8 +211,9 @@ Single square frame.`,
 
 Requirements:
 - Pure white background (#FFFFFF); optional very soft, tight drop shadow for separation only.
-- Camera looking straight down; nails arranged neatly (2×5 grid if a 10-piece set is implied). In each row of five, enforce thumb-to-pinky size graduation left to right (thumb largest, pinky smallest).
-- Even spacing, centered composition, macro clarity on textures.
+- Camera looking straight down; nails in a strict 2×5 modular grid if a 10-piece set is implied.
+- LOCK the sequence of designs to match the reference layout (no column swaps). Equal gutters everywhere; each nail perfectly vertical (no rotation). Thumb→pinky monotonic size per row using scale only.
+- Macro clarity on textures.
 
 Single square frame.`,
   },
