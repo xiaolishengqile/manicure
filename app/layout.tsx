@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "美甲白底产品图",
+  title: "美甲商家专用",
   description: "上传美甲实拍，一键生成纯白底、固定栅格的产品图。",
 };
 

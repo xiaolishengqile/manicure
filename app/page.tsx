@@ -4,6 +4,7 @@ import { useCallback, useRef, useState } from "react";
 import {
   GENERATION_MODE_OPTIONS,
   getDualUploadKind,
+  requiresTenSingleNails,
   type GenerationMode,
 } from "@/lib/generation-modes";
 
@@ -44,6 +45,7 @@ function UploadTile({
 export default function Home() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const secondInputRef = useRef<HTMLInputElement>(null);
+  const tenInputRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [secondFile, setSecondFile] = useState<File | null>(null);
@@ -53,8 +55,80 @@ export default function Home() {
   const [resultLabels, setResultLabels] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [downloadBusyIndex, setDownloadBusyIndex] = useState<number | null>(
+    null,
+  );
+  const [tenFiles, setTenFiles] = useState<File[]>([]);
+  const [tenPreviewUrls, setTenPreviewUrls] = useState<string[]>([]);
 
   const dualKind = getDualUploadKind(mode);
+  const tenMode = requiresTenSingleNails(mode);
+
+  const downloadResult = useCallback(async (url: string, index: number) => {
+    const extFromDataUrl = (u: string): string => {
+      const m = /^data:image\/(png|jpeg|jpg|webp|gif)/i.exec(u);
+      if (!m) return "png";
+      const t = m[1].toLowerCase();
+      return t === "jpeg" ? "jpg" : t;
+    };
+    const extFromContentType = (ct: string | null): string => {
+      if (!ct) return "png";
+      if (ct.includes("webp")) return "webp";
+      if (ct.includes("jpeg")) return "jpg";
+      if (ct.includes("png")) return "png";
+      if (ct.includes("gif")) return "gif";
+      return "png";
+    };
+
+    setDownloadBusyIndex(index);
+    setError(null);
+    try {
+      if (url.startsWith("data:image/")) {
+        const ext = extFromDataUrl(url);
+        const filename = `美甲生成_${index + 1}.${ext}`;
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        a.rel = "noopener";
+        a.click();
+        return;
+      }
+      if (url.startsWith("http://") || url.startsWith("https://")) {
+        const res = await fetch("/api/download-image", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url }),
+        });
+        if (!res.ok) {
+          const text = await res.text();
+          let msg = "下载失败";
+          try {
+            const j = JSON.parse(text) as { error?: string };
+            if (j.error) msg = j.error;
+          } catch {
+            if (text) msg = text.slice(0, 120);
+          }
+          throw new Error(msg);
+        }
+        const ext = extFromContentType(res.headers.get("content-type"));
+        const filename = `美甲生成_${index + 1}.${ext}`;
+        const blob = await res.blob();
+        const objectUrl = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = objectUrl;
+        a.download = filename;
+        a.rel = "noopener";
+        a.click();
+        URL.revokeObjectURL(objectUrl);
+        return;
+      }
+      throw new Error("不支持的图片地址格式");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "下载失败，请稍后重试。");
+    } finally {
+      setDownloadBusyIndex(null);
+    }
+  }, []);
 
   const onPickFile = useCallback(() => {
     fileInputRef.current?.click();
@@ -62,6 +136,10 @@ export default function Home() {
 
   const onPickSecond = useCallback(() => {
     secondInputRef.current?.click();
+  }, []);
+
+  const onPickTen = useCallback(() => {
+    tenInputRef.current?.click();
   }, []);
 
   const onFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
@@ -101,7 +179,7 @@ export default function Home() {
       if (!f.type.startsWith("image/")) {
         setError(
           dualKind === "accessory"
-            ? "饰品场景图请选择图片文件。"
+            ? "饰品参考图请选择图片文件。"
             : "模特图请选择图片文件。",
         );
         setSecondFile(null);
@@ -117,12 +195,46 @@ export default function Home() {
     [dualKind],
   );
 
+  const onTenFilesChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const picked = Array.from(e.target.files ?? []);
+      setError(null);
+      setResultUrls([]);
+      setResultLabels([]);
+      setTenPreviewUrls((prev) => {
+        prev.forEach((u) => URL.revokeObjectURL(u));
+        return [];
+      });
+      e.target.value = "";
+      if (picked.length !== 10) {
+        setError("请一次选择恰好 10 张单甲图片。");
+        setTenFiles([]);
+        return;
+      }
+      for (const f of picked) {
+        if (!f.type.startsWith("image/")) {
+          setError("10 张文件均须为图片格式。");
+          setTenFiles([]);
+          return;
+        }
+      }
+      setTenFiles(picked);
+      setTenPreviewUrls(picked.map((f) => URL.createObjectURL(f)));
+    },
+    [],
+  );
+
   const onExtract = useCallback(async () => {
-    if (dualKind) {
+    if (tenMode) {
+      if (tenFiles.length !== 10) {
+        setError("请一次选择恰好 10 张单甲照片。");
+        return;
+      }
+    } else if (dualKind) {
       if (!file || !secondFile) {
         setError(
           dualKind === "accessory"
-            ? "请同时上传「美甲产品图」与「饰品场景图」。"
+            ? "请同时上传「美甲产品图」与「饰品参考图」。"
             : "请同时上传「美甲产品图」与「模特图」。",
         );
         return;
@@ -138,13 +250,19 @@ export default function Home() {
     setResultLabels([]);
     try {
       const body = new FormData();
-      body.set("image", file!);
       body.set("mode", mode);
-      if (dualKind === "model" && secondFile) {
-        body.set("modelImage", secondFile);
-      }
-      if (dualKind === "accessory" && secondFile) {
-        body.set("accessoryImage", secondFile);
+      if (tenMode) {
+        for (const f of tenFiles) {
+          body.append("nail", f);
+        }
+      } else {
+        body.set("image", file!);
+        if (dualKind === "model" && secondFile) {
+          body.set("modelImage", secondFile);
+        }
+        if (dualKind === "accessory" && secondFile) {
+          body.set("accessoryImage", secondFile);
+        }
       }
       const res = await fetch("/api/extract-nails", {
         method: "POST",
@@ -174,9 +292,8 @@ export default function Home() {
     } finally {
       setLoading(false);
     }
-  }, [dualKind, file, secondFile, mode]);
+  }, [dualKind, file, secondFile, mode, tenMode, tenFiles]);
 
-  const modeMeta = GENERATION_MODE_OPTIONS.find((o) => o.value === mode);
   const resultHeading =
     mode === "multi_angle"
       ? "产出（多角度 · 固定3张）"
@@ -187,8 +304,10 @@ export default function Home() {
           : mode === "model_tryon"
             ? "产出（试戴效果图）"
             : mode === "accessory_tryon"
-              ? "产出（饰品场景试戴）"
-              : "产出（白底栅格）";
+              ? "产出（手模 · 指甲+饰品试戴）"
+              : mode === "ten_singles_grid"
+                ? "产出（十枚单甲 · 一张合集）"
+                : "产出（白底栅格）";
 
   const gridClass =
     mode === "multi_angle"
@@ -201,16 +320,17 @@ export default function Home() {
 
   const canSubmit =
     !loading &&
-    !!file &&
-    (!dualKind || (dualKind && !!secondFile));
+    (tenMode
+      ? tenFiles.length === 10
+      : !!file && (!dualKind || !!secondFile));
 
   const secondSlotTitle =
     dualKind === "accessory"
-      ? "点击选择饰品 / 陈列场景图"
+      ? "点击选择饰品参考图（戒指等）"
       : "点击选择模特照片";
   const secondSlotHint =
     dualKind === "accessory"
-      ? "首饰、托盘、展台、静物布景均可，无需人物"
+      ? "可含多只戒指；成片会生成手模并同时戴上甲片与这些饰品"
       : "需清晰露出指甲区域";
 
   const singleUploadTitle =
@@ -226,20 +346,12 @@ export default function Home() {
     <div className="min-h-full bg-zinc-50 text-zinc-900">
       <main className="mx-auto flex max-w-5xl flex-col gap-10 px-6 py-14">
         <header className="space-y-2">
-          <p className="text-sm font-medium uppercase tracking-wide text-rose-600">
-            美甲白底图
+          <p className="text-xl font-semibold tracking-wide text-rose-600 sm:text-2xl">
+            美甲商家专用
           </p>
           <h1 className="text-3xl font-semibold tracking-tight text-zinc-950">
-            白底产品图、多角度、包装示意、2D 转 3D 包装、模特/饰品试戴
+            白底产品图、多角度、包装示意、2D 转 3D 包装、模特/手模饰品试戴
           </h1>
-          <p className="text-base leading-relaxed text-zinc-600">
-            选择模式后上传图片；双图模式需<strong>两张</strong>图。请求走中转站（OpenAI 兼容{" "}
-            <span className="font-mono text-sm">/v1/images/edits</span>
-            ）。双图模式下接口传入顺序为：<strong>先场景</strong>（模特图或饰品陈列图），
-            <strong>后美甲产品</strong>（字段 image + modelImage / accessoryImage）。请在{" "}
-            <code className="rounded bg-zinc-200 px-1.5 py-0.5 text-sm">.env.local</code>{" "}
-            中配置密钥与 <code className="rounded bg-zinc-200 px-1.5 py-0.5 text-sm">OPENAI_BASE_URL</code>。
-          </p>
         </header>
 
         <input
@@ -256,6 +368,14 @@ export default function Home() {
           className="hidden"
           onChange={onSecondFileChange}
         />
+        <input
+          ref={tenInputRef}
+          type="file"
+          accept="image/*"
+          multiple
+          className="hidden"
+          onChange={onTenFilesChange}
+        />
 
         <div className="flex flex-col gap-2 rounded-xl border border-zinc-200 bg-white p-5 shadow-sm">
           <label htmlFor="mode" className="text-sm font-semibold text-zinc-700">
@@ -267,12 +387,30 @@ export default function Home() {
             onChange={(e) => {
               const next = e.target.value as GenerationMode;
               setMode(next);
-              if (!getDualUploadKind(next)) {
+              if (next === "ten_singles_grid") {
+                setFile(null);
+                setPreviewUrl((prev) => {
+                  if (prev) URL.revokeObjectURL(prev);
+                  return null;
+                });
                 setSecondFile(null);
                 setSecondPreviewUrl((prev) => {
                   if (prev) URL.revokeObjectURL(prev);
                   return null;
                 });
+              } else {
+                setTenFiles([]);
+                setTenPreviewUrls((prev) => {
+                  prev.forEach((u) => URL.revokeObjectURL(u));
+                  return [];
+                });
+                if (!getDualUploadKind(next)) {
+                  setSecondFile(null);
+                  setSecondPreviewUrl((prev) => {
+                    if (prev) URL.revokeObjectURL(prev);
+                    return null;
+                  });
+                }
               }
             }}
             className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2.5 text-sm text-zinc-900 outline-none ring-rose-500 focus:border-rose-500 focus:ring-2"
@@ -283,15 +421,46 @@ export default function Home() {
               </option>
             ))}
           </select>
-          {modeMeta ? (
-            <p className="text-sm leading-relaxed text-zinc-500">{modeMeta.description}</p>
-          ) : null}
         </div>
 
         <section className="grid gap-8 rounded-2xl border border-zinc-200 bg-white p-8 shadow-sm lg:grid-cols-2">
           <div className="flex flex-col gap-4">
             <h2 className="text-sm font-semibold text-zinc-500">投喂图片</h2>
-            {dualKind ? (
+            {tenMode ? (
+              <div className="flex flex-col gap-3">
+                <p className="text-xs leading-relaxed text-zinc-500">
+                  一次多选恰好 10 张「单枚甲片」图。顺序：第 1–5 张 → 上排从左到右；第 6–10 张 →
+                  下排从左到右。合成时会在每行内按拇指最大、小指最小做比例调整。
+                </p>
+                <button
+                  type="button"
+                  onClick={onPickTen}
+                  className="flex min-h-[200px] cursor-pointer flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed border-zinc-300 bg-zinc-50 px-4 py-6 text-center text-sm text-zinc-600 transition hover:border-rose-300 hover:bg-rose-50/60"
+                >
+                  {tenPreviewUrls.length === 10 ? (
+                    <div className="grid w-full max-w-md grid-cols-5 gap-2">
+                      {tenPreviewUrls.map((url, i) => (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          key={url}
+                          src={url}
+                          alt={`单甲 ${i + 1}`}
+                          className="aspect-square w-full rounded-md border border-zinc-200 bg-white object-cover"
+                        />
+                      ))}
+                    </div>
+                  ) : null}
+                  <span className="text-base font-medium text-zinc-800">
+                    {tenPreviewUrls.length === 10
+                      ? "点击可重新选择 10 张"
+                      : "点击一次选择 10 张单甲照片"}
+                  </span>
+                  <span className="text-xs text-zinc-500">
+                    须恰好 10 张；支持 JPG / PNG / WebP 等常见格式
+                  </span>
+                </button>
+              </div>
+            ) : dualKind ? (
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div className="flex flex-col gap-2">
                   <span className="text-xs font-medium text-zinc-500">① 美甲产品图</span>
@@ -304,7 +473,7 @@ export default function Home() {
                 </div>
                 <div className="flex flex-col gap-2">
                   <span className="text-xs font-medium text-zinc-500">
-                    {dualKind === "accessory" ? "② 饰品 / 场景图（无模特）" : "② 模特图"}
+                    {dualKind === "accessory" ? "② 饰品参考图（戒指等）" : "② 模特图"}
                   </span>
                   <UploadTile
                     title={secondSlotTitle}
@@ -343,7 +512,10 @@ export default function Home() {
               {resultUrls.length ? (
                 <div className={gridClass}>
                   {resultUrls.map((url, i) => (
-                    <figure key={`${url.slice(0, 48)}-${i}`} className="flex flex-col gap-2">
+                    <figure
+                      key={`${url.slice(0, 48)}-${i}`}
+                      className="flex flex-col gap-2"
+                    >
                       <figcaption className="text-center text-xs font-medium text-zinc-500">
                         {resultLabels[i] ?? `图 ${i + 1}`}
                       </figcaption>
@@ -353,6 +525,16 @@ export default function Home() {
                         alt={resultLabels[i] ?? `结果 ${i + 1}`}
                         className="w-full rounded-lg border border-zinc-200 bg-white object-contain shadow-sm"
                       />
+                      <button
+                        type="button"
+                        disabled={downloadBusyIndex === i}
+                        onClick={() => {
+                          void downloadResult(url, i);
+                        }}
+                        className="mx-auto inline-flex h-9 min-w-[5.5rem] items-center justify-center rounded-lg border border-zinc-300 bg-white px-3 text-sm font-medium text-zinc-800 shadow-sm transition hover:border-rose-400 hover:bg-rose-50 hover:text-rose-900 disabled:cursor-wait disabled:opacity-60"
+                      >
+                        {downloadBusyIndex === i ? "下载中…" : "下载"}
+                      </button>
                     </figure>
                   ))}
                 </div>
@@ -384,8 +566,10 @@ export default function Home() {
                     : mode === "model_tryon"
                       ? "正在生成试戴图…"
                       : mode === "accessory_tryon"
-                        ? "正在生成饰品场景试戴图…"
-                        : "正在生成…"
+                        ? "正在生成手模试戴广告图…"
+                        : mode === "ten_singles_grid"
+                          ? "正在合成十甲白底合集…"
+                          : "正在生成…"
               : "开始生成"}
           </button>
           {error ? (
