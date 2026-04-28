@@ -2,11 +2,13 @@ import OpenAI, { toFile } from "openai";
 import {
   ACCESSORY_TRYON_PROMPT,
   MODEL_TRYON_PROMPT,
-  TEN_SINGLES_GRID_PROMPT,
+  TEN_SINGLES_COLLAGE_REF_PROMPT,
   parseGenerationMode,
   promptsForMode,
   type GenerationMode,
 } from "@/lib/generation-modes";
+import { buildTenSinglesCollageReference } from "@/lib/ten-singles-collage";
+import { normalizeTenSingleNailForCollageCell } from "@/lib/ten-singles-nail-preprocess";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -95,34 +97,6 @@ async function editDualSceneNails(
   return firstImageUrl(res);
 }
 
-/** 多枚参考图一次合成（如 10 张单甲 → 1 张栅格；模型需支持多图 edit） */
-async function editWithManyImages(
-  openai: OpenAI,
-  parts: { buffer: Buffer; mime: string }[],
-  prompt: string,
-): Promise<string | null> {
-  const uploads = await Promise.all(
-    parts.map(async (p, i) => {
-      const ext = extFromMime(p.mime);
-      return toFile(p.buffer, `nail_${i}.${ext}`, { type: p.mime });
-    }),
-  );
-  const imageModel = getImageModel();
-  const res = await openai.images.edit({
-    model: imageModel,
-    image: uploads,
-    prompt,
-    n: 1,
-    size: "1024x1024",
-    quality: "high",
-    background: "opaque",
-    output_format: "png",
-    input_fidelity: "high",
-    stream: false,
-  });
-  return firstImageUrl(res);
-}
-
 async function validateImageFile(
   entry: FormDataEntryValue | null,
   fieldLabel: string,
@@ -173,6 +147,7 @@ export async function POST(request: Request) {
   });
 
   if (mode === "ten_singles_grid") {
+    /** 与客户端 `body.append("nail", f)` 顺序一致：第 1 张→栅格 input 1，依此类推 */
     const entries = formData.getAll("nail");
     if (entries.length !== 10) {
       return Response.json(
@@ -182,7 +157,7 @@ export async function POST(request: Request) {
         { status: 400 },
       );
     }
-    const parts: { buffer: Buffer; mime: string }[] = [];
+    const normalizedCells: Buffer[] = [];
     for (let i = 0; i < 10; i++) {
       const entry = entries[i];
       const validated = await validateImageFile(
@@ -192,10 +167,28 @@ export async function POST(request: Request) {
       if (!validated.ok) {
         return Response.json({ error: validated.error }, { status: 400 });
       }
-      parts.push({ buffer: validated.buffer, mime: validated.mime });
+      const { buffer: cellPng } = await normalizeTenSingleNailForCollageCell(
+        validated.buffer,
+        validated.mime,
+      );
+      normalizedCells.push(cellPng);
+    }
+    let collageBuffer: Buffer;
+    try {
+      collageBuffer = await buildTenSinglesCollageReference(normalizedCells);
+    } catch (e) {
+      const message =
+        e instanceof Error ? e.message : "服务端拼接十甲参考图失败";
+      return Response.json({ error: message }, { status: 500 });
     }
     try {
-      const url = await editWithManyImages(openai, parts, TEN_SINGLES_GRID_PROMPT);
+      const url = await editOnce(
+        openai,
+        collageBuffer,
+        "png",
+        "image/png",
+        TEN_SINGLES_COLLAGE_REF_PROMPT,
+      );
       if (!url) {
         return Response.json(
           { error: "模型未返回图片（既无 url 也无 b64_json）。" },

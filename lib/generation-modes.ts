@@ -52,7 +52,7 @@ export const GENERATION_MODE_OPTIONS: {
     value: "ten_singles_grid",
     label: "十枚单甲 → 一张白底合集",
     description:
-      "一次上传 10 张「单枚甲片」照片，合成一张纯白底 2×5 产品栅格图；每行五枚遵循拇指最大、小指最小的真实比例感。",
+      "10 格逐张上传或一次选满 10 张；每格可单独替换/删除。服务端拼成 2×5 参考图后生成纯白底栅格，顺序与格子一致。",
   },
 ];
 
@@ -113,33 +113,29 @@ TASK — premium social / e-commerce “matching ad” (virtual try-on with a GE
 
 Output a single square high-resolution photograph.`;
 
-/** 十张单甲各一图 → 合成一张 2×5 白底栅格（多图 edit 一次） */
-export const TEN_SINGLES_GRID_PROMPT = `You receive EXACTLY TEN separate input images, in fixed order from the FIRST image (index 1) through the TENTH image (index 10). Each input should depict ONE artificial press-on nail tip (or one nail plate crop), possibly on a neutral background, finger, or tool.
+/** 单张「2×5 拼图参考图」→ 输出一张干净白底商品栅格（images.edit 单图） */
+export const TEN_SINGLES_COLLAGE_REF_PROMPT = `You receive **ONE** reference image. It is a **draft 2×5 grid** (2 horizontal rows, 5 columns) on **white**, reading **left → right**, **top row first**: positions **1–5** are the **top** row (left = slot 1 … right = slot 5), then positions **6–10** are the **bottom** row (left = slot 6 … right = slot 10).
 
-TASK — single composite product sheet (Amazon / Taobao catalog grade):
+Each cell contains ONE press-on nail artwork. Small **digit badges (1–10)** may sit in a cell corner — the digit equals that cell’s **slot index**. Those badges are **layout metadata only**; your **final image must NOT** show these badge graphics anywhere (no digits, no white label boxes from the reference). Re-extract each nail’s art cleanly.
 
-LOCKED SLOT ORDER (non-negotiable):
-- TOP row columns 1→5 MUST use ONLY the artwork from inputs 1, 2, 3, 4, 5 respectively (input 2 → column 2 only, never column 3).
-- BOTTOM row columns 1→5 MUST use ONLY inputs 6, 7, 8, 9, 10 respectively.
-- Never permute, swap, or “sort” nails across columns. Distinctive motifs (e.g. a flower on input 2) MUST stay in column 2 of the top row exactly.
+TASK — premium Amazon / Taobao **single-sheet** packshot from this collage reference:
 
-AXIS-ALIGNED PLACEMENT (no tilt):
-- Every nail must be perfectly upright: its long axis parallel to the canvas vertical; rotation in the image plane = 0° (no diagonal lean, no cocked angles).
-- Center each nail within its own invisible grid cell.
+CRITICAL (failure if violated):
+- **Pixel slot fidelity:** the artwork that appears in reference **top-left** MUST end up in **output top-left** only; same for every slot through **bottom-right**. Never swap, mirror, or re-sort cells for aesthetics.
 
-UNIFORM MODULAR GRID (equal spacing):
-- Build a strict 2×5 layout on pure white #FFFFFF: identical horizontal gap between every pair of adjacent nails in the same row; identical vertical gap between the two rows; equal margins to the frame edges so the block looks like a spreadsheet / Figma auto-layout.
-- Do NOT use irregular “organic” spacing — gutters must look mechanically even.
+LAYOUT + LOOK:
+- Pure white **#FFFFFF** background; strict modular **2×5**; **narrow fixed gutters** between neighbors (minimal white sliver, tight catalog look, not wide spacing).
+- The reference collage **top-aligns** each nail inside its cell so **cuticle / proximal (back) edges** in the **same row** sit on **one horizontal line** (like a ruler). Preserve that same **row-wise proximal alignment** in the final packshot — do not vertically re-center nails in a way that breaks the shared baseline per row.
+- Columns must align vertically across both rows (no staircase offset).
+- Each nail: long axis vertical, **0°** yaw in the plane, **horizontally centered** in its column; crisp cutout edges; remove stray background, skin, props from the reference cells.
+- Preserve all artwork, gloss, chrome, glitter, 3D charms with **high input fidelity** — no invented patterns.
+- Soft even studio light; optional tiny uniform contact shadow only.
 
-SIZE GRADIENT WITHOUT BREAKING ORDER:
-- Within each row, apparent nail-plate width (and length) must decrease monotonically from column 1 (thumb) to column 5 (pinky). Column 4 must NOT be wider than column 3; column 2 must NOT be narrower than column 3 in a way that breaks the sequence.
-- Achieve this ONLY by uniform per-nail SCALE inside the cell — never by swapping which input occupies which column.
+FINAL CHECK:
+- No digit badges or label boxes remain in the output.
+- Slot 1 art is still top-left; slot 10 still bottom-right.
 
-1) From EACH input, isolate ONLY that nail tip with crisp edges; remove skin, tools, cards, text, backgrounds.
-2) Preserve every nail’s artwork, colors, gloss, 3D charms with high fidelity (input_fidelity). No invented designs.
-3) Soft even studio light; optional minimal contact shadow only.
-
-Return ONE single square high-resolution product-ready image.`;
+Return **ONE** square high-resolution product-ready image.`;
 
 const COMPLETE_GRID_PROMPT = `Edit the provided reference photo of press-on / stick-on nails (they may sit on a display card, be held by a hand, or appear on a noisy background).
 
@@ -156,6 +152,7 @@ LOCKED READING ORDER (do not permute designs):
 
 RECTIFY GEOMETRY — DO NOT COPY CASUAL TILT FROM THE SOURCE:
 - Even if nails in the reference photo are tilted, overlapping, or unevenly spaced, the OUTPUT must IGNORE that geometry. Re-pose each extracted nail as if placed on a drafting table: long axis parallel to the canvas vertical, yaw = 0° in the image plane (no diagonal lean, no “dynamic” tilt, no Dutch angle).
+- **Fingertips down:** the free edge (distal tip) of every nail must point toward the **bottom** of the frame; the cuticle / proximal (back) edge toward the **top** — never flip tips upward.（须保证指尖朝下，甲根/后缘朝上。）
 - Do NOT preserve the reference’s random rotations “for realism” — commercial grids require rectified, upright nails only.
 
 UNIFORM MODULAR GRID + COLUMN ALIGNMENT:
@@ -171,6 +168,7 @@ ANATOMICAL SIZE RULE (thumb → pinky per row):
 
 5) If fewer than 10 nails are clearly visible, invent additional matching press-ons for empty slots only; invented nails respect the size gradient and column order logic above.
 6) E-commerce studio look: soft even light; no props, no watermark, no busy shadows; optional minimal uniform contact shadow acceptable if identical under every nail.
+7) Finish & sparkle fidelity: If the reference nails include chrome, foil, glitter, glass shine, iridescence, or other “jewelry-like” brilliance, carry that same sparkling / reflective quality into the final grid — specular accents and micro-glints should still read as lively and true to the originals; avoid accidental dull-down of intentional shine.
 
 Return a single square product-ready image.`;
 
