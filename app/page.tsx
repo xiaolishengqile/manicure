@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 
 /** 拉取可绘制的位图（data URL 或经本站代理的 http(s)） */
 async function fetchImageBlobFromDisplayUrl(url: string): Promise<Blob> {
@@ -149,12 +149,14 @@ export default function Home() {
   /** 下标 0–9 即合成第 1–10 位顺序，与 FormData append 顺序一致 */
   const [tenSlots, setTenSlots] = useState<TenSlotCell[]>(() => emptyTenSlots());
 
-  useEffect(() => {
-    setResultRotationDeg(resultUrls.map(() => 0));
-  }, [resultUrls]);
-
   const dualKind = getDualUploadKind(mode);
   const tenMode = requiresTenSingleNails(mode);
+
+  const clearResults = useCallback(() => {
+    setResultUrls([]);
+    setResultLabels([]);
+    setResultRotationDeg([]);
+  }, []);
 
   const downloadResult = useCallback(async (url: string, index: number, rotationDeg: number) => {
     const extFromDataUrl = (u: string): string => {
@@ -276,8 +278,7 @@ export default function Home() {
   const onFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
     setError(null);
-    setResultUrls([]);
-    setResultLabels([]);
+    clearResults();
     if (!f) {
       setFile(null);
       setPreviewUrl(null);
@@ -294,14 +295,13 @@ export default function Home() {
       if (prev) URL.revokeObjectURL(prev);
       return URL.createObjectURL(f);
     });
-  }, []);
+  }, [clearResults]);
 
   const onSecondFileChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const f = e.target.files?.[0];
       setError(null);
-      setResultUrls([]);
-      setResultLabels([]);
+      clearResults();
       if (!f) {
         setSecondFile(null);
         setSecondPreviewUrl(null);
@@ -323,15 +323,14 @@ export default function Home() {
         return URL.createObjectURL(f);
       });
     },
-    [dualKind],
+    [clearResults, dualKind],
   );
 
   const onTenBatchFilesChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const picked = Array.from(e.target.files ?? []);
       setError(null);
-      setResultUrls([]);
-      setResultLabels([]);
+      clearResults();
       e.target.value = "";
       if (picked.length !== 10) {
         setError("请一次选择恰好 10 张单甲图片。");
@@ -353,7 +352,7 @@ export default function Home() {
         }));
       });
     },
-    [],
+    [clearResults],
   );
 
   const onTenSlotFileChange = useCallback(
@@ -363,8 +362,7 @@ export default function Home() {
       const f = e.target.files?.[0];
       e.target.value = "";
       setError(null);
-      setResultUrls([]);
-      setResultLabels([]);
+      clearResults();
       if (slotIndex === null || slotIndex < 0 || slotIndex > 9) return;
       if (!f) return;
       if (!f.type.startsWith("image/")) {
@@ -382,7 +380,7 @@ export default function Home() {
         return next;
       });
     },
-    [],
+    [clearResults],
   );
 
   const onExtract = useCallback(async () => {
@@ -407,8 +405,7 @@ export default function Home() {
 
     setLoading(true);
     setError(null);
-    setResultUrls([]);
-    setResultLabels([]);
+    clearResults();
     try {
       const body = new FormData();
       body.set("mode", mode);
@@ -449,12 +446,13 @@ export default function Home() {
       }
       setResultUrls(urls);
       setResultLabels(data.labels ?? urls.map((_, i) => `图 ${i + 1}`));
+      setResultRotationDeg(urls.map(() => 0));
     } catch (err) {
       setError(err instanceof Error ? err.message : "处理失败");
     } finally {
       setLoading(false);
     }
-  }, [dualKind, file, secondFile, mode, tenMode, tenSlots]);
+  }, [clearResults, dualKind, file, secondFile, mode, tenMode, tenSlots]);
 
   const resultHeading =
     mode === "multi_angle"
@@ -472,7 +470,7 @@ export default function Home() {
                 : mode === "extract_ten_grid"
                   ? "产出（白底栅格 · 仅抠图）"
                   : mode === "complete_single_grid"
-                    ? "产出（白底栅格 · 补全至10枚）"
+                    ? "产出（白底栅格 · 单甲尺码合集）"
                     : "产出";
 
   const gridClass =
@@ -505,7 +503,7 @@ export default function Home() {
       : mode === "extract_ten_grid"
         ? "点击选择含多枚甲片的照片"
         : mode === "complete_single_grid"
-          ? "点击选择单枚或少量甲片照片"
+          ? "点击选择单枚甲片照片"
           : "点击选择美甲照片";
   const singleUploadHint =
     mode === "flat_to_3d_packaging"
@@ -513,7 +511,7 @@ export default function Home() {
       : mode === "extract_ten_grid"
         ? "托盘、卡纸、实拍平铺等；只抠图中已出现的甲片，不补全款式"
         : mode === "complete_single_grid"
-          ? "先整图转 180° 再送模型；成品须每行甲根顶线齐平，指位大小符合客观比例"
+          ? "先整图转 180°；模型生成一枚高清单甲，再由服务端按尺码规则拼成 10 枚"
           : "支持常见图片格式";
 
   return (
@@ -828,7 +826,7 @@ export default function Home() {
                         : mode === "ten_singles_grid"
                           ? "正在合成十甲白底合集…"
                           : mode === "complete_single_grid"
-                            ? "正在补全至 10 枚…"
+                            ? "正在生成单甲并拼成 10 枚…"
                             : mode === "extract_ten_grid"
                               ? "正在抠图排版…"
                               : "正在生成…"

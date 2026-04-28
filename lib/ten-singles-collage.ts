@@ -9,6 +9,9 @@ const COLLAGE_SIDE = 1600;
  */
 const COL_MAX_WIDTH_FRAC: readonly number[] = [1, 0.945, 0.975, 0.945, 0.905];
 
+/** 补全/单甲尺码合集的最终列宽比例：代码直接复制缩放一枚单甲，比例可以更精确。 */
+const COL_WIDTH_FRAC: readonly number[] = [1, 0.945, 0.975, 0.945, 0.89];
+
 /** 去掉近似白边 */
 async function trimWhiteEdges(input: Buffer): Promise<Buffer> {
   try {
@@ -91,7 +94,7 @@ async function placeRowWithAlignedRoots(
     let imgBuf = current[i]!;
     const ry = rootYs[i]!;
     let { w: iw, h: ih } = await pngMeta(imgBuf);
-    let topOff = Math.round(R - ry);
+    const topOff = Math.round(R - ry);
 
     // 若底会超出格高，画布会裁掉下半截 → 视觉上变成「底边齐平」。改为先缩放到格内，仍从 topOff 贴顶，保住甲根对齐。
     if (topOff + ih > ch) {
@@ -152,7 +155,7 @@ export async function buildTenSinglesCollageReference(
   const H = COLLAGE_SIDE;
   /** 外边距与格间缝：尽量小，让十枚在画布里更紧凑（仍留 1px 级缝隙避免拼版粘连感） */
   const margin = Math.round(W * 0.018);
-  const gutter = Math.max(2, Math.round(W * 0.0025));
+  const gutter = 0;
   const cols = 5;
   const rows = 2;
   const innerW = W - 2 * margin;
@@ -202,6 +205,73 @@ export async function buildTenSinglesCollageReference(
         input: cellSlotBadgeSvg(slot1, badge),
         left: left + 4,
         top: top + ch - badge - 4,
+      });
+    }
+  }
+
+  return sharp({
+    create: {
+      width: W,
+      height: H,
+      channels: 3,
+      background: { r: 255, g: 255, b: 255 },
+    },
+  })
+    .composite(composites)
+    .png({ compressionLevel: 6 })
+    .toBuffer();
+}
+
+/**
+ * 将一枚模型高清化后的单甲复制成 2×5 尺码合集。
+ * 与十枚单甲参考图不同，这个函数产出最终图：不加角标、不再交给模型重绘。
+ */
+export async function buildScaledSingleNailGrid(
+  singleNailBuffer: Buffer,
+): Promise<Buffer> {
+  const W = COLLAGE_SIDE;
+  const H = COLLAGE_SIDE;
+  const margin = Math.round(W * 0.018);
+  const gutter = 0;
+  const cols = 5;
+  const rows = 2;
+  const innerW = W - 2 * margin;
+  const innerH = H - 2 * margin;
+  const cellW = (innerW - (cols - 1) * gutter) / cols;
+  const cellH = (innerH - (rows - 1) * gutter) / rows;
+
+  const cw = Math.round(cellW);
+  const ch = Math.round(cellH);
+  const trimmed = await trimWhiteEdges(singleNailBuffer);
+  const { w: sourceW, h: sourceH } = await pngMeta(trimmed);
+  const aspect = sourceH / Math.max(1, sourceW);
+  const targetBaseW = Math.min(cw * 0.88, (ch * 0.96) / Math.max(0.01, aspect));
+
+  const rowInners: Buffer[][] = [[], []];
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const frac = COL_WIDTH_FRAC[c] ?? 0.87;
+      const targetW = Math.max(1, Math.round(targetBaseW * frac));
+      const inner = await sharp(trimmed)
+        .resize({ width: targetW, withoutEnlargement: false })
+        .png()
+        .toBuffer();
+      rowInners[r]!.push(inner);
+    }
+  }
+
+  const alignedRows: Buffer[][] = [];
+  for (let r = 0; r < rows; r++) {
+    alignedRows.push(await placeRowWithAlignedRoots(rowInners[r]!, cw, ch));
+  }
+
+  const composites: sharp.OverlayOptions[] = [];
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      composites.push({
+        input: alignedRows[r]![c]!,
+        left: Math.round(margin + c * (cellW + gutter)),
+        top: Math.round(margin + r * (cellH + gutter)),
       });
     }
   }

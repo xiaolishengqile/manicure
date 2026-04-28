@@ -7,7 +7,10 @@ import {
   promptsForMode,
   type GenerationMode,
 } from "@/lib/generation-modes";
-import { buildTenSinglesCollageReference } from "@/lib/ten-singles-collage";
+import {
+  buildScaledSingleNailGrid,
+  buildTenSinglesCollageReference,
+} from "@/lib/ten-singles-collage";
 import {
   exifRotate180TipDownToPng,
   exifUprightToPng,
@@ -42,6 +45,62 @@ function extFromMime(mime: string): string {
   if (mime === "image/png") return "png";
   if (mime === "image/webp") return "webp";
   return "jpg";
+}
+
+function isBlockedHost(hostname: string): boolean {
+  const h = hostname.toLowerCase();
+  if (h === "localhost" || h === "0.0.0.0") return true;
+  if (h.endsWith(".local")) return true;
+  if (h === "127.0.0.1") return true;
+  return false;
+}
+
+function imageDataUrlToBuffer(url: string): Buffer | null {
+  const match = /^data:([^;,]+)?(;base64)?,(.*)$/i.exec(url);
+  if (!match) return null;
+  const mime = match[1]?.toLowerCase() ?? "";
+  if (!mime.startsWith("image/")) return null;
+  const payload = match[3] ?? "";
+  if (match[2]) return Buffer.from(payload, "base64");
+  return Buffer.from(decodeURIComponent(payload));
+}
+
+async function imageUrlToBuffer(url: string): Promise<Buffer> {
+  const dataBuffer = imageDataUrlToBuffer(url);
+  if (dataBuffer) return dataBuffer;
+
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error("模型返回的单甲图片地址无效。");
+  }
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+    throw new Error("模型返回的单甲图片地址不是 http(s)。");
+  }
+  if (isBlockedHost(parsed.hostname)) {
+    throw new Error("模型返回的单甲图片地址不允许下载。");
+  }
+
+  const upstream = await fetch(url, {
+    redirect: "follow",
+    cache: "no-store",
+    signal: AbortSignal.timeout(60_000),
+    headers: { "User-Agent": "ManicureApp/1.0" },
+  });
+  if (!upstream.ok) {
+    throw new Error("无法下载模型生成的单甲图片。");
+  }
+  const contentType =
+    upstream.headers.get("content-type")?.split(";")[0]?.trim() ?? "";
+  if (
+    contentType &&
+    !contentType.startsWith("image/") &&
+    contentType !== "application/octet-stream"
+  ) {
+    throw new Error("模型生成的单甲结果不是图片格式。");
+  }
+  return Buffer.from(await upstream.arrayBuffer());
 }
 
 async function editOnce(
@@ -285,6 +344,38 @@ export async function POST(request: Request) {
     mime = pre.mime;
   }
   const ext = extFromMime(mime);
+
+  if (mode === "complete_single_grid") {
+    const job = promptsForMode(mode)[0];
+    if (!job) {
+      return Response.json({ error: "未找到单甲高清化提示词。" }, { status: 500 });
+    }
+
+    try {
+      const singleNailUrl = await editOnce(openai, buffer, ext, mime, job.prompt);
+      if (!singleNailUrl) {
+        return Response.json(
+          { error: "模型未返回单甲图片（既无 url 也无 b64_json）。" },
+          { status: 502 },
+        );
+      }
+
+      const singleNailBuffer = await imageUrlToBuffer(singleNailUrl);
+      const gridBuffer = await buildScaledSingleNailGrid(singleNailBuffer);
+      const gridUrl = `data:image/png;base64,${gridBuffer.toString("base64")}`;
+
+      return Response.json({
+        imageUrls: [gridUrl],
+        labels: [job.label],
+        imageUrl: gridUrl,
+        mode,
+      });
+    } catch (e) {
+      const message =
+        e instanceof Error ? e.message : "单甲高清化或服务端拼图失败";
+      return Response.json({ error: message }, { status: 502 });
+    }
+  }
 
   const jobs = promptsForMode(mode);
   const imageUrls: string[] = [];

@@ -21,9 +21,9 @@ export const GENERATION_MODE_OPTIONS: {
   },
   {
     value: "complete_single_grid",
-    label: "白底栅格 · 单枚/少量补全至10枚",
+    label: "白底栅格 · 单甲尺码合集",
     description:
-      "服务端先 EXIF + 整图转 180° 再送模型。提示词要求：每行顶部（甲根）一条水平线（图1式）；拇指最大、中指第二、食指与无名指中等且约等大、小指最小；补满 10 格、间距紧凑。",
+      "服务端先 EXIF + 整图转 180° 再送模型；模型只生成一枚真实高清单甲，随后服务端复制缩放为 2×5：拇最大、中指第二、食名约等大、小指最小，且每行甲根顶线水平。",
   },
   {
     value: "multi_angle",
@@ -212,33 +212,31 @@ E-commerce studio light; optional minimal uniform contact shadow; preserve spark
 
 Return a single square product-ready image.`;
 
-/** 单枚或少量甲片，补满 10 格（可发明同款空位）；与 UI 说明一致：先 180° 再喂模型，甲根顶线 + 客观指位 */
+/** 单枚高清化：服务端先 180°，模型只出一枚真实单甲，最终 2×5 由代码复制缩放拼接。 */
 const COMPLETE_SINGLE_GRID_PROMPT = `Edit the provided reference image of press-on / stick-on nails (single nail, a few nails, card, or noisy background).
 
 PIPELINE YOU MUST RESPECT — rotation before layout:
 - The image has **already** been processed on the server: **EXIF upright**, then a **global 180° rotation** so that **fingertips (free edge) point DOWN** and **nail roots / cuticle (甲根) sit at the TOP** of the frame. Treat this as the **canonical** orientation for all nails you output. **Never** undo it (no whole-canvas flip back to tips-up).
 
-PRIMARY LAYOUT GOAL — “图1式” 白底 2×5 商品栅格:
-- Output **exactly 10** nails in **2 rows × 5 columns** on pure **#FFFFFF**, like a top-tier Taobao/Amazon press-on sheet (orthographic front, modular grid).
-
-WHITE-GRID PRODUCT RULES (failure if violated — **all** nails including invented fill-ins):
-${WHITE_BG_NAIL_GRID_FINGER_LADDER}
-
-${WHITE_BG_NAIL_GRID_TOP_BASELINE}
+PRIMARY OUTPUT GOAL — single realistic source nail only:
+- Output **exactly ONE** press-on nail, centered on a pure **#FFFFFF** background.
+- Do **NOT** output a grid, sheet, pair, set, duplicate, label, number, ruler, hand, finger, card, packaging, or any extra nail.
+- The single nail must be upright with **cuticle/root at the top** and **free edge/tip pointing down**.
 
 IMAGE EDITING STEPS:
 1) Identify visible nail tips; ignore skin, card text, logos, packaging clutter.
-2) Cut out with crisp edges; composite on #FFFFFF in locked reading order (same LTR / TTB as reference when a tray is implied; otherwise coherent product order without column swaps).
-3) Rectify each nail: long axis vertical, yaw 0°, **tips down / roots up** per nail.（指尖朝下，甲根朝上。）
-
-GRID + SPACING:
-- Five vertical columns align across both rows; **minimal** gutters between nails and slim outer margins (tight SKU look). Center each nail in its cell horizontally.
-
-INVENTION (when <10 visible):
-- Invent matching press-ons only for empty slots; invented nails must obey the **same** WHITE-GRID finger ladder, per-row top baseline, and tip-down rule as above.
+2) If several nails are visible, choose the clearest / most representative nail art from the reference and render that design as ONE standalone nail.
+3) Reconstruct it as a realistic high-resolution catalog product cutout: long axis vertical, yaw 0°, **tips down / roots up**.（指尖朝下，甲根朝上。）
 
 LIGHTING & FIDELITY:
-- Soft even studio light; no watermark; optional tiny uniform contact shadow. Preserve chrome, glitter, gloss, and micro-detail from the reference.
+- Photorealistic material, natural curved press-on shape, glossy gel finish, believable thickness and highlights.
+- Preserve the source nail art faithfully: color, gradient, chrome, glitter, gloss, decals, 3D charms, and micro-detail.
+- Soft even studio light; optional tiny uniform contact shadow; no watermark.
+
+FINAL CHECK:
+- Exactly ONE nail is visible.
+- No 2×5 layout, no ten-nail set, no duplicated copies.
+- Pure white background; single centered nail; tip down; root up.
 
 Return **one** square, catalog-ready image.`;
 
