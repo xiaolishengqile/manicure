@@ -8,7 +8,11 @@ import {
   type GenerationMode,
 } from "@/lib/generation-modes";
 import { buildTenSinglesCollageReference } from "@/lib/ten-singles-collage";
-import { normalizeTenSingleNailForCollageCell } from "@/lib/ten-singles-nail-preprocess";
+import {
+  exifRotate180TipDownToPng,
+  exifUprightToPng,
+  normalizeTenSingleNailForCollageCell,
+} from "@/lib/ten-singles-nail-preprocess";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -269,8 +273,17 @@ export async function POST(request: Request) {
     return Response.json({ error: nailsOnly.error }, { status: 400 });
   }
 
-  const buffer = nailsOnly.buffer;
-  const mime = nailsOnly.mime;
+  let buffer = nailsOnly.buffer;
+  let mime = nailsOnly.mime;
+  if (mode === "complete_single_grid") {
+    const pre = await exifRotate180TipDownToPng(buffer, mime);
+    buffer = pre.buffer;
+    mime = pre.mime;
+  } else if (mode === "extract_ten_grid") {
+    const pre = await exifUprightToPng(buffer, mime);
+    buffer = pre.buffer;
+    mime = pre.mime;
+  }
   const ext = extFromMime(mime);
 
   const jobs = promptsForMode(mode);

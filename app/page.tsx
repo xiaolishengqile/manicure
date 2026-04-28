@@ -136,7 +136,7 @@ export default function Home() {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [secondFile, setSecondFile] = useState<File | null>(null);
   const [secondPreviewUrl, setSecondPreviewUrl] = useState<string | null>(null);
-  const [mode, setMode] = useState<GenerationMode>("complete_grid");
+  const [mode, setMode] = useState<GenerationMode>("extract_ten_grid");
   const [resultUrls, setResultUrls] = useState<string[]>([]);
   const [resultLabels, setResultLabels] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
@@ -469,7 +469,11 @@ export default function Home() {
               ? "产出（手模 · 指甲+饰品试戴）"
               : mode === "ten_singles_grid"
                 ? "产出（十枚单甲 · 一张合集）"
-                : "产出（白底栅格）";
+                : mode === "extract_ten_grid"
+                  ? "产出（白底栅格 · 仅抠图）"
+                  : mode === "complete_single_grid"
+                    ? "产出（白底栅格 · 补全至10枚）"
+                    : "产出";
 
   const gridClass =
     mode === "multi_angle"
@@ -498,11 +502,19 @@ export default function Home() {
   const singleUploadTitle =
     mode === "flat_to_3d_packaging"
       ? "点击选择 2D 包装平面稿"
-      : "点击选择美甲照片";
+      : mode === "extract_ten_grid"
+        ? "点击选择含多枚甲片的照片"
+        : mode === "complete_single_grid"
+          ? "点击选择单枚或少量甲片照片"
+          : "点击选择美甲照片";
   const singleUploadHint =
     mode === "flat_to_3d_packaging"
       ? "正面/背面展开、屏显效果图、刀版图截图均可"
-      : "支持常见图片格式";
+      : mode === "extract_ten_grid"
+        ? "托盘、卡纸、实拍平铺等；只抠图中已出现的甲片，不补全款式"
+        : mode === "complete_single_grid"
+          ? "服务端会先整图转 180° 指尖朝下，再由模型补满 10 格"
+          : "支持常见图片格式";
 
   return (
     <div className="min-h-full bg-zinc-50 text-zinc-900">
@@ -815,7 +827,11 @@ export default function Home() {
                         ? "正在生成手模试戴广告图…"
                         : mode === "ten_singles_grid"
                           ? "正在合成十甲白底合集…"
-                          : "正在生成…"
+                          : mode === "complete_single_grid"
+                            ? "正在补全至 10 枚…"
+                            : mode === "extract_ten_grid"
+                              ? "正在抠图排版…"
+                              : "正在生成…"
               : "开始生成"}
           </button>
           {error ? (

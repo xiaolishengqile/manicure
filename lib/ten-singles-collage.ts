@@ -4,9 +4,9 @@ import sharp from "sharp";
 const COLLAGE_SIDE = 1600;
 
 /**
- * 列 0=拇指 … 列 4=小指：格内最大宽度占满格宽比例（左略大右略小，梯度柔和）。
+ * 列 0–4 = 拇指、食指、中指、无名指、小指：符合「拇最大、中指第二大、食≈名、小指最小」的参考图宽度上限。
  */
-const COL_MAX_WIDTH_FRAC: readonly number[] = [1, 0.96, 0.93, 0.9, 0.87];
+const COL_MAX_WIDTH_FRAC: readonly number[] = [1, 0.9, 0.97, 0.9, 0.84];
 
 /** 去掉近似白边 */
 async function trimWhiteEdges(input: Buffer): Promise<Buffer> {
@@ -82,15 +82,34 @@ async function placeRowWithAlignedRoots(
     hs = await Promise.all(current.map(async (b) => (await pngMeta(b)).h));
   }
 
-  /** 同一行甲根线：所有「内容顶」对齐到本行最大的 rootY（保证落在格高内时已通过缩放满足） */
+  /** 同一行甲根线：所有「内容顶」对齐到本行最大的 rootY（甲根在上、指尖朝下时即画面上方同一直线） */
   const R = Math.max(...rootYs);
 
   const out: Buffer[] = [];
   for (let i = 0; i < current.length; i++) {
-    const inner = current[i]!;
+    let imgBuf = current[i]!;
     const ry = rootYs[i]!;
-    const { w: iw } = await pngMeta(inner);
-    const topOff = Math.round(R - ry);
+    let { w: iw, h: ih } = await pngMeta(imgBuf);
+    let topOff = Math.round(R - ry);
+
+    // 若底会超出格高，画布会裁掉下半截 → 视觉上变成「底边齐平」。改为先缩放到格内，仍从 topOff 贴顶，保住甲根对齐。
+    if (topOff + ih > ch) {
+      const targetH = Math.max(1, ch - topOff);
+      imgBuf = await sharp(imgBuf)
+        .resize({
+          width: cw,
+          height: targetH,
+          fit: "contain",
+          position: "north",
+          background: { r: 255, g: 255, b: 255, alpha: 1 },
+        })
+        .png()
+        .toBuffer();
+      const m2 = await pngMeta(imgBuf);
+      iw = m2.w;
+      ih = m2.h;
+    }
+
     const padL = Math.max(0, Math.floor((cw - iw) / 2));
     const cell = await sharp({
       create: {
@@ -100,7 +119,7 @@ async function placeRowWithAlignedRoots(
         background: { r: 255, g: 255, b: 255 },
       },
     })
-      .composite([{ input: inner, left: padL, top: topOff }])
+      .composite([{ input: imgBuf, left: padL, top: topOff }])
       .png()
       .toBuffer();
     out.push(cell);
@@ -130,8 +149,9 @@ export async function buildTenSinglesCollageReference(
   }
   const W = COLLAGE_SIDE;
   const H = COLLAGE_SIDE;
-  const margin = Math.round(W * 0.032);
-  const gutter = Math.max(6, Math.round(W * 0.006));
+  /** 外边距与格间缝：尽量小，让十枚在画布里更紧凑（仍留 1px 级缝隙避免拼版粘连感） */
+  const margin = Math.round(W * 0.018);
+  const gutter = Math.max(2, Math.round(W * 0.0025));
   const cols = 5;
   const rows = 2;
   const innerW = W - 2 * margin;
