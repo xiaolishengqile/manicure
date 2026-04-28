@@ -23,7 +23,7 @@ export const GENERATION_MODE_OPTIONS: {
     value: "complete_single_grid",
     label: "白底栅格 · 单枚/少量补全至10枚",
     description:
-      "适合单枚或少量甲片：服务端先整图转 180° 指尖朝下，由模型按同款补满 10 格。拇指最大、中指第二大、食名约等大、小指最小；甲根同线、间距紧凑。",
+      "服务端先 EXIF + 整图转 180° 再送模型。提示词要求：每行顶部（甲根）一条水平线（图1式）；拇指最大、中指第二、食指与无名指中等且约等大、小指最小；补满 10 格、间距紧凑。",
   },
   {
     value: "multi_angle",
@@ -193,51 +193,39 @@ E-commerce studio light; optional minimal uniform contact shadow; preserve spark
 
 Return a single square product-ready image.`;
 
-/** 单枚或少量甲片，补满 10 格（可发明同款空位） */
-const COMPLETE_SINGLE_GRID_PROMPT = `Edit the provided reference photo of press-on / stick-on nails (they may sit on a display card, be held by a hand, or appear on a noisy background).
+/** 单枚或少量甲片，补满 10 格（可发明同款空位）；与 UI 说明一致：先 180° 再喂模型，甲根顶线 + 客观指位 */
+const COMPLETE_SINGLE_GRID_PROMPT = `Edit the provided reference image of press-on / stick-on nails (single nail, a few nails, card, or noisy background).
 
-GOAL — output must read like a machine-placed Amazon/Taobao SKU packshot: orthographic front view, not a casual re-photo of the messy layout.
+PIPELINE YOU MUST RESPECT — rotation before layout:
+- The image has **already** been processed on the server: **EXIF upright**, then a **global 180° rotation** so that **fingertips (free edge) point DOWN** and **nail roots / cuticle (甲根) sit at the TOP** of the frame. Treat this as the **canonical** orientation for all nails you output. **Never** undo it (no whole-canvas flip back to tips-up).
 
-IMAGE EDITING TASK:
-1) Identify every individual artificial nail tip in the photo. Ignore human skin, fingers, display card, printed text, logos, packaging, and environment.
-2) Cut out ONLY the nail pieces with crisp, clean edges (no leftover card, skin, harsh cast shadows, or background texture).
-3) Composite them onto a new canvas with a pure solid white background (#FFFFFF only).
+PRIMARY LAYOUT GOAL — “图1式” 白底 2×5 商品栅格:
+- Output **exactly 10** nails in **2 rows × 5 columns** on pure **#FFFFFF**, like a top-tier Taobao/Amazon press-on sheet (orthographic front, modular grid).
+- **Row-wise TOP line (mandatory, same as a ruler):** In **each** horizontal row, the **TOP edge of every nail plate** — the **root / cuticle / proximal side** (美甲根部, the edge opposite the pointed tip when tips point down) — must lie on **one and the same horizontal line** for all five nails in that row. Think of a single straight edge touching the top of every nail in the row. **This is non-negotiable.**
+- **FORBIDDEN mistake:** lining up the **bottom pointed tips** on one horizontal line while the **tops** step up/down like stairs. **Tips may end at different heights**; only the **top / root** line must be perfectly shared.
 
-LOCKED READING ORDER (do not permute designs):
-- If the source shows a 2×5 card or tray, map nails to the output grid in the SAME left-to-right, top-to-bottom order as they appear on that card: top-row slot 1 = leftmost nail of the top row in the reference, etc. A distinctive design on “reference column 2” MUST land in output column 2 of that row — never shift it to column 3 or 4.
-- If nails are scattered or one hand holds the set, order them consistently (e.g. by the reference’s implied product layout); do NOT re-sort columns in a way that swaps which artwork sits where.
+REALISTIC FINGER SIZE (objective anatomy — both rows; columns 1→5 = thumb → index → middle → ring → pinky):
+- **Thumb (col 1):** **Largest** plate in the row (width and overall footprint).
+- **Middle finger (col 3):** **Second largest** — clearly smaller than thumb, clearly larger than index, ring, and pinky.
+- **Index (col 2) and ring (col 4):** **Medium** size, **about equal** to each other (within ~5–8%); both smaller than middle, both larger than pinky.
+- **Pinky (col 5):** **Smallest** in the row.
+- Achieve this **only** with uniform per-nail scale inside each cell; **never** swap which artwork sits in which column.
 
-INPUT ORIENTATION — complete_single_grid pipeline:
-- The uploaded image has already been **server-normalized**: EXIF upright, then **180°** so **free edge (tip) points toward the BOTTOM** of the frame and **cuticle / proximal edge toward the TOP**. Your output must **keep** this tip-down convention — **never** flip the whole composition back to tips-up.
+IMAGE EDITING STEPS:
+1) Identify visible nail tips; ignore skin, card text, logos, packaging clutter.
+2) Cut out with crisp edges; composite on #FFFFFF in locked reading order (same LTR / TTB as reference when a tray is implied; otherwise coherent product order without column swaps).
+3) Rectify each nail: long axis vertical, yaw 0°, **tips down / roots up** per nail.（指尖朝下，甲根朝上。）
 
-RECTIFY GEOMETRY — DO NOT COPY CASUAL TILT FROM THE SOURCE:
-- Even if nails in the reference photo are tilted, overlapping, or unevenly spaced, the OUTPUT must IGNORE that geometry. Re-pose each extracted nail as if placed on a drafting table: long axis parallel to the canvas vertical, yaw = 0° in the image plane (no diagonal lean, no “dynamic” tilt, no Dutch angle).
-- **Fingertips down:** the free edge (distal tip) of every nail must point toward the **bottom** of the frame; the cuticle / proximal (back) edge toward the **top**.（须保证指尖朝下，甲根/后缘朝上。）
-- Do NOT preserve the reference’s random rotations “for realism” — commercial grids require rectified, upright nails only.
+GRID + SPACING:
+- Five vertical columns align across both rows; **minimal** gutters between nails and slim outer margins (tight SKU look). Center each nail in its cell horizontally.
 
-UNIFORM MODULAR GRID + COLUMN ALIGNMENT:
-- EXACTLY 10 tips in 2 rows × 5 columns. Imagine five invisible vertical columns spanning BOTH rows: the center of column k in the top row MUST align with the center of column k in the bottom row (same x-position per column). The two rows share one rigid column grid — no horizontal drift or “staircase” offset between rows.
-- **Tight spacing (priority):** horizontal gap between each adjacent nail in a row and vertical gap between the two rows must be **as small as possible** — hairline-to–few-pixels white only, **never** generous “catalog air” gutters. Outer margins around the whole 2×5 block should also be **slim** so the set fills the canvas. Still mechanically even (same tiny gutter everywhere).
+INVENTION (when <10 visible):
+- Invent matching press-ons only for empty slots; invented nails must obey the **same** top-line alignment, tip-down rule, and **thumb > middle > index ≈ ring > pinky** size ladder.
 
-CELL PLACEMENT:
-- Center each nail inside its cell. Equal perceived cell width per column (allow only uniform scale per nail to vary footprint). Nails may sit **close** to neighbors as long as edges do not visually merge; do not pad with extra white just for “breathing room.”
+LIGHTING & FIDELITY:
+- Soft even studio light; no watermark; optional tiny uniform contact shadow. Preserve chrome, glitter, gloss, and micro-detail from the reference.
 
-ANATOMICAL SIZE & FINGER ORDER (both rows — realistic hand; columns 1→5 = thumb → index → middle → ring → pinky):
-- **Thumb (column 1):** largest width and length in the row.
-- **Middle finger (column 3):** **second largest** — clearly smaller than thumb, clearly larger than index, ring, and pinky.
-- **Index (column 2) and ring (column 4):** **approximately equal** overall footprint (within ~5–8%); both smaller than middle; both larger than pinky. Do NOT make one dramatically larger than the other unless the source artwork alone forces it.
-- **Pinky (column 5):** smallest in the row.
-- Achieve sizing ONLY by uniform per-nail scale inside each cell — never swap which cutout occupies which column.
-
-ROW-WISE PROXIMAL BASELINE (mandatory — do NOT invert):
-- In **each** horizontal row, the **TOP** of every nail plate — the **cuticle / proximal / rounded root edge** (opposite the pointed free tip when tips point **down**) — must lie on **one shared horizontal line** across the five nails.
-- **FORBIDDEN:** aligning the **bottom pointed tips** to a straight line (that creates a “staircase” cuticle line and is wrong). The **free tips may end at different heights**; only the **upper / cuticle** row must be ruler-straight.
-
-5) If fewer than 10 nails are clearly visible, invent additional matching press-ons for empty slots only; invented nails must follow the **same** finger column order and size rules above.
-6) E-commerce studio look: soft even light; no props, no watermark, no busy shadows; optional minimal uniform contact shadow acceptable if identical under every nail.
-7) Finish & sparkle fidelity: If the reference nails include chrome, foil, glitter, glass shine, iridescence, or other “jewelry-like” brilliance, carry that same sparkling / reflective quality into the final grid — specular accents and micro-glints should still read as lively and true to the originals; avoid accidental dull-down of intentional shine.
-
-Return a single square product-ready image.`;
+Return **one** square, catalog-ready image.`;
 
 const ANGLE_PROMPTS: { prompt: string; label: string }[] = [
   {

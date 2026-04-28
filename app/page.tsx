@@ -513,7 +513,7 @@ export default function Home() {
       : mode === "extract_ten_grid"
         ? "托盘、卡纸、实拍平铺等；只抠图中已出现的甲片，不补全款式"
         : mode === "complete_single_grid"
-          ? "服务端会先整图转 180° 指尖朝下，再由模型补满 10 格"
+          ? "先整图转 180° 再送模型；成品须每行甲根顶线齐平，指位大小符合客观比例"
           : "支持常见图片格式";
 
   return (
