@@ -52,7 +52,7 @@ export const GENERATION_MODE_OPTIONS: {
     value: "ten_singles_grid",
     label: "十枚单甲 → 一张白底合集",
     description:
-      "10 格逐张上传或一次选满 10 张；每格可单独替换/删除。服务端拼成 2×5 参考图后生成纯白底栅格，顺序与格子一致。",
+      "10 格逐张上传或一次选满 10 张；每格可单独替换/删除。服务端拼成 2×5 参考图后生成纯白底栅格。顺序与格子一致：每行左起拇指（最大）→ 右端小指（最小）。",
   },
 ];
 
@@ -123,9 +123,14 @@ TASK — premium Amazon / Taobao **single-sheet** packshot from this collage ref
 CRITICAL (failure if violated):
 - **Pixel slot fidelity:** the artwork that appears in reference **top-left** MUST end up in **output top-left** only; same for every slot through **bottom-right**. Never swap, mirror, or re-sort cells for aesthetics.
 
+ANATOMICAL GRID MEANING — thumb largest left, pinky smallest right (both rows):
+- Treat the 2×5 layout as **two hands** in standard product order: **left column = thumb**, **right column = pinky**, and **columns 2→3→4 = index → middle → ring** between them.
+- **Within each row**, nail plate **width and overall footprint should decrease gently from column 1 to column 5** (thumb **slightly** largest, pinky **slightly** smallest — subtle SKU gradient, not extreme size jumps). Achieve this only by **uniform per-nail scaling** inside each cell — **never** swap which design sits in which column.
+- Top row (slots 1–5) and bottom row (slots 6–10) share the **same left-to-right finger semantics** (slot 1 & 6 = thumbs at the **left**; slot 5 & 10 = pinkies at the **right**).
+
 LAYOUT + LOOK:
 - Pure white **#FFFFFF** background; strict modular **2×5**; **narrow fixed gutters** between neighbors (minimal white sliver, tight catalog look, not wide spacing).
-- The reference collage **top-aligns** each nail inside its cell so **cuticle / proximal (back) edges** in the **same row** sit on **one horizontal line** (like a ruler). Preserve that same **row-wise proximal alignment** in the final packshot — do not vertically re-center nails in a way that breaks the shared baseline per row.
+- The draft reference was **server-built** so that in **each horizontal row**, the **proximal / cuticle (back) edge** of every nail lies on the **same horizontal line** (shared Y per row). This baseline is **mandatory**: preserve that **exact same row-wise horizontal alignment** in your output — do **not** vertically shift any nail to “even out” tips or for aesthetics; breaking the shared cuticle line is a failure.
 - Columns must align vertically across both rows (no staircase offset).
 - Each nail: long axis vertical, **0°** yaw in the plane, **horizontally centered** in its column; crisp cutout edges; remove stray background, skin, props from the reference cells.
 - Preserve all artwork, gloss, chrome, glitter, 3D charms with **high input fidelity** — no invented patterns.
@@ -134,6 +139,7 @@ LAYOUT + LOOK:
 FINAL CHECK:
 - No digit badges or label boxes remain in the output.
 - Slot 1 art is still top-left; slot 10 still bottom-right.
+- Each row still reads thumb (slightly largest, left) → pinky (slightly smallest, right); keep the gentle size step-down without harsh jumps.
 
 Return **ONE** square high-resolution product-ready image.`;
 

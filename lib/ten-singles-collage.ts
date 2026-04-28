@@ -3,6 +3,111 @@ import sharp from "sharp";
 /** 白底参考拼图边长；与常见 image edit 上限兼容，单格仍有足够细节 */
 const COLLAGE_SIDE = 1600;
 
+/**
+ * 列 0=拇指 … 列 4=小指：格内最大宽度占满格宽比例（左略大右略小，梯度柔和）。
+ */
+const COL_MAX_WIDTH_FRAC: readonly number[] = [1, 0.96, 0.93, 0.9, 0.87];
+
+/** 去掉近似白边 */
+async function trimWhiteEdges(input: Buffer): Promise<Buffer> {
+  try {
+    return await sharp(input)
+      .trim({ threshold: 14, lineArt: false })
+      .png()
+      .toBuffer();
+  } catch {
+    return input;
+  }
+}
+
+/** 从顶向下第一行含「非近似白」像素的 y（作为甲根/上缘对齐基准） */
+async function firstContentRowYFromTop(png: Buffer): Promise<number> {
+  const { data, info } = await sharp(png).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  const { width, height, channels } = info;
+  const stride = channels;
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = (y * width + x) * stride;
+      const r = data[i]!;
+      const g = data[i + 1]!;
+      const b = data[i + 2]!;
+      const a = stride >= 4 ? data[i + 3]! : 255;
+      if (a < 22) continue;
+      const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+      const maxc = Math.max(r, g, b);
+      const minc = Math.min(r, g, b);
+      const sat = maxc <= 1 ? 0 : (maxc - minc) / maxc;
+      if (lum < 252 || sat > 0.04) return y;
+    }
+  }
+  return 0;
+}
+
+async function pngMeta(buf: Buffer): Promise<{ w: number; h: number }> {
+  const m = await sharp(buf).metadata();
+  return { w: m.width ?? 1, h: m.height ?? 1 };
+}
+
+/** 相对原始 inner 等比缩放（用于整行放不下时） */
+async function resizeInnerProportional(inner: Buffer, scale: number): Promise<Buffer> {
+  const { w } = await pngMeta(inner);
+  const nw = Math.max(1, Math.round(w * scale));
+  return sharp(inner).resize({ width: nw }).png().toBuffer();
+}
+
+function rowRootBaselineFeasible(rootYs: number[], hs: number[], ch: number): boolean {
+  const maxRoot = Math.max(...rootYs);
+  const minCap = Math.min(...rootYs.map((ry, i) => ch + ry - hs[i]!));
+  return maxRoot <= minCap + 0.75;
+}
+
+/**
+ * 同一行五枚：甲根（内容顶边）对齐到同一水平线，再置入 cw×ch 白底格；必要时整行等比缩小直至可行。
+ */
+async function placeRowWithAlignedRoots(
+  innerBuffers: Buffer[],
+  cw: number,
+  ch: number,
+): Promise<Buffer[]> {
+  const originals = [...innerBuffers];
+  let scale = 1;
+  let current = originals;
+  let rootYs = await Promise.all(current.map((b) => firstContentRowYFromTop(b)));
+  let hs = await Promise.all(current.map(async (b) => (await pngMeta(b)).h));
+
+  while (!rowRootBaselineFeasible(rootYs, hs, ch) && scale > 0.02) {
+    scale *= 0.91;
+    current = await Promise.all(originals.map((b) => resizeInnerProportional(b, scale)));
+    rootYs = await Promise.all(current.map((b) => firstContentRowYFromTop(b)));
+    hs = await Promise.all(current.map(async (b) => (await pngMeta(b)).h));
+  }
+
+  /** 同一行甲根线：所有「内容顶」对齐到本行最大的 rootY（保证落在格高内时已通过缩放满足） */
+  const R = Math.max(...rootYs);
+
+  const out: Buffer[] = [];
+  for (let i = 0; i < current.length; i++) {
+    const inner = current[i]!;
+    const ry = rootYs[i]!;
+    const { w: iw } = await pngMeta(inner);
+    const topOff = Math.round(R - ry);
+    const padL = Math.max(0, Math.floor((cw - iw) / 2));
+    const cell = await sharp({
+      create: {
+        width: cw,
+        height: ch,
+        channels: 3,
+        background: { r: 255, g: 255, b: 255 },
+      },
+    })
+      .composite([{ input: inner, left: padL, top: topOff }])
+      .png()
+      .toBuffer();
+    out.push(cell);
+  }
+  return out;
+}
+
 function cellSlotBadgeSvg(slot1Based: number, box: number): Buffer {
   const fs = Math.max(12, Math.floor(box * 0.45));
   const svg = `<svg width="${box}" height="${box}" xmlns="http://www.w3.org/2000/svg">
@@ -15,6 +120,7 @@ function cellSlotBadgeSvg(slot1Based: number, box: number): Buffer {
 
 /**
  * 将已归一化的 10 枚 PNG（顺序 = 用户第 1–10 格）拼成一张 2×5 白底参考图，左上起第 1–5 为上排。
+ * 每行内强制「甲根」同一水平线（按内容顶边对齐）；列间仅轻微左大右小。
  */
 export async function buildTenSinglesCollageReference(
   cellPngBuffers: Buffer[],
@@ -33,20 +139,20 @@ export async function buildTenSinglesCollageReference(
   const cellW = (innerW - (cols - 1) * gutter) / cols;
   const cellH = (innerH - (rows - 1) * gutter) / rows;
 
-  const composites: sharp.OverlayOptions[] = [];
+  const cw = Math.round(cellW);
+  const ch = Math.round(cellH);
+
+  const rowInners: Buffer[][] = [[], []];
 
   for (let i = 0; i < 10; i++) {
     const r = Math.floor(i / 5);
     const c = i % 5;
-    const left = Math.round(margin + c * (cellW + gutter));
-    const top = Math.round(margin + r * (cellH + gutter));
-    const cw = Math.round(cellW);
-    const ch = Math.round(cellH);
-
-    // 单枚已归一为「指尖朝下」→ 甲根/后缘在图像上方；格内上对齐 (north) 使同一行后缘落在同一水平线（与用户示意一致）
-    const fitted = await sharp(cellPngBuffers[i])
+    const trimmed = await trimWhiteEdges(cellPngBuffers[i]!);
+    const frac = COL_MAX_WIDTH_FRAC[c] ?? 0.87;
+    const maxW = Math.max(1, Math.round(cw * frac));
+    const inner = await sharp(trimmed)
       .resize({
-        width: cw,
+        width: maxW,
         height: ch,
         fit: "contain",
         position: "north",
@@ -54,15 +160,29 @@ export async function buildTenSinglesCollageReference(
       })
       .png()
       .toBuffer();
+    rowInners[r]!.push(inner);
+  }
 
-    composites.push({ input: fitted, left, top });
+  const alignedRows: Buffer[][] = [];
+  for (let r = 0; r < rows; r++) {
+    alignedRows.push(await placeRowWithAlignedRoots(rowInners[r]!, cw, ch));
+  }
 
-    const badge = Math.min(36, Math.round(Math.min(cw, ch) * 0.14));
-    composites.push({
-      input: cellSlotBadgeSvg(i + 1, badge),
-      left: left + 4,
-      top: top + ch - badge - 4,
-    });
+  const composites: sharp.OverlayOptions[] = [];
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const left = Math.round(margin + c * (cellW + gutter));
+      const top = Math.round(margin + r * (cellH + gutter));
+      const fitted = alignedRows[r]![c]!;
+      composites.push({ input: fitted, left, top });
+      const slot1 = r * cols + c + 1;
+      const badge = Math.min(36, Math.round(Math.min(cw, ch) * 0.14));
+      composites.push({
+        input: cellSlotBadgeSvg(slot1, badge),
+        left: left + 4,
+        top: top + ch - badge - 4,
+      });
+    }
   }
 
   return sharp({
