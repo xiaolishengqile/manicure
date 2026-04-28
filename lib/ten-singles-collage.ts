@@ -4,9 +4,10 @@ import sharp from "sharp";
 const COLLAGE_SIDE = 1600;
 
 /**
- * 列 0–4 = 拇指、食指、中指、无名指、小指：符合「拇最大、中指第二大、食≈名、小指最小」的参考图宽度上限。
+ * 列 0–4 = 拇指、食指、中指、无名指、小指：拇最大、中指第二大、食≈名、小指最小。
+ * 宽度上限级差刻意收窄，避免参考图里相邻指「悬殊过大」导致模型把成品画成玩具比例。
  */
-const COL_MAX_WIDTH_FRAC: readonly number[] = [1, 0.9, 0.97, 0.9, 0.84];
+const COL_MAX_WIDTH_FRAC: readonly number[] = [1, 0.945, 0.975, 0.945, 0.905];
 
 /** 去掉近似白边 */
 async function trimWhiteEdges(input: Buffer): Promise<Buffer> {
