@@ -125,6 +125,16 @@ export const WHITE_BG_NAIL_GRID_TOP_BASELINE = `ROW-WISE TOP BASELINE (mandatory
 （每一行：所有美甲的甲根/上缘必须在同一条水平线上；禁止只对齐指尖、甲根呈阶梯。）`;
 
 /**
+ * 有法/深色指尖（法式、豹纹尖等）时：深色必须在解剖学**指尖**（游离缘），拇指最易反贴。
+ * 与包装手握、试戴、多角度上手共用。
+ */
+export const DISTAL_PATTERN_AT_ANATOMICAL_FINGERTIP_EN = `DISTAL TIP DIRECTION — “DARK AT THE REAL FINGERTIP” (whenever a real hand wears press-ons; failure if violated):
+- If the product art shows a **darker distal zone** (black / deep brown French band, leopard **tip**, ombré **darkening toward free edge**, chrome cap at tip, etc.), that **dark / patterned distal band must cap the anatomical free edge** — the margin of the nail plate **toward the fingertip and away from the knuckle** — on **every** visible finger **and thumb**.
+- The **lighter / nude proximal zone** stays toward the **cuticle and finger base**. **Forbidden:** wearing the nail **180° flipped** so the dark band sits against the **proximal nail fold** while nude points out to the fingertip (reads as “black at the knuckle”).
+- **Thumb (highest error rate):** even when the thumb is horizontal, sideways, or presses the box edge, **column-1** art must still place **distal dark art on the true thumb free margin** (the working edge toward air / opposite the palm), **not** mirrored so “tip” art hugs the thenar web.
+（中文：有深色指尖时**指尖应是深色**、甲根偏浅；禁止整片戴反。拇指常错，须单独自检。）`;
+
+/**
  * 上手戴甲：产品图左→右 = 大拇指→小指；甲根朝指根、指尖朝游离缘（款式「顶部」朝上）；严禁整片戴反或整行左右对调。
  * 用于模特试戴、饰品试戴、多角度上手、包装手握等英文提示。
  */
@@ -133,7 +143,9 @@ export const NAIL_ON_HAND_SHEET_TO_FINGER_ORDER_EN = `PRODUCT SHEET → REAL HAN
 - **Two rows (10 nails):** keep **top row then bottom row** exactly as printed — **same slot → same finger role** as your pipeline’s 2×5 convention (columns 1–5 = thumb…pinky per row); **no** shuffling designs between fingers or between rows.
 - **Wear orientation — nail “top” toward the knuckle:** each press-on is mounted so the **cuticle / root / proximal edge (甲根, the visual “top” of the nail art)** points toward the **finger base / knuckle**, and the **free edge (指尖)** points toward the **fingertip** — matching how that nail sits on the **reference sheet** (tips-down / roots-up on the sheet must become **roots toward hand base, tips toward finger end** on the real finger). **Forbidden:** **180°** mounting that flips the whole art upside-down vs the reference, or swapping which end is “up” on the finger.
 - **Strictly follow the reference image** for every slot: the art on each real finger must be **only** the art from that **same sheet cell** — no substitutions.
-（中文小结：产品图每行从左到右依次大拇指→小指；两行顺序与背卡一致不乱序；戴甲时甲根/款式上缘朝指根、指尖朝游离缘，勿正反颠倒。）`;
+（中文小结：产品图每行从左到右依次大拇指→小指；两行顺序与背卡一致不乱序；戴甲时甲根/款式上缘朝指根、指尖朝游离缘，勿正反颠倒。）
+
+${DISTAL_PATTERN_AT_ANATOMICAL_FINGERTIP_EN}`;
 
 export const MODEL_TRYON_PROMPT = `You receive TWO input images in this order:
 1) FIRST image: the MODEL photograph — a person (hands visible) with natural nails, in a specific pose, lighting, skin tone, clothing, and background.
@@ -291,7 +303,7 @@ const MULTI_ANGLE_ARTWORK_AND_ORIENTATION_BLOCK = `ART FIDELITY + ORIENTATION (e
 - **Accent placement by column (e.g. flowers):** copy **exactly** which columns carry an extra motif on the **product sheet** — if flowers appear **only** on **columns 2 and 4** (index + ring) in each row, then **thumb (1), middle (3), and pinky (5) must have zero flowers** — only leopard/base as on those reference nails. **Forbidden:** flowers on thumb, middle, or pinky; **forbidden:** duplicating the flowered design onto the wrong column.
 - **Do not change how the art looks:** same colors, shapes, micro-lines, and accent placement as the reference nail for that finger — **zero** creative redesign; only natural **lighting + perspective wrap** on the curved nail.
 - **Printed front face outward:** the **designed top surface** faces outward on the nail plate the camera sees; **never** use the **matte inner / underside** as the visible art side.
-- **Cuticle → free edge (甲根→指尖) — anatomy wins over flat-card bitmap:** map art so **proximal/root** of the motif sits toward the **nail fold / finger base** and **distal French / tip pattern** sits toward the **physical free edge at the fingertip** — same logic as on the reference nail plate. **No 180°** “paste” that clusters tip art near the cuticle.
+- **Cuticle → free edge (甲根→指尖) — anatomy wins over flat-card bitmap:** map art so **proximal/root** of the motif sits toward the **nail fold / finger base** and **distal French / tip pattern** sits toward the **physical free edge at the fingertip** — same logic as on the reference nail plate. **No 180°** “paste” that clusters tip art near the cuticle. **If the reference has a dark / black tip, that dark must face the real fingertip**, not the knuckle.
 - **Palm-up / 手心朝上 / palmar-facing camera:** when the **palm faces upward** or toward the lens, **do not** keep the flat product-card orientation blindly — **re-express** the design on each nail so the **distal decorative band (French, leopard tip)** still lies at the **anatomical fingertip**, **not** flipped so the “tip” reads next to the knuckle. The nail plate is a **curved surface**; rotate the art **in 3D** as needed so **tip art = fingertip side, root art = cuticle side** regardless of palm vs dorsal view.
 - **No wrong mirroring:** asymmetric prints must keep **correct chirality** vs the reference after 3D wrap — **forbidden:** accidental **horizontal mirror** unless physically required (prefer fidelity).`;
 
@@ -373,6 +385,7 @@ const PACKAGING_ORIENT_AND_NO_MIX_BLOCK = `FINGERS — STRICT SLOT + ORIENTATION
 - **No pattern mixing:** each visible fingernail may show **only** the artwork from the **same numbered slot** on the SECOND reference (same as the matching window cell). **Forbidden:** borrowing another finger’s motif, blending two slots’ designs, or inventing a hand-only graphic that does not exist on that reference nail.
 - **Wear side / front vs back:** the **printed front face** of every press-on faces **outward** toward the viewer on the back-of-hand view; **never** treat the **matte inner / underside** as the display face. Do **not** paste a nail so the **design plane is reversed** vs how it appears on the product sheet for that slot.
 - **Proximal–distal on LIVE SKIN ONLY (甲根→指尖):** on **each visible fingernail**, **cuticle / root zone** of the art sits toward the **finger base** and **French / leopard / distal band** toward the **anatomical free edge** — **regardless of** whether that slot is drawn **tips-down inside the window on paper**. The window may match the flat sheet; **worn nails must not** copy the bitmap’s vertical axis onto skin (that causes **180° inverted** wear). **Forbidden:** treating the cell’s “bottom” in the product image as the finger’s “bottom” toward the knuckle.
+- **Visual check — “black at the fingertip”:** if the reference has **black or dark brown at the nail tip** (e.g. leopard French), the viewer must see that **dark on the fingertip side of the real hand and inside the window**, never clustered at the knuckle / cuticle on the live fingers.
 - **Left–right readability:** asymmetric motifs (flowers, animal streaks, tiny text) must keep the **same chirality** as the reference for that slot after natural 3D wrap — **no** accidental **horizontal mirror** that reverses lettering or asymmetric blooms unless the camera angle physically requires it (prefer preserving motif direction over “pretty” symmetry).`;
 
 const PACKAGING_GRIP_FINGER_SLOT_BLOCK = `VISIBLE GRIP / HOLDING FINGERS — SAME SLOT DISCIPLINE (critical):
@@ -385,7 +398,8 @@ const PACKAGING_THUMB_AND_TIPS_DOWN_SHEET_BLOCK = `TIPS-DOWN ON CARD → 3D ON H
 - **Scope:** The **nails inside the window** may stay **tips-down on the backing card** exactly like the SECOND reference — that is **correct** and **not** what to “fix.” The failure mode is **only** the **live hand:** worn press-ons must **not** inherit the flat cell’s vertical axis.
 - The SECOND reference usually shows each cell with **free edge / French–leopard band toward the BOTTOM of the cell** (paper layout). On **skin**, **re-orient each press-on in 3D** so the **same distal band** caps the **anatomical free edge** — **never** paste so the “tip” graphic sits at the **proximal fold** while nude points to the fingertip (**180° inverted** wear).
 - **Thumb (highest risk):** even when the thumb points **up or sideways**, **column-1** art must place **distal tip design on the true thumb free margin** (away from palm / toward air or carton), **not** flipped toward the thenar web. **Do not** rotate window nails to “match” the hand — correct **hand mapping only**.
-（中文：开窗里背卡可与参考一致（含甲尖朝下）；**只纠正手上穿戴**：立体对齐解剖游离缘，拇指最易整片反贴。勿为迁就手而去改窗内排版。）`;
+- **User-facing sanity check:** for leopard / dark French sets, **the black or dark tip must read at the fingertip** on the gripping thumb and every other visible nail — same as the window display and the SECOND reference’s intent.
+（中文：开窗里背卡可与参考一致（含甲尖朝下）；**只纠正手上穿戴**：立体对齐解剖游离缘，拇指最易整片反贴；**指尖应是深色**（若有深色尖款）。勿为迁就手而去改窗内排版。）`;
 
 const PACKAGING_PROMPTS: { prompt: string; label: string }[] = [
   {
