@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   GENERATION_MODE_OPTIONS,
@@ -8,6 +8,60 @@ import {
   requiresTenSingleNails,
   type GenerationMode,
 } from "@/lib/generation-modes";
+import { DEFAULT_USER_PROMPT_PRESETS } from "@/lib/prompt-presets-defaults";
+
+const LS_LAST_USER_NOTES = "manicure_last_user_extra_notes";
+const LS_PROMPT_PRESETS = "manicure_user_prompt_presets";
+const MAX_PRESETS = 40;
+const MAX_PRESET_LINE_CHARS = 200;
+
+type PromptPresetItem = { id: string; text: string };
+
+function newPresetId(): string {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+  return `p-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+}
+
+function defaultPresetItems(): PromptPresetItem[] {
+  return DEFAULT_USER_PROMPT_PRESETS.map((text, i) => ({
+    id: `builtin-${i}`,
+    text,
+  }));
+}
+
+/** 兼容旧版 string[] 与新版 { id, text }[] */
+function parseStoredPresets(raw: string): PromptPresetItem[] | null {
+  try {
+    const arr = JSON.parse(raw) as unknown;
+    if (!Array.isArray(arr) || arr.length === 0) return null;
+    if (arr.every((x): x is string => typeof x === "string")) {
+      const lines = arr
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .map((s) => s.slice(0, MAX_PRESET_LINE_CHARS))
+        .slice(0, MAX_PRESETS);
+      if (!lines.length) return null;
+      return lines.map((text) => ({ id: newPresetId(), text }));
+    }
+    const out: PromptPresetItem[] = [];
+    for (const entry of arr) {
+      if (typeof entry !== "object" || entry === null) continue;
+      const o = entry as Record<string, unknown>;
+      const textRaw = typeof o.text === "string" ? o.text.trim() : "";
+      const text = textRaw.slice(0, MAX_PRESET_LINE_CHARS);
+      if (!text) continue;
+      const id =
+        typeof o.id === "string" && o.id.length > 0 ? o.id : newPresetId();
+      out.push({ id, text });
+      if (out.length >= MAX_PRESETS) break;
+    }
+    return out.length ? out : null;
+  } catch {
+    return null;
+  }
+}
 
 type TenSlotCell = { file: File | null; previewUrl: string | null };
 
@@ -69,6 +123,64 @@ export default function Home() {
   );
   /** 下标 0–9 即合成第 1–10 位顺序，与 FormData append 顺序一致 */
   const [tenSlots, setTenSlots] = useState<TenSlotCell[]>(() => emptyTenSlots());
+
+  const [userExtraNotes, setUserExtraNotes] = useState("");
+  const skipNextNotesPersist = useRef(true);
+  const [promptPresets, setPromptPresets] =
+    useState<PromptPresetItem[]>(defaultPresetItems);
+  const skipFirstPresetPersist = useRef(true);
+  const [presetPanelOpen, setPresetPanelOpen] = useState(false);
+  const [newPresetDraft, setNewPresetDraft] = useState("");
+  const [draggingPresetIndex, setDraggingPresetIndex] = useState<number | null>(
+    null,
+  );
+  const [dragOverPresetIndex, setDragOverPresetIndex] = useState<number | null>(
+    null,
+  );
+
+  useEffect(() => {
+    try {
+      const t = localStorage.getItem(LS_LAST_USER_NOTES);
+      if (t != null) setUserExtraNotes(t);
+    } catch {
+      /* private mode */
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(LS_PROMPT_PRESETS);
+      if (!raw) return;
+      const next = parseStoredPresets(raw);
+      if (next?.length) setPromptPresets(next);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  useEffect(() => {
+    if (skipNextNotesPersist.current) {
+      skipNextNotesPersist.current = false;
+      return;
+    }
+    try {
+      localStorage.setItem(LS_LAST_USER_NOTES, userExtraNotes);
+    } catch {
+      /* ignore */
+    }
+  }, [userExtraNotes]);
+
+  useEffect(() => {
+    if (skipFirstPresetPersist.current) {
+      skipFirstPresetPersist.current = false;
+      return;
+    }
+    try {
+      localStorage.setItem(LS_PROMPT_PRESETS, JSON.stringify(promptPresets));
+    } catch {
+      /* ignore */
+    }
+  }, [promptPresets]);
 
   const dualKind = getDualUploadKind(mode);
   const tenMode = requiresTenSingleNails(mode);
@@ -347,6 +459,7 @@ export default function Home() {
           body.set("packaging3dReferenceImage", secondFile);
         }
       }
+      body.set("userExtraNotes", userExtraNotes);
       const res = await fetch("/api/extract-nails", {
         method: "POST",
         body,
@@ -375,7 +488,81 @@ export default function Home() {
     } finally {
       setLoading(false);
     }
-  }, [clearResults, dualKind, file, secondFile, mode, tenMode, tenSlots]);
+  }, [
+    clearResults,
+    dualKind,
+    file,
+    secondFile,
+    mode,
+    tenMode,
+    tenSlots,
+    userExtraNotes,
+  ]);
+
+  const clearUserNotes = useCallback(() => {
+    setUserExtraNotes("");
+    try {
+      localStorage.removeItem(LS_LAST_USER_NOTES);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const appendPresetToNotes = useCallback((line: string) => {
+    const t = line.trim().slice(0, MAX_PRESET_LINE_CHARS);
+    if (!t) return;
+    setUserExtraNotes((prev) => (prev.trim() ? `${prev.trim()}\n${t}` : t));
+  }, []);
+
+  const addPresetFromDraft = useCallback(() => {
+    const t = newPresetDraft.trim().slice(0, MAX_PRESET_LINE_CHARS);
+    if (!t) return;
+    setPromptPresets((prev) => {
+      if (prev.some((p) => p.text === t)) return prev;
+      if (prev.length >= MAX_PRESETS) return prev;
+      return [{ id: newPresetId(), text: t }, ...prev];
+    });
+    setNewPresetDraft("");
+  }, [newPresetDraft]);
+
+  const removePresetById = useCallback((id: string) => {
+    setPromptPresets((prev) => prev.filter((p) => p.id !== id));
+  }, []);
+
+  const movePreset = useCallback((index: number, delta: -1 | 1) => {
+    setPromptPresets((prev) => {
+      const j = index + delta;
+      if (j < 0 || j >= prev.length) return prev;
+      const next = [...prev];
+      const tmp = next[index]!;
+      next[index] = next[j]!;
+      next[j] = tmp;
+      return next;
+    });
+  }, []);
+
+  const reorderPresetByDrag = useCallback((from: number, to: number) => {
+    if (from === to) return;
+    setPromptPresets((prev) => {
+      if (
+        from < 0 ||
+        to < 0 ||
+        from >= prev.length ||
+        to >= prev.length
+      ) {
+        return prev;
+      }
+      const next = [...prev];
+      const [el] = next.splice(from, 1);
+      next.splice(to, 0, el!);
+      return next;
+    });
+  }, []);
+
+  const clearPresetDragUi = useCallback(() => {
+    setDraggingPresetIndex(null);
+    setDragOverPresetIndex(null);
+  }, []);
 
   const resultHeading =
     mode === "multi_angle"
@@ -725,6 +912,157 @@ export default function Home() {
         </section>
 
         <div className="flex flex-col items-stretch gap-4">
+          <div className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <label
+                htmlFor="user-extra-notes"
+                className="text-sm font-semibold text-zinc-800"
+              >
+                补充说明（可选）
+              </label>
+              <span className="text-xs text-zinc-500">
+                会附在发给模型的提示末尾；不满意时可写修改意见
+              </span>
+            </div>
+            <textarea
+              id="user-extra-notes"
+              value={userExtraNotes}
+              onChange={(e) => setUserExtraNotes(e.target.value)}
+              maxLength={2500}
+              rows={3}
+              placeholder="例如：指尖深色对齐真指尖、光再柔一点…"
+              className="mt-2 w-full resize-y rounded-lg border border-zinc-300 bg-zinc-50/80 px-3 py-2 text-sm text-zinc-900 outline-none ring-rose-500 focus:border-rose-500 focus:ring-2"
+            />
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={clearUserNotes}
+                className="inline-flex h-9 items-center justify-center rounded-lg border border-zinc-300 bg-white px-3 text-sm font-medium text-zinc-700 shadow-sm transition hover:border-red-300 hover:bg-red-50 hover:text-red-900"
+              >
+                清空
+              </button>
+              <button
+                type="button"
+                onClick={() => setPresetPanelOpen((o) => !o)}
+                className="inline-flex h-9 items-center justify-center rounded-lg border border-zinc-300 bg-white px-3 text-sm font-medium text-zinc-800 shadow-sm transition hover:border-rose-400 hover:bg-rose-50"
+              >
+                {presetPanelOpen ? "收起常用提示词" : "常用提示词"}
+              </button>
+              <span className="text-xs text-zinc-400">
+                {userExtraNotes.length}/2500
+              </span>
+            </div>
+            {presetPanelOpen ? (
+              <div className="mt-3 rounded-lg border border-zinc-200 bg-zinc-50/90 p-3">
+                <p className="mb-2 text-xs font-medium text-zinc-600">
+                  新添加的词条会出现在**第一行**。可**拖动左侧手柄**排序，或用「上移 / 下移」微调；顺序会保存。
+                </p>
+                <ul className="max-h-52 space-y-2 overflow-y-auto">
+                  {promptPresets.map((item, i) => (
+                    <li
+                      key={item.id}
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        e.dataTransfer.dropEffect = "move";
+                        setDragOverPresetIndex(i);
+                      }}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        const raw = e.dataTransfer.getData("text/x-preset-index");
+                        const from = Number.parseInt(raw, 10);
+                        if (Number.isNaN(from)) {
+                          clearPresetDragUi();
+                          return;
+                        }
+                        reorderPresetByDrag(from, i);
+                        clearPresetDragUi();
+                      }}
+                      className={`flex flex-wrap items-start gap-2 rounded-md border bg-white px-2 py-2 text-sm text-zinc-800 ${
+                        dragOverPresetIndex === i
+                          ? "border-rose-400 ring-2 ring-rose-200"
+                          : "border-zinc-200"
+                      } ${draggingPresetIndex === i ? "opacity-60" : ""}`}
+                    >
+                      <span
+                        draggable
+                        onDragStart={(e) => {
+                          e.dataTransfer.setData("text/x-preset-index", String(i));
+                          e.dataTransfer.effectAllowed = "move";
+                          setDraggingPresetIndex(i);
+                        }}
+                        onDragEnd={clearPresetDragUi}
+                        className="flex h-7 w-7 shrink-0 cursor-grab select-none items-center justify-center rounded border border-dashed border-zinc-300 bg-zinc-50 text-xs text-zinc-500 active:cursor-grabbing"
+                        title="拖动排序"
+                        aria-label="拖动排序"
+                      >
+                        ⋮⋮
+                      </span>
+                      <span
+                        className="flex h-7 w-7 shrink-0 items-center justify-center rounded bg-zinc-100 text-xs font-semibold text-zinc-500"
+                        title="顺序"
+                      >
+                        {i + 1}
+                      </span>
+                      <span className="min-w-0 flex-1 break-words">{item.text}</span>
+                      <div className="flex shrink-0 flex-wrap gap-1">
+                        <button
+                          type="button"
+                          disabled={i === 0}
+                          onClick={() => movePreset(i, -1)}
+                          className="rounded border border-zinc-200 px-2 py-0.5 text-xs text-zinc-700 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          上移
+                        </button>
+                        <button
+                          type="button"
+                          disabled={i >= promptPresets.length - 1}
+                          onClick={() => movePreset(i, 1)}
+                          className="rounded border border-zinc-200 px-2 py-0.5 text-xs text-zinc-700 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          下移
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => appendPresetToNotes(item.text)}
+                          className="rounded border border-rose-200 bg-rose-50 px-2 py-0.5 text-xs font-medium text-rose-900 hover:bg-rose-100"
+                        >
+                          使用
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => removePresetById(item.id)}
+                          className="rounded border border-zinc-200 px-2 py-0.5 text-xs text-zinc-600 hover:border-red-200 hover:bg-red-50 hover:text-red-800"
+                        >
+                          删除
+                        </button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+                <div className="mt-3 flex flex-wrap items-stretch gap-2">
+                  <input
+                    type="text"
+                    value={newPresetDraft}
+                    onChange={(e) => setNewPresetDraft(e.target.value)}
+                    maxLength={MAX_PRESET_LINE_CHARS}
+                    placeholder="新增强提示词…"
+                    className="min-w-[12rem] flex-1 rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm outline-none ring-rose-500 focus:border-rose-500 focus:ring-2"
+                  />
+                  <button
+                    type="button"
+                    onClick={addPresetFromDraft}
+                    disabled={
+                      !newPresetDraft.trim() || promptPresets.length >= MAX_PRESETS
+                    }
+                    className="inline-flex h-10 shrink-0 items-center justify-center rounded-lg bg-zinc-800 px-4 text-sm font-medium text-white transition hover:bg-zinc-900 disabled:cursor-not-allowed disabled:bg-zinc-300"
+                  >
+                    添加
+                  </button>
+                </div>
+              </div>
+            ) : null}
+          </div>
+
           <button
             type="button"
             disabled={!canSubmit}

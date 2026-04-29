@@ -16,6 +16,10 @@ import {
   exifUprightToPng,
   normalizeTenSingleNailForCollageCell,
 } from "@/lib/ten-singles-nail-preprocess";
+import {
+  appendUserRefinementToPrompt,
+  parseUserExtraNotes,
+} from "@/lib/extra-user-notes";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -203,6 +207,8 @@ export async function POST(request: Request) {
   }
 
   const mode: GenerationMode = parseGenerationMode(formData.get("mode"));
+  const userExtraNotes = parseUserExtraNotes(formData.get("userExtraNotes"));
+  const withNotes = (p: string) => appendUserRefinementToPrompt(p, userExtraNotes);
 
   const openai = new OpenAI({
     apiKey,
@@ -250,7 +256,7 @@ export async function POST(request: Request) {
         collageBuffer,
         "png",
         "image/png",
-        TEN_SINGLES_COLLAGE_REF_PROMPT,
+        withNotes(TEN_SINGLES_COLLAGE_REF_PROMPT),
       );
       if (!url) {
         return Response.json(
@@ -295,8 +301,9 @@ export async function POST(request: Request) {
       return Response.json({ error: sceneRes.error }, { status: 400 });
     }
 
-    const prompt =
-      mode === "model_tryon" ? MODEL_TRYON_PROMPT : ACCESSORY_TRYON_PROMPT;
+    const prompt = withNotes(
+      mode === "model_tryon" ? MODEL_TRYON_PROMPT : ACCESSORY_TRYON_PROMPT,
+    );
     const label =
       mode === "model_tryon" ? "试戴效果图" : "手模饰品试戴图";
 
@@ -355,7 +362,7 @@ export async function POST(request: Request) {
           poseRes.mime,
           nailsRes.buffer,
           nailsRes.mime,
-          prompt,
+          withNotes(prompt),
         );
         if (!url) {
           return Response.json(
@@ -413,7 +420,7 @@ export async function POST(request: Request) {
           flatRes.mime,
           refRes.buffer,
           refRes.mime,
-          prompt,
+          withNotes(prompt),
         );
         if (!url) {
           return Response.json(
@@ -468,7 +475,13 @@ export async function POST(request: Request) {
     }
 
     try {
-      const singleNailUrl = await editOnce(openai, buffer, ext, mime, job.prompt);
+      const singleNailUrl = await editOnce(
+        openai,
+        buffer,
+        ext,
+        mime,
+        withNotes(job.prompt),
+      );
       if (!singleNailUrl) {
         return Response.json(
           { error: "模型未返回单甲图片（既无 url 也无 b64_json）。" },
@@ -499,7 +512,7 @@ export async function POST(request: Request) {
 
   try {
     for (const { prompt, label } of jobs) {
-      const url = await editOnce(openai, buffer, ext, mime, prompt);
+      const url = await editOnce(openai, buffer, ext, mime, withNotes(prompt));
       if (!url) {
         return Response.json(
           {
