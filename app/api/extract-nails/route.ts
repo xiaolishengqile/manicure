@@ -327,6 +327,122 @@ export async function POST(request: Request) {
     }
   }
 
+  if (mode === "packaging_mockup") {
+    const nailsRes = await validateImageFile(
+      formData.get("image"),
+      "美甲产品图（字段 image）",
+    );
+    if (!nailsRes.ok) {
+      return Response.json({ error: nailsRes.error }, { status: 400 });
+    }
+    const poseRes = await validateImageFile(
+      formData.get("packagingPoseImage"),
+      "握姿参考图（字段 packagingPoseImage）",
+    );
+    if (!poseRes.ok) {
+      return Response.json({ error: poseRes.error }, { status: 400 });
+    }
+
+    const jobs = promptsForMode(mode);
+    const imageUrls: string[] = [];
+    const labels: string[] = [];
+
+    try {
+      for (const { prompt, label } of jobs) {
+        const url = await editDualSceneNails(
+          openai,
+          poseRes.buffer,
+          poseRes.mime,
+          nailsRes.buffer,
+          nailsRes.mime,
+          prompt,
+        );
+        if (!url) {
+          return Response.json(
+            {
+              error: `模型未返回第 ${imageUrls.length + 1} 张图片（既无 url 也无 b64_json）。`,
+              imageUrls,
+              labels,
+            },
+            { status: 502 },
+          );
+        }
+        imageUrls.push(url);
+        labels.push(label);
+      }
+      return Response.json({
+        imageUrls,
+        labels,
+        imageUrl: imageUrls[0],
+        mode,
+      });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "图像编辑接口调用失败";
+      return Response.json(
+        { error: message, imageUrls, labels },
+        { status: 502 },
+      );
+    }
+  }
+
+  if (mode === "flat_to_3d_packaging") {
+    const flatRes = await validateImageFile(
+      formData.get("image"),
+      "2D 包装平面稿（字段 image）",
+    );
+    if (!flatRes.ok) {
+      return Response.json({ error: flatRes.error }, { status: 400 });
+    }
+    const refRes = await validateImageFile(
+      formData.get("packaging3dReferenceImage"),
+      "3D/摄影参考图（字段 packaging3dReferenceImage）",
+    );
+    if (!refRes.ok) {
+      return Response.json({ error: refRes.error }, { status: 400 });
+    }
+
+    const jobs = promptsForMode(mode);
+    const imageUrls: string[] = [];
+    const labels: string[] = [];
+
+    try {
+      for (const { prompt, label } of jobs) {
+        const url = await editDualSceneNails(
+          openai,
+          flatRes.buffer,
+          flatRes.mime,
+          refRes.buffer,
+          refRes.mime,
+          prompt,
+        );
+        if (!url) {
+          return Response.json(
+            {
+              error: `模型未返回第 ${imageUrls.length + 1} 张图片（既无 url 也无 b64_json）。`,
+              imageUrls,
+              labels,
+            },
+            { status: 502 },
+          );
+        }
+        imageUrls.push(url);
+        labels.push(label);
+      }
+      return Response.json({
+        imageUrls,
+        labels,
+        imageUrl: imageUrls[0],
+        mode,
+      });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "图像编辑接口调用失败";
+      return Response.json(
+        { error: message, imageUrls, labels },
+        { status: 502 },
+      );
+    }
+  }
+
   const nailsOnly = await validateImageFile(formData.get("image"), "美甲图片（字段 image）");
   if (!nailsOnly.ok) {
     return Response.json({ error: nailsOnly.error }, { status: 400 });

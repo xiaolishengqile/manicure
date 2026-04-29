@@ -21,21 +21,27 @@ export const GENERATION_MODE_OPTIONS: {
   },
   {
     value: "complete_single_grid",
-    label: "白底栅格 · 单甲尺码合集",
+    label: "白底栅格 · 单甲补齐10支",
     description:
       "服务端先 EXIF + 整图转 180° 再送模型；模型只生成一枚真实高清单甲，随后服务端复制缩放为 2×5：拇最大、中指第二、食名约等大、小指最小，且每行甲根顶线水平。",
   },
   {
-    value: "multi_angle",
-    label: "多角度产品图（固定3张）",
+    value: "ten_singles_grid",
+    label: "十枚单甲 → 一张白底合集",
     description:
-      "基于同一张投喂图，依次生成正视主图、约45°斜视、俯视平铺三张电商白底产品照。凡白底上的 2×5/五列陈列，提示词与抠图/补全一致：指位大小级差 + 每行甲根同一条水平线。",
+      "每枚上传后先转 180° 甲尖朝下再拼图（格间缝已压紧；列宽级差略收紧以免参考图悬殊过大）。提示词强调同一套成品甲片的柔和指位级差 + 每行甲根顶线水平。拼参考图后送模型出白底栅格。",
+  },
+  {
+    value: "multi_angle",
+    label: "多角度上手图（固定2张）",
+    description:
+      "固定 **2 张**、每张**单手**真手棚拍质感（非插画）。① 正视上手主图（手背或手心朝上，指尖纹样对齐解剖游离缘）。② 约 45° 特写（同一只手、3–4 指 macro；小花等点缀须与背卡列位一致）。白底、光影一致，禁止双掌、反关节与蜡皮假肤。",
   },
   {
     value: "packaging_mockup",
     label: "包装盒 + 手握实拍",
     description:
-      "生成带透明开窗的白盒包装示意，盒内陈列甲片；同时生成手戴同款美甲并握持包装盒的画面（2张、不同构图）。开窗内背卡若为拇→小指横向排布，提示词要求与白底栅格一致：指位大小级差 + 每行甲根顶线水平。",
+      "需双图：① 产品图；② 握姿参考。开窗内背卡可与参考一致（含甲尖朝下排版）。**仅手上穿戴**：每枚须在立体上与**解剖游离缘**对齐（法式/豹纹在真指尖），勿把背卡像素的上下直接贴到皮肤；拇指仅用第1列款。",
   },
   {
     value: "flat_to_3d_packaging",
@@ -54,12 +60,6 @@ export const GENERATION_MODE_OPTIONS: {
     label: "指甲 × 饰品 · 手模试戴广告图",
     description:
       "上传美甲产品图与饰品参考图（如戒指）。生成一张广告级成片：由模型生成自然的手部，甲片与饰品同时戴在这只手上，适合社媒/电商主图。",
-  },
-  {
-    value: "ten_singles_grid",
-    label: "十枚单甲 → 一张白底合集",
-    description:
-      "每枚上传后先转 180° 甲尖朝下再拼图（格间缝已压紧；列宽级差略收紧以免参考图悬殊过大）。提示词强调同一套成品甲片的柔和指位级差 + 每行甲根顶线水平。拼参考图后送模型出白底栅格。",
   },
 ];
 
@@ -84,11 +84,19 @@ export function parseGenerationMode(raw: FormDataEntryValue | null): GenerationM
 }
 
 /** 需要第二张图时的语义：决定表单字段名与 UI 文案 */
+export type DualUploadKind =
+  | "model"
+  | "accessory"
+  | "packaging_pose"
+  | "packaging_3d_ref";
+
 export function getDualUploadKind(
   mode: GenerationMode,
-): null | "model" | "accessory" {
+): DualUploadKind | null {
   if (mode === "model_tryon") return "model";
   if (mode === "accessory_tryon") return "accessory";
+  if (mode === "packaging_mockup") return "packaging_pose";
+  if (mode === "flat_to_3d_packaging") return "packaging_3d_ref";
   return null;
 }
 
@@ -116,6 +124,17 @@ export const WHITE_BG_NAIL_GRID_TOP_BASELINE = `ROW-WISE TOP BASELINE (mandatory
 - **Forbidden:** aligning the **bottom free edges (tips)** to one line while the **tops** step up/down like stairs. Tips may end at different heights; only the **top / root** line must be shared.
 （每一行：所有美甲的甲根/上缘必须在同一条水平线上；禁止只对齐指尖、甲根呈阶梯。）`;
 
+/**
+ * 上手戴甲：产品图左→右 = 大拇指→小指；甲根朝指根、指尖朝游离缘（款式「顶部」朝上）；严禁整片戴反或整行左右对调。
+ * 用于模特试戴、饰品试戴、多角度上手、包装手握等英文提示。
+ */
+export const NAIL_ON_HAND_SHEET_TO_FINGER_ORDER_EN = `PRODUCT SHEET → REAL HAND — ORDER + “TOP UP” (mandatory; treat violation as failure):
+- **Left → right = thumb → pinky:** on each **horizontal row** of the product reference, the **leftmost** nail maps to the **thumb**, then **index, middle, ring, pinky** toward the **right** (standard retail sheet). **Never** mirror the whole row onto the hand (e.g. do **not** assign the leftmost design to the pinky or reverse column order).
+- **Two rows (10 nails):** keep **top row then bottom row** exactly as printed — **same slot → same finger role** as your pipeline’s 2×5 convention (columns 1–5 = thumb…pinky per row); **no** shuffling designs between fingers or between rows.
+- **Wear orientation — nail “top” toward the knuckle:** each press-on is mounted so the **cuticle / root / proximal edge (甲根, the visual “top” of the nail art)** points toward the **finger base / knuckle**, and the **free edge (指尖)** points toward the **fingertip** — matching how that nail sits on the **reference sheet** (tips-down / roots-up on the sheet must become **roots toward hand base, tips toward finger end** on the real finger). **Forbidden:** **180°** mounting that flips the whole art upside-down vs the reference, or swapping which end is “up” on the finger.
+- **Strictly follow the reference image** for every slot: the art on each real finger must be **only** the art from that **same sheet cell** — no substitutions.
+（中文小结：产品图每行从左到右依次大拇指→小指；两行顺序与背卡一致不乱序；戴甲时甲根/款式上缘朝指根、指尖朝游离缘，勿正反颠倒。）`;
+
 export const MODEL_TRYON_PROMPT = `You receive TWO input images in this order:
 1) FIRST image: the MODEL photograph — a person (hands visible) with natural nails, in a specific pose, lighting, skin tone, clothing, and background.
 2) SECOND image: the NAIL PRODUCT reference — press-on / stick-on nails shown flat, on a card, or as a product shot, displaying the exact nail art (colors, patterns, 3D chrome, decals, shape) to apply.
@@ -125,6 +144,8 @@ TASK — photorealistic virtual try-on (image editing):
 - Preserve the model’s identity, face, body, skin texture, pose, jewelry, clothing, environment, and global lighting. Do NOT restyle the whole photo into a different scene.
 - If multiple nail designs exist in the product reference, map them to fingers in a coherent order (e.g. thumb→pinky) consistent with the product layout.
 - Edges must look naturally attached: no floating nails, no harsh paste lines, no duplicated hands.
+
+${NAIL_ON_HAND_SHEET_TO_FINGER_ORDER_EN}
 
 Output a single full-frame photorealistic image with the same composition and crop as the FIRST (model) image.`;
 
@@ -139,6 +160,8 @@ TASK — premium social / e-commerce “matching ad” (virtual try-on with a GE
 - HERO FRAMING: this is NOT a flat-lay of loose nails in a tray. The hero is a believable manicured hand wearing BOTH the nails and the jewelry together, suitable for Instagram / Taobao / Xiaohongshu hero creative.
 - Lighting & set: soft beauty / commercial studio light; clean neutral or pale backdrop; optional subtle sleeve cuff (cream knit, etc.) is fine; avoid busy clutter.
 - Skin must look natural; no duplicated ghost fingers; no extra random jewelry not present in the first reference.
+
+${NAIL_ON_HAND_SHEET_TO_FINGER_ORDER_EN}
 
 Output a single square high-resolution photograph.`;
 
@@ -240,148 +263,211 @@ FINAL CHECK:
 
 Return **one** square, catalog-ready image.`;
 
+/** 多角度上手：无握姿参考图，由模型生成手；每张必须单手、解剖与光影符合现实。 */
+const MULTI_ANGLE_HAND_ON_BODY_RULES = `${NAIL_ON_HAND_SHEET_TO_FINGER_ORDER_EN}
+
+COMPOSITION — **EXACTLY ONE HAND PER OUTPUT IMAGE** (hard rule):
+- The square contains **one** adult human hand only — **either** left **or** right, internally consistent. **Forbidden:** two hands, mirrored twin hands, overlapping second palms, “helping” second person, or any read as **two wearers**.
+- Forearm/wrist may appear only as a **natural continuation** of **that same** hand; **no** extra wrist that implies another body.
+- Use **plain white** for negative space — **never** fill the frame with a duplicate hand for symmetry.
+
+PHOTOREAL — **must read as a retouched DSLR / mirrorless catalog still**, not CG illustration or beauty-filter plastic:
+- Natural skin: subsurface warmth, visible fine creases at knuckles, **no** wax-doll smoothing, **no** poreless airbrush.
+- Nails: believable press-on thickness, sharp gel/chrome speculars, accurate C-curve in perspective; **no** sticker-flat paste, **no** neon oversaturation beyond the product reference.
+
+HAND + WEAR (mandatory for **both** shots in this mode):
+- The nails must be **worn on that single real human hand** — **never** output a loose tray, backing card, or nails floating on white without skin.
+- **Exactly five digits** on that hand (one thumb + four fingers); **no** sixth finger, no duplicated thumb, no fused or “branching” digits. Natural knuckle hierarchy; thumb opposes the other four in a **physically possible** way.
+- **Pose & joints:** only **biologically plausible** joint ranges — **no** impossible twists, **no** thumb sprouting from the wrong edge of the palm, **no** fingers bent backward beyond comfort. If the crop hides a digit, **keep it hidden** — **do not** invent partial fingers in gaps.
+- **Lighting:** one coherent studio key direction on skin and nails (same hand, same session); **avoid** contradictory shadows that imply two light sources on two different bodies.
+- Map press-on art from the product reference onto fingers in **thumb → index → middle → ring → pinky** order consistent with how the reference sheet/card orders designs **left to right** in each row (same mapping discipline as white-grid packshots — do not swap distinctive patterns to wrong fingers):
+${WHITE_BG_NAIL_GRID_FINGER_LADDER}
+- Nails sit on nail beds with believable glue-line / cuticle transition; **no** floating plates.
+- Skin: photoreal micro-texture (pores, fine creases); **avoid** waxy plastic skin.
+- Backdrop: pure **#FFFFFF** seamless studio; soft even beauty light; optional subtle contact shadow only.`;
+
+const MULTI_ANGLE_ARTWORK_AND_ORIENTATION_BLOCK = `ART FIDELITY + ORIENTATION (every shot — failure if violated):
+- **Per-slot copy only:** each visible fingernail must show **exactly** the artwork from the **matching slot** on the product reference — **never** borrow another slot’s motif, merge patterns, or add “prettier” flowers/decals that are **not** on that reference nail.
+- **Accent placement by column (e.g. flowers):** copy **exactly** which columns carry an extra motif on the **product sheet** — if flowers appear **only** on **columns 2 and 4** (index + ring) in each row, then **thumb (1), middle (3), and pinky (5) must have zero flowers** — only leopard/base as on those reference nails. **Forbidden:** flowers on thumb, middle, or pinky; **forbidden:** duplicating the flowered design onto the wrong column.
+- **Do not change how the art looks:** same colors, shapes, micro-lines, and accent placement as the reference nail for that finger — **zero** creative redesign; only natural **lighting + perspective wrap** on the curved nail.
+- **Printed front face outward:** the **designed top surface** faces outward on the nail plate the camera sees; **never** use the **matte inner / underside** as the visible art side.
+- **Cuticle → free edge (甲根→指尖) — anatomy wins over flat-card bitmap:** map art so **proximal/root** of the motif sits toward the **nail fold / finger base** and **distal French / tip pattern** sits toward the **physical free edge at the fingertip** — same logic as on the reference nail plate. **No 180°** “paste” that clusters tip art near the cuticle.
+- **Palm-up / 手心朝上 / palmar-facing camera:** when the **palm faces upward** or toward the lens, **do not** keep the flat product-card orientation blindly — **re-express** the design on each nail so the **distal decorative band (French, leopard tip)** still lies at the **anatomical fingertip**, **not** flipped so the “tip” reads next to the knuckle. The nail plate is a **curved surface**; rotate the art **in 3D** as needed so **tip art = fingertip side, root art = cuticle side** regardless of palm vs dorsal view.
+- **No wrong mirroring:** asymmetric prints must keep **correct chirality** vs the reference after 3D wrap — **forbidden:** accidental **horizontal mirror** unless physically required (prefer fidelity).`;
+
 const ANGLE_PROMPTS: { prompt: string; label: string }[] = [
   {
-    label: "图1 · 正视主图",
-    prompt: `Using ONLY the nail designs from the reference image, create a premium e-commerce HERO product photograph.
+    label: "图1 · 正视上手主图",
+    prompt: `Using ONLY the nail artwork from the reference image (tray, card, or product photo), create shot **1 of 2**: a **photoreal** premium e-commerce **on-hand** hero — must look like a real photo, not rendered illustration.
 
-Requirements:
-- Isolate the press-on nail set on a pure solid white background (#FFFFFF).
-- Soft, even studio lighting; minimal gentle contact shadow acceptable.
-- Straight-on front / camera-facing symmetrical view suitable for a product listing main image.
-- If the reference implies a full set, show up to 10 nails in a clean 2 rows × 5 columns grid; otherwise show every distinct nail from the reference in a tidy layout.
-- LOCK order: preserve the same left-to-right, top-to-bottom sequence of designs as on the reference card/tray — do not permute columns so distinctive patterns jump to wrong slots.
-- **Tight modular grid:** equal **minimal** horizontal gutters (as small as still readable), equal **minimal** vertical gutter between rows, slim outer margins — ten nails should feel **packed** on white, not floating in lots of empty space.
-- NO tilt: every nail axis-aligned vertical (0° rotation), centered in cell.
+${MULTI_ANGLE_HAND_ON_BODY_RULES}
 
-WHITE-GRID PRODUCT RULES whenever nails are shown as a **2×5** (or clear five-across retail row) on white — **mandatory**:
-${WHITE_BG_NAIL_GRID_FINGER_LADDER}
+${MULTI_ANGLE_ARTWORK_AND_ORIENTATION_BLOCK}
 
-${WHITE_BG_NAIL_GRID_TOP_BASELINE}
-
-Preserve each nail’s artwork, colors, and 3D/metallic details with high fidelity (input_fidelity intent).
+SHOT 1 — **front hero — dorsal OR palm-up (正视可手背或手心朝上):**
+- **Single** elegant adult **hand** with the **full set** on that hand visible. Camera may be **straight-on to the dorsal nail side** **OR** a **palm-up / palm-toward** beauty pose (common for “正视” catalog). **If palm faces up or toward camera:** follow **PALM-UP** rule in the block above — **tip/French art must sit at the real fingertip**, never inverted toward the cuticle.
+- Every visible nail must reproduce the reference art with **high fidelity** (color, gradients, chrome, glitter, 3D blobs/charms) with **correct per-column accents** (flowers only where the sheet has them — typically **index + ring only** if columns 2 & 4 only).
+- Pose must stay **anatomically plausible**. This frame must read as a **different camera relationship** than shot 2 (more frontal / hero), not a mild crop of the same angle.
 
 Single square frame, catalog-ready.`,
   },
   {
-    label: "图2 · 约45°斜视",
-    prompt: `Using ONLY the nail designs from the reference image, create a second PRODUCT SHOT from a different angle.
+    label: "图2 · 约45°上手特写",
+    prompt: `Using ONLY the nail artwork from the reference image, create shot **2 of 2**: a **photoreal** **three-quarter macro** — clearly **not** the same camera angle as shot 1; must still feel like the **same real hand** and session.
 
-Requirements:
-- Same pure white seamless background (#FFFFFF).
-- Approximately 45° three-quarter perspective so depth and edge curvature read clearly—like Fig.2 style catalog angles.
-- Same nail art fidelity as the reference; coherent lighting; professional catalog look.
-- Layout: still product-focused (not worn on a person). Arrange nails so all remain readable.
-- If the composition still shows a **readable left-to-right five-across / 2×5** product layout on white, apply the **same** WHITE-GRID rules as the front hero (finger-size ladder + per-row cuticle top baseline); do not “pretty re-pack” into wrong sizes.
+${MULTI_ANGLE_HAND_ON_BODY_RULES}
 
-WHITE-GRID PRODUCT RULES (whenever a modular multi-nail layout on white is visible):
-${WHITE_BG_NAIL_GRID_FINGER_LADDER}
+${MULTI_ANGLE_ARTWORK_AND_ORIENTATION_BLOCK}
 
-${WHITE_BG_NAIL_GRID_TOP_BASELINE}
-
-Single square frame.`,
-  },
-  {
-    label: "图3 · 俯视平铺",
-    prompt: `Using ONLY the nail designs from the reference image, create a TOP-DOWN flat lay product photograph.
-
-Requirements:
-- Pure white background (#FFFFFF); optional very soft, tight drop shadow for separation only.
-- Camera looking straight down; nails in a strict 2×5 modular grid if a 10-piece set is implied.
-- LOCK the sequence of designs to match the reference layout (no column swaps). **Minimal** gutters between nails and rows; each nail perfectly vertical (no rotation).
-
-WHITE-GRID PRODUCT RULES (**mandatory** for this top-down 2×5 packshot):
-${WHITE_BG_NAIL_GRID_FINGER_LADDER}
-
-${WHITE_BG_NAIL_GRID_TOP_BASELINE}
-
-- Macro clarity on textures.
+SHOT 2 — **~45° three-quarter macro (accent discipline — e.g. flowers on index + ring only):**
+- Still **one hand only** — macro crop must be **the same anatomical hand** (3–4 adjacent fingers of one palm), **not** a collage of fingers from different hands.
+- **Camera:** about **35–50° off the nail plane** so **depth, C-curve, and 3D relief** read clearly; **dorsal nail emphasis** preferred so column-to-finger mapping is unambiguous — **must** feel more “oblique / macro” than shot 1.
+- **Crop tighter** on **3–4 fingers** — beauty **macro** framing; knuckles and skin in shallow depth-of-field welcome.
+- **Column check:** if the reference has small flowers **only** on **sheet columns 2 and 4**, only **index and ring** show flowers; **thumb, middle, pinky = base + leopard tip only** — **re-verify** before finalizing; **no** flowers on thumb.
+- Same nail designs as reference; **do not** fall back to a flat nail sheet on white.
 
 Single square frame.`,
   },
 ];
+
+/**
+ * 包装手握图里模型常画错手（六指、拇指错位、手指从盒缘「长出来」、蜡皮）。
+ * 两队 PACKAGING 提示词共用，强调可数解剖与宁可少露手指不可瞎补。
+ */
+const PACKAGING_HAND_ANATOMY_BLOCK = `HAND & GRIP — ANATOMICAL REALISM (hard rule; treat like QA before ship):
+- Show **exactly ONE** adult human hand (**either** left **or** right, pick one coherent view) with **exactly five (5) digits total**: **one thumb + four fingers**. **No sixth finger**, no mirrored duplicate thumb, no fused or split digits, no “finger” that is only a floating tip with no palm attachment.
+- **Single continuous palm + wrist**: every visible digit must **join** believably from that palm at natural knuckle angles for **retail grip on a slim rectangular carton** (fingers along one narrow side or corner bundle; thumb stabilizes the **opposite** face or forward edge — physically possible opposition).
+- **Occlusion beats invention:** if the box, crop, or perspective hides part of the hand, keep it **hidden** — **never** paint guessed finger stubs in white gaps between box and backdrop.
+- Press-on nails on the **live hand** must sit on real nail beds; **no** floating nail plates beside fingers.
+- Skin: believable micro-detail (pores, faint creases, subtle subsurface warmth); **avoid** waxy, porcelain, or airbrushed-doll plastic skin.
+- If a pose risks ambiguous anatomy, **simplify**: fewer fingers in frame, slightly looser grip, or a modestly wider crop — **never** add anatomy to “fill” the composition.`;
+
+/** 双图包装：FIRST=握姿锚点，SECOND=款式产品图。与 API `editDualSceneNails` 传入顺序一致。 */
+const PACKAGING_DUAL_INPUT_PREAMBLE = `You receive TWO images supplied to the editor in this order:
+1) **FIRST — POSE / ANATOMY ANCHOR:** A real photograph of a hand holding a retail box (or similar grip). **Treat this frame as authoritative for:** hand identity (left vs right), **exact digit count and skeleton**, finger lengths, joint angles, thumb opposition, wrist entry, **scale and 3D contact** between fingers and cardboard, camera viewpoint, crop, and **skin lighting direction**. Existing nail polish and/or box print in this photo may be **wrong or placeholder** — you will replace them.
+2) **SECOND — NAIL PRODUCT SOURCE OF TRUTH:** Press-on nails on a card, tray, flat-lay, or white-grid product shot showing the **exact** artwork (colors, patterns, chrome, decals, tiny charms) that must appear **both** on the live hand’s nails **and** on the nails visible through the packaging window.
+
+HARD RULE — **in-place restyle, not a new hand:**
+- **Preserve the FIRST image’s hand geometry and pose**; do **not** redraw a different hand, do **not** change finger count, do **not** “improve” the grip into a new pose.
+- Replace only: (a) nail art on visible fingernails → faithful copies from the SECOND reference; (b) box faces / window contents / backing card nails → premium white **windowed** press-on carton with art from the SECOND reference inside the window.
+- If the FIRST box shape differs from an ideal retail box, you may **cosmetically** retexture to a tall white windowed carton **while keeping the same 3D pose, occlusions, and finger–box contact lines**.`;
+
+/** 防止模型「美化」或替换花朵/法式边等微纹样 — 与产品图逐枚对齐 */
+const PACKAGING_ARTWORK_LOCK_BLOCK = `ARTWORK LOCK — SECOND IMAGE ONLY (non-negotiable; treat mismatch as failure):
+- The **SECOND** image is **not inspiration** — it is the **sole graphic truth** for **every** nail’s printed design (base color, gradients, animal/French tips, **flowers**, leaves, logos, dots, lines, foil layout). **Zero** creative reinterpretation.
+- **Inside the window** and **on the live hand**, each nail’s art must match the **same slot** in thumb→pinky reading order as on the product reference — **do not** swap which pattern sits on which finger.
+- **Forbidden:** redrawing flowers or decals into a “nicer” variant; changing petal **shape or count** (e.g. soft rounded white petals → sharp / spiky / splatter petals); shifting hue or saturation to “pop” more; substituting stock floral graphics; simplifying small icons; inventing details not on the reference.
+- **Allowed:** only **perspective warp** and **lighting highlights** that naturally follow the curved nail surface — the **2D motif layout** (shapes, edges, negative space, micro-lines) must remain **recognizably identical** to that nail in the SECOND image.
+- 3D gel / chrome blobs: keep **the same silhouette and placement** as on the reference nails — do **not** replace with a different drip pattern.
+- **Hand vs window — one source:** art on **each visible live fingernail** must match the **same-slot** nail in the **window** and the **SECOND** reference — **identical** motif, not a looser “hand version.” **Forbidden:** detailed miniatures in the window but simplified or wrong flowers on the fingers.`;
+
+const PACKAGING_WINDOW_AND_SLOT_RULES = `WINDOW BACKING — GRID + PER-SLOT DECOR (failure if violated):
+- If the **SECOND** reference shows **ten** retail nails, the backing card **inside the window** must show **exactly two horizontal rows × five columns (2×5)** — same topology as a standard sheet: **five nails per row**, **two rows**, aligned columns. **Forbidden:** inventing a **third row**, 4+4+3 stagger, diagonal collage, curved fan layout, or any count/layout that is **not** a clean 2×5 when the source is a full set.
+- Preserve **left-to-right, then top-to-bottom** design order **exactly** as on the SECOND reference (no column swaps, no shuffling art between slots).
+
+ACCENTS (flowers, charms, icons) — **COPY REFERENCE COLUMNS ONLY:**
+- Any small accent must appear **only** on the **same column index (1–5 = thumb→pinky)** as on the SECOND reference for that row. Example: if flowers appear **only on columns 2 and 4** in the reference rows, then **columns 1, 3, and 5 have zero flowers** — **thumb (column 1) must not gain a flower** if the reference thumb nail has none. **Forbidden:** “balancing” flowers on thumb/middle/pinky, adding motifs to empty columns, or duplicating a flowered design onto the wrong finger.
+- The **live hand** must use the **same slot→finger mapping** as the window (thumb wears column-1 art from the reference, index column 2, etc.) — **no** extra decorations on fingers that are plain in the reference.`;
+
+const PACKAGING_ORIENT_AND_NO_MIX_BLOCK = `FINGERS — STRICT SLOT + ORIENTATION (failure if violated):
+- **No pattern mixing:** each visible fingernail may show **only** the artwork from the **same numbered slot** on the SECOND reference (same as the matching window cell). **Forbidden:** borrowing another finger’s motif, blending two slots’ designs, or inventing a hand-only graphic that does not exist on that reference nail.
+- **Wear side / front vs back:** the **printed front face** of every press-on faces **outward** toward the viewer on the back-of-hand view; **never** treat the **matte inner / underside** as the display face. Do **not** paste a nail so the **design plane is reversed** vs how it appears on the product sheet for that slot.
+- **Proximal–distal on LIVE SKIN ONLY (甲根→指尖):** on **each visible fingernail**, **cuticle / root zone** of the art sits toward the **finger base** and **French / leopard / distal band** toward the **anatomical free edge** — **regardless of** whether that slot is drawn **tips-down inside the window on paper**. The window may match the flat sheet; **worn nails must not** copy the bitmap’s vertical axis onto skin (that causes **180° inverted** wear). **Forbidden:** treating the cell’s “bottom” in the product image as the finger’s “bottom” toward the knuckle.
+- **Left–right readability:** asymmetric motifs (flowers, animal streaks, tiny text) must keep the **same chirality** as the reference for that slot after natural 3D wrap — **no** accidental **horizontal mirror** that reverses lettering or asymmetric blooms unless the camera angle physically requires it (prefer preserving motif direction over “pretty” symmetry).`;
+
+const PACKAGING_GRIP_FINGER_SLOT_BLOCK = `VISIBLE GRIP / HOLDING FINGERS — SAME SLOT DISCIPLINE (critical):
+- Fingers that **grip the carton** (often a **large, close-up thumb**) still follow **strict column mapping:** the **anatomical thumb** wears **only** the **column-1 (thumb)** nail from the product reference — **never** column-2 or column-4 **floral** art just because the thumb is prominent, nearest the camera, or “needs decoration.”
+- **If the reference thumb (column 1) has no flower**, the **live thumb must have no flower** — same for middle/pinky vs columns 3 & 5.
+- **Forbidden:** “hero” treatment that copies the prettiest design from another column onto the thumb; **forbidden:** confusing which sheet column maps to the thumb because of pose.
+（中文：握盒的拇指再大、再抢镜，也只能用背卡**第 1 列（大拇指）**那一枚的图案；禁止把食指/无名指带花款贴到拇指上。）`;
+
+const PACKAGING_THUMB_AND_TIPS_DOWN_SHEET_BLOCK = `TIPS-DOWN ON CARD → 3D ON HAND — FIX INVERTED **WORN** NAILS ONLY (failure if violated):
+- **Scope:** The **nails inside the window** may stay **tips-down on the backing card** exactly like the SECOND reference — that is **correct** and **not** what to “fix.” The failure mode is **only** the **live hand:** worn press-ons must **not** inherit the flat cell’s vertical axis.
+- The SECOND reference usually shows each cell with **free edge / French–leopard band toward the BOTTOM of the cell** (paper layout). On **skin**, **re-orient each press-on in 3D** so the **same distal band** caps the **anatomical free edge** — **never** paste so the “tip” graphic sits at the **proximal fold** while nude points to the fingertip (**180° inverted** wear).
+- **Thumb (highest risk):** even when the thumb points **up or sideways**, **column-1** art must place **distal tip design on the true thumb free margin** (away from palm / toward air or carton), **not** flipped toward the thenar web. **Do not** rotate window nails to “match” the hand — correct **hand mapping only**.
+（中文：开窗里背卡可与参考一致（含甲尖朝下）；**只纠正手上穿戴**：立体对齐解剖游离缘，拇指最易整片反贴。勿为迁就手而去改窗内排版。）`;
 
 const PACKAGING_PROMPTS: { prompt: string; label: string }[] = [
   {
-    label: "图4 · 开窗盒 + 手戴同款握持",
-    prompt: `Create a high-end commercial mockup inspired by boutique press-on retail packaging.
+    label: "包装手握图",
+    prompt: `${PACKAGING_DUAL_INPUT_PREAMBLE}
 
-Use the EXACT nail art from the reference image for both (a) nails displayed inside the packaging window and (b) nails worn on the model hand.
+${NAIL_ON_HAND_SHEET_TO_FINGER_ORDER_EN}
 
-Scene:
-- A fair-skinned hand holds a tall white rectangular box with a large clear plastic window.
-- Inside the window, show the press-on nails mounted on a subtle pearlescent / iridescent backing card, arranged in 2 vertical columns × 5 rows (10 nails total) when applicable. Wherever nails read as **standard retail thumb→pinky** order (left→right within each **horizontal** row on the card), apply these **same** rules as any white-background 2×5 packshot:
+${PACKAGING_ARTWORK_LOCK_BLOCK}
+
+${PACKAGING_WINDOW_AND_SLOT_RULES}
+
+${PACKAGING_ORIENT_AND_NO_MIX_BLOCK}
+
+${PACKAGING_GRIP_FINGER_SLOT_BLOCK}
+
+${PACKAGING_THUMB_AND_TIPS_DOWN_SHEET_BLOCK}
+
+TASK — single premium packaging hero:
+- Output matches the **FIRST** image’s composition and crop; **pure white #FFFFFF** seamless studio backdrop (replace busy backgrounds from the pose photo if needed, without changing hand or box silhouette).
+- **Window display:** press-ons on a subtle pearlescent / iridescent backing card inside the clear window; **strict 2×5** when the SECOND reference is a full ten-nail sheet (see rules above). Wherever nails read as **thumb→pinky** left-to-right within each **horizontal** row on the card:
 ${WHITE_BG_NAIL_GRID_FINGER_LADDER}
 
 ${WHITE_BG_NAIL_GRID_TOP_BASELINE}
-- Top of box: small black sans-serif caps text band reading: × HANDMADE PRESS-ON NAILS ×
-- Bottom area: bold stacked placeholder title text "YOUR COLLECTION" plus a tiny playful line-art cat mascot silhouette (generic, not copying any trademark) optional.
-- The same hand wears the matching press-on nails on visible fingers; thumb prominent near lower-right of window, other fingers wrap the left side—cohesive with reference art.
-- Pure white studio background; bright, even lighting; crisp packaging print.
+- **Box top:** small black sans-serif caps band: × HANDMADE PRESS-ON NAILS ×
+- **Box bottom:** bold stacked placeholder title "YOUR COLLECTION" plus optional tiny generic line-art cat mascot (not any real trademark).
+- The **same preserved hand** wears the matching press-ons from the SECOND reference on every visible nail bed.
 
-Single photorealistic square image.`,
-  },
-  {
-    label: "图5 · 另一构图包装手握",
-    prompt: `Alternate packaging hero shot using the SAME nail designs as the reference.
+${PACKAGING_HAND_ANATOMY_BLOCK}
 
-Requirements:
-- White press-on nail box with clear window, same nail art inside arranged neatly (2×5 if full set). On the backing card, whenever nails read as **thumb→pinky** left-to-right within each horizontal row:
-${WHITE_BG_NAIL_GRID_FINGER_LADDER}
-
-${WHITE_BG_NAIL_GRID_TOP_BASELINE}
-- Different hand pose / camera crop / slight angle change from a typical first packaging shot—still professional catalog quality.
-- Hand wears identical nail art to the set in the box.
-- Clean white #FFFFFF backdrop; bright even lighting; premium retail vibe.
-
-Single photorealistic square image.`,
+Return **one** photorealistic square image only.`,
   },
 ];
 
-/** 单张 2D 包装平面稿 → 多张稳定 3D 产品渲染（依次调用） */
+/** 双图 2D 平面稿 + 3D/摄影参考 → 多张稳定 3D 渲染（与 API 中 image 顺序一致：FIRST=平面稿，SECOND=参考图） */
+const FLAT_TO_3D_DUAL_PREFIX = `You receive TWO input images in this fixed order:
+1) **FIRST — FLAT GRAPHIC SOURCE OF TRUTH:** 2D packaging artwork / print proof / die-line sheet (may show front, back, or unfolded panels). **All** logos, wordmarks, color blocks, barcodes, micro-copy, and icons that appear on any 3D carton, pouch, or label in your output must be taken **only** from this first image — faithful color and legible typography; no invented alternate brands.
+2) **SECOND — PHOTO / 3D STYLE REFERENCE:** a packshot, lifestyle crop, competitor hero, or render mood reference. Use it **only** for hints about **camera angle, key vs fill light, specular strength, backdrop tone, surface reflectivity, depth cues, and spacing** between multiple units when relevant. **Forbidden:** copying foreign trademarks, unrelated product categories, human models, or **graphic layouts printed on packaging** from the second image — printed faces must still match the FIRST image.
+
+`;
+
 const FLAT_TO_3D_PACKAGING_PROMPTS: { prompt: string; label: string }[] = [
   {
     label: "① 3D 纸盒主视图",
-    prompt: `The input image is a FLAT 2D packaging artwork / print proof (may show front, back, or unfolded panels).
-
-TASK — photorealistic 3D product visualization:
-- Reconstruct a PHYSICAL folding carton / retail box in accurate 3D perspective (slight three-quarter hero angle).
-- Map ALL visible graphics from the 2D reference onto the box faces with correct UV-style alignment: logos, product name, legal copy, icons, barcodes if present, and EXACT brand colors (match hex perception from the flat art). Typography must stay legible and proportionally consistent—no invented alternate fonts.
-- Realistic cardboard thickness, clean die-cut edges, subtle print texture, soft studio lighting on a pure white or very light neutral seamless background.
-- Do not add unrelated branding; do not distort the artwork into unreadable warps.
+    prompt: `${FLAT_TO_3D_DUAL_PREFIX}TASK — photorealistic 3D product visualization:
+- Reconstruct a PHYSICAL folding carton / retail box in accurate 3D perspective (slight three-quarter hero angle); you may subtly align camera and light mood with the SECOND reference when it helps believability.
+- Map ALL visible graphics from the **FIRST** image onto the box faces with correct UV-style alignment: logos, product name, legal copy, icons, barcodes if present, and EXACT brand colors. Typography must stay legible and proportionally consistent—no invented alternate fonts.
+- Realistic cardboard thickness, clean die-cut edges, subtle print texture; backdrop may follow the SECOND reference’s brightness (prefer pure white #FFFFFF or very light seamless if the reference is busy—never import clutter or props from image 2).
+- Do not add unrelated branding; do not distort the FIRST image’s artwork into unreadable warps.
 
 Single square catalog-quality render.`,
   },
   {
     label: "② 3D 独立小袋 / 箔袋",
-    prompt: `Using the SAME flat 2D packaging reference as the only art source, generate a photorealistic 3D render of the PRIMARY small flexible pouch / foil sachet / single-use packet implied by that design language.
+    prompt: `${FLAT_TO_3D_DUAL_PREFIX}TASK — photorealistic 3D render of the PRIMARY small flexible pouch / foil sachet / single-use packet implied by the **FIRST** flat sheet’s design language.
 
 Requirements:
-- If the flat art clearly describes a pouch shape, follow it; otherwise infer a plausible pouch consistent with the colors and typography on the 2D sheet.
-- Front face artwork must match the reference (logo, titles, color blocks) with correct perspective and specular highlights on foil or matte film.
-- Floating or standing product shot on clean white #FFFFFF backdrop; crisp edges; stable, repeatable look.
+- If the flat art clearly describes a pouch shape, follow it; otherwise infer a plausible pouch consistent with the colors and typography on the FIRST sheet.
+- Front face artwork must match the FIRST reference (logo, titles, color blocks) with correct perspective; specular highlights on foil or matte film may echo the SECOND reference’s lighting character.
+- Floating or standing product shot on clean white #FFFFFF backdrop unless the SECOND reference strongly suggests a minimal neutral seamless; crisp edges; stable, repeatable look.
 
 Single square image.`,
   },
   {
     label: "③ 3D 另一视角 / 组合",
-    prompt: `From the same flat 2D packaging manuscript reference, produce a SECOND stable 3D packaging view that feels like a sibling shot to a hero pack render.
+    prompt: `${FLAT_TO_3D_DUAL_PREFIX}TASK — produce a SECOND stable 3D packaging view that feels like a sibling shot to a hero pack render, still driven by the **FIRST** flat manuscript.
 
 Choose ONE coherent variant:
-- alternate camera angle (lower three-quarter OR top-down), OR
+- alternate camera angle (lower three-quarter OR top-down), optionally informed by the SECOND reference’s framing, OR
 - two identical units slightly staggered showing depth, OR
 - box + pouch together in one frame if both appear in the flat layout.
 
-Keep fonts, Pantone-like colors, and logo lockups faithful to the 2D source. White seamless studio background; professional packshot lighting.
+Keep fonts, Pantone-like colors, and logo lockups faithful to the **FIRST** source. Professional packshot lighting; white or very light seamless studio background.
 
 Single square image.`,
   },
   {
     label: "④ 场景陈列 · 多包装",
-    prompt: `Using the SAME 2D packaging artwork as brand reference, create a premium LIFESTYLE packshot: several finished 3D units (pouches and/or small boxes) naturally scattered on a bright white reflective surface—like an Amazon-ready group product photo.
+    prompt: `${FLAT_TO_3D_DUAL_PREFIX}TASK — premium LIFESTYLE packshot: several finished 3D units (pouches and/or small boxes) naturally scattered on a bright white or lightly reflective surface—like an Amazon-ready group product photo. **Staging density and shadow softness** may take cues from the SECOND reference when helpful.
 
 Rules:
-- Every visible 3D item must carry the SAME graphics/color system as the flat reference (no random redesign).
+- Every visible 3D item must carry the SAME graphics/color system as the **FIRST** flat reference (no random redesign).
 - Natural overlaps and soft shadows; high clarity; no human model.
 - Cohesive “stable series” look suitable next to the other renders from this batch.
 

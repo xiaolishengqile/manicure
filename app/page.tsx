@@ -2,83 +2,6 @@
 
 import { useCallback, useRef, useState } from "react";
 
-/** 拉取可绘制的位图（data URL 或经本站代理的 http(s)） */
-async function fetchImageBlobFromDisplayUrl(url: string): Promise<Blob> {
-  if (url.startsWith("data:image/")) {
-    const res = await fetch(url);
-    if (!res.ok) throw new Error("无法读取图片数据");
-    return res.blob();
-  }
-  if (url.startsWith("http://") || url.startsWith("https://")) {
-    const res = await fetch("/api/download-image", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url }),
-    });
-    if (!res.ok) {
-      const text = await res.text();
-      let msg = "下载失败";
-      try {
-        const j = JSON.parse(text) as { error?: string };
-        if (j.error) msg = j.error;
-      } catch {
-        if (text) msg = text.slice(0, 120);
-      }
-      throw new Error(msg);
-    }
-    return res.blob();
-  }
-  throw new Error("不支持的图片地址格式");
-}
-
-/** 将位图按 deg（0/90/180/270）顺时针旋转，输出 PNG */
-async function rotateImageBlobToPng(blob: Blob, deg: number): Promise<Blob> {
-  const d = ((deg % 360) + 360) % 360;
-  if (d === 0) return blob;
-
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    const objectUrl = URL.createObjectURL(blob);
-    img.onload = () => {
-      URL.revokeObjectURL(objectUrl);
-      const w = img.naturalWidth;
-      const h = img.naturalHeight;
-      if (!w || !h) {
-        reject(new Error("图片尺寸无效"));
-        return;
-      }
-      const swap = d % 180 !== 0;
-      const cw = swap ? h : w;
-      const ch = swap ? w : h;
-      const canvas = document.createElement("canvas");
-      canvas.width = cw;
-      canvas.height = ch;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) {
-        reject(new Error("无法创建画布"));
-        return;
-      }
-      ctx.fillStyle = "#ffffff";
-      ctx.fillRect(0, 0, cw, ch);
-      ctx.translate(cw / 2, ch / 2);
-      ctx.rotate((d * Math.PI) / 180);
-      ctx.drawImage(img, -w / 2, -h / 2);
-      canvas.toBlob(
-        (b) => {
-          if (b) resolve(b);
-          else reject(new Error("导出失败"));
-        },
-        "image/png",
-        1,
-      );
-    };
-    img.onerror = () => {
-      URL.revokeObjectURL(objectUrl);
-      reject(new Error("图片加载失败"));
-    };
-    img.src = objectUrl;
-  });
-}
 import {
   GENERATION_MODE_OPTIONS,
   getDualUploadKind,
@@ -144,8 +67,6 @@ export default function Home() {
   const [downloadBusyIndex, setDownloadBusyIndex] = useState<number | null>(
     null,
   );
-  /** 每张产出图的顺时针旋转角（仅预览与下载；新结果生成时重置） */
-  const [resultRotationDeg, setResultRotationDeg] = useState<number[]>([]);
   /** 下标 0–9 即合成第 1–10 位顺序，与 FormData append 顺序一致 */
   const [tenSlots, setTenSlots] = useState<TenSlotCell[]>(() => emptyTenSlots());
 
@@ -155,10 +76,9 @@ export default function Home() {
   const clearResults = useCallback(() => {
     setResultUrls([]);
     setResultLabels([]);
-    setResultRotationDeg([]);
   }, []);
 
-  const downloadResult = useCallback(async (url: string, index: number, rotationDeg: number) => {
+  const downloadResult = useCallback(async (url: string, index: number) => {
     const extFromDataUrl = (u: string): string => {
       const m = /^data:image\/(png|jpeg|jpg|webp|gif)/i.exec(u);
       if (!m) return "png";
@@ -177,60 +97,46 @@ export default function Home() {
     setDownloadBusyIndex(index);
     setError(null);
     try {
-      const rot = ((rotationDeg % 360) + 360) % 360;
-
-      if (rot === 0) {
-        if (url.startsWith("data:image/")) {
-          const ext = extFromDataUrl(url);
-          const filename = `美甲生成_${index + 1}.${ext}`;
-          const a = document.createElement("a");
-          a.href = url;
-          a.download = filename;
-          a.rel = "noopener";
-          a.click();
-          return;
-        }
-        if (url.startsWith("http://") || url.startsWith("https://")) {
-          const res = await fetch("/api/download-image", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ url }),
-          });
-          if (!res.ok) {
-            const text = await res.text();
-            let msg = "下载失败";
-            try {
-              const j = JSON.parse(text) as { error?: string };
-              if (j.error) msg = j.error;
-            } catch {
-              if (text) msg = text.slice(0, 120);
-            }
-            throw new Error(msg);
-          }
-          const ext = extFromContentType(res.headers.get("content-type"));
-          const filename = `美甲生成_${index + 1}.${ext}`;
-          const blob = await res.blob();
-          const objectUrl = URL.createObjectURL(blob);
-          const a = document.createElement("a");
-          a.href = objectUrl;
-          a.download = filename;
-          a.rel = "noopener";
-          a.click();
-          URL.revokeObjectURL(objectUrl);
-          return;
-        }
-        throw new Error("不支持的图片地址格式");
+      if (url.startsWith("data:image/")) {
+        const ext = extFromDataUrl(url);
+        const filename = `美甲生成_${index + 1}.${ext}`;
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        a.rel = "noopener";
+        a.click();
+        return;
       }
-
-      const blobIn = await fetchImageBlobFromDisplayUrl(url);
-      const out = await rotateImageBlobToPng(blobIn, rot);
-      const objectUrl = URL.createObjectURL(out);
-      const a = document.createElement("a");
-      a.href = objectUrl;
-      a.download = `美甲生成_${index + 1}_旋转${rot}度.png`;
-      a.rel = "noopener";
-      a.click();
-      URL.revokeObjectURL(objectUrl);
+      if (url.startsWith("http://") || url.startsWith("https://")) {
+        const res = await fetch("/api/download-image", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url }),
+        });
+        if (!res.ok) {
+          const text = await res.text();
+          let msg = "下载失败";
+          try {
+            const j = JSON.parse(text) as { error?: string };
+            if (j.error) msg = j.error;
+          } catch {
+            if (text) msg = text.slice(0, 120);
+          }
+          throw new Error(msg);
+        }
+        const ext = extFromContentType(res.headers.get("content-type"));
+        const filename = `美甲生成_${index + 1}.${ext}`;
+        const blob = await res.blob();
+        const objectUrl = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = objectUrl;
+        a.download = filename;
+        a.rel = "noopener";
+        a.click();
+        URL.revokeObjectURL(objectUrl);
+        return;
+      }
+      throw new Error("不支持的图片地址格式");
     } catch (e) {
       setError(e instanceof Error ? e.message : "下载失败，请稍后重试。");
     } finally {
@@ -285,7 +191,11 @@ export default function Home() {
       return;
     }
     if (!f.type.startsWith("image/")) {
-      setError("美甲产品图请选择图片文件。");
+      setError(
+        mode === "flat_to_3d_packaging"
+          ? "2D 包装平面稿请选择图片文件。"
+          : "美甲产品图请选择图片文件。",
+      );
       setFile(null);
       setPreviewUrl(null);
       return;
@@ -295,7 +205,7 @@ export default function Home() {
       if (prev) URL.revokeObjectURL(prev);
       return URL.createObjectURL(f);
     });
-  }, [clearResults]);
+  }, [clearResults, mode]);
 
   const onSecondFileChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -311,7 +221,11 @@ export default function Home() {
         setError(
           dualKind === "accessory"
             ? "饰品参考图请选择图片文件。"
-            : "模特图请选择图片文件。",
+            : dualKind === "packaging_pose"
+              ? "握姿参考图请选择图片文件。"
+              : dualKind === "packaging_3d_ref"
+                ? "3D/摄影参考图请选择图片文件。"
+                : "模特图请选择图片文件。",
         );
         setSecondFile(null);
         setSecondPreviewUrl(null);
@@ -394,7 +308,11 @@ export default function Home() {
         setError(
           dualKind === "accessory"
             ? "请同时上传「美甲产品图」与「饰品参考图」。"
-            : "请同时上传「美甲产品图」与「模特图」。",
+            : dualKind === "packaging_pose"
+              ? "请同时上传「美甲产品图」与「握姿参考图」（真实手握盒构图）。"
+              : dualKind === "packaging_3d_ref"
+                ? "请同时上传「2D 包装平面稿」与「3D/摄影参考图」。"
+                : "请同时上传「美甲产品图」与「模特图」。",
         );
         return;
       }
@@ -422,6 +340,12 @@ export default function Home() {
         if (dualKind === "accessory" && secondFile) {
           body.set("accessoryImage", secondFile);
         }
+        if (dualKind === "packaging_pose" && secondFile) {
+          body.set("packagingPoseImage", secondFile);
+        }
+        if (dualKind === "packaging_3d_ref" && secondFile) {
+          body.set("packaging3dReferenceImage", secondFile);
+        }
       }
       const res = await fetch("/api/extract-nails", {
         method: "POST",
@@ -446,7 +370,6 @@ export default function Home() {
       }
       setResultUrls(urls);
       setResultLabels(data.labels ?? urls.map((_, i) => `图 ${i + 1}`));
-      setResultRotationDeg(urls.map(() => 0));
     } catch (err) {
       setError(err instanceof Error ? err.message : "处理失败");
     } finally {
@@ -456,9 +379,9 @@ export default function Home() {
 
   const resultHeading =
     mode === "multi_angle"
-      ? "产出（多角度 · 固定3张）"
+      ? "产出（多角度上手 · 固定2张 · 真实棚拍感）"
       : mode === "packaging_mockup"
-        ? "产出（包装 + 手握 · 2张）"
+        ? "产出（包装 + 手握 · 1张）"
         : mode === "flat_to_3d_packaging"
           ? "产出（2D→3D 包装 · 固定4张）"
           : mode === "model_tryon"
@@ -470,14 +393,14 @@ export default function Home() {
                 : mode === "extract_ten_grid"
                   ? "产出（白底栅格 · 仅抠图）"
                   : mode === "complete_single_grid"
-                    ? "产出（白底栅格 · 单甲尺码合集）"
+                    ? "产出（白底栅格 · 单甲补齐10支）"
                     : "产出";
 
   const gridClass =
     mode === "multi_angle"
-      ? "grid grid-cols-1 gap-6 md:grid-cols-3"
+      ? "grid grid-cols-1 gap-6 md:grid-cols-2"
       : mode === "packaging_mockup"
-        ? "grid grid-cols-1 gap-6 md:grid-cols-2"
+        ? "grid grid-cols-1"
         : mode === "flat_to_3d_packaging"
           ? "grid grid-cols-1 gap-6 sm:grid-cols-2 xl:grid-cols-4"
           : "grid grid-cols-1";
@@ -491,28 +414,39 @@ export default function Home() {
   const secondSlotTitle =
     dualKind === "accessory"
       ? "点击选择饰品参考图（戒指等）"
-      : "点击选择模特照片";
+      : dualKind === "packaging_pose"
+        ? "点击选择握姿 / 构图参考"
+        : dualKind === "packaging_3d_ref"
+          ? "点击选择 3D/摄影参考图"
+          : "点击选择模特照片";
   const secondSlotHint =
     dualKind === "accessory"
       ? "可含多只戒指；成片会生成手模并同时戴上甲片与这些饰品"
-      : "需清晰露出指甲区域";
+      : dualKind === "packaging_pose"
+        ? "真实手握包装盒（或相近握持）照片；用于锁定手型与镜头，款式以左侧产品图为准"
+        : dualKind === "packaging_3d_ref"
+          ? "实拍盒型、竞品主图、电商光影氛围等；盒面印刷与配色以左侧平面稿为准"
+        : "需清晰露出指甲区域";
+
+  const firstDualProductHint =
+    dualKind === "packaging_pose"
+      ? "款式来源：托盘、背卡、白底栅格等均可；不用于锁手型"
+      : dualKind === "packaging_3d_ref"
+        ? "正面/背面展开、屏显效果图、刀版图截图均可；为盒面图文唯一来源"
+        : "平铺、卡纸、白底商品图均可";
 
   const singleUploadTitle =
-    mode === "flat_to_3d_packaging"
-      ? "点击选择 2D 包装平面稿"
-      : mode === "extract_ten_grid"
-        ? "点击选择含多枚甲片的照片"
-        : mode === "complete_single_grid"
-          ? "点击选择单枚甲片照片"
-          : "点击选择美甲照片";
+    mode === "extract_ten_grid"
+      ? "点击选择含多枚甲片的照片"
+      : mode === "complete_single_grid"
+        ? "点击选择单枚甲片照片"
+        : "点击选择美甲照片";
   const singleUploadHint =
-    mode === "flat_to_3d_packaging"
-      ? "正面/背面展开、屏显效果图、刀版图截图均可"
-      : mode === "extract_ten_grid"
-        ? "托盘、卡纸、实拍平铺等；只抠图中已出现的甲片，不补全款式"
-        : mode === "complete_single_grid"
-          ? "先整图转 180°；模型生成一枚高清单甲，再由服务端按尺码规则拼成 10 枚"
-          : "支持常见图片格式";
+    mode === "extract_ten_grid"
+      ? "托盘、卡纸、实拍平铺等；只抠图中已出现的甲片，不补全款式"
+      : mode === "complete_single_grid"
+        ? "先整图转 180°；模型生成一枚高清单甲，再由服务端按尺码规则拼成 10 枚"
+        : "支持常见图片格式";
 
   return (
     <div className="min-h-full bg-zinc-50 text-zinc-900">
@@ -686,17 +620,31 @@ export default function Home() {
             ) : dualKind ? (
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div className="flex flex-col gap-2">
-                  <span className="text-xs font-medium text-zinc-500">① 美甲产品图</span>
+                  <span className="text-xs font-medium text-zinc-500">
+                    {dualKind === "packaging_3d_ref"
+                      ? "① 2D 包装平面稿"
+                      : "① 美甲产品图"}
+                  </span>
                   <UploadTile
-                    title="点击选择产品 / 甲片款式图"
-                    hint="平铺、卡纸、白底商品图均可"
+                    title={
+                      dualKind === "packaging_3d_ref"
+                        ? "点击选择 2D 包装平面稿"
+                        : "点击选择产品 / 甲片款式图"
+                    }
+                    hint={firstDualProductHint}
                     previewUrl={previewUrl}
                     onPick={onPickFile}
                   />
                 </div>
                 <div className="flex flex-col gap-2">
                   <span className="text-xs font-medium text-zinc-500">
-                    {dualKind === "accessory" ? "② 饰品参考图（戒指等）" : "② 模特图"}
+                    {dualKind === "accessory"
+                      ? "② 饰品参考图（戒指等）"
+                      : dualKind === "packaging_pose"
+                        ? "② 握姿参考（真实手握盒）"
+                        : dualKind === "packaging_3d_ref"
+                          ? "② 3D/摄影参考图"
+                          : "② 模特图"}
                   </span>
                   <UploadTile
                     title={secondSlotTitle}
@@ -734,65 +682,36 @@ export default function Home() {
             <div className="min-h-[200px] rounded-xl border border-zinc-200 bg-zinc-50/50 p-4">
               {resultUrls.length ? (
                 <div className={gridClass}>
-                  {resultUrls.map((url, i) => {
-                    const deg = resultRotationDeg[i] ?? 0;
-                    return (
-                      <figure
-                        key={`${url.slice(0, 48)}-${i}`}
-                        className="flex flex-col gap-2"
-                      >
-                        <figcaption className="text-center text-xs font-medium text-zinc-500">
-                          {resultLabels[i] ?? `图 ${i + 1}`}
-                        </figcaption>
-                        <div className="flex w-full items-start justify-center gap-2">
-                          <div className="min-w-0 flex-1 overflow-hidden rounded-lg border border-zinc-200 bg-white p-2 shadow-sm">
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img
-                              src={url}
-                              alt={resultLabels[i] ?? `结果 ${i + 1}`}
-                              className="mx-auto max-h-[min(70vh,520px)] w-full object-contain transition-transform duration-200 ease-out"
-                              style={{
-                                transform: `rotate(${deg}deg)`,
-                              }}
-                            />
-                          </div>
-                          <button
-                            type="button"
-                            title="顺时针旋转 90°（仅影响预览与下载）"
-                            onClick={() => {
-                              setResultRotationDeg((prev) => {
-                                const next = [...prev];
-                                while (next.length <= i) next.push(0);
-                                next[i] = ((next[i] ?? 0) + 90) % 360;
-                                return next;
-                              });
-                            }}
-                            className="inline-flex h-10 shrink-0 flex-col items-center justify-center gap-0.5 rounded-lg border border-zinc-300 bg-white px-2.5 text-xs font-medium text-zinc-700 shadow-sm transition hover:border-rose-400 hover:bg-rose-50 hover:text-rose-900"
-                          >
-                            <span className="text-base leading-none" aria-hidden>
-                              ↻
-                            </span>
-                            <span>旋转</span>
-                          </button>
-                        </div>
-                        <div className="flex flex-wrap items-center justify-center gap-2">
-                          <button
-                            type="button"
-                            disabled={downloadBusyIndex === i}
-                            onClick={() => {
-                              void downloadResult(url, i, deg);
-                            }}
-                            className="inline-flex h-9 min-w-[5.5rem] items-center justify-center rounded-lg border border-zinc-300 bg-white px-3 text-sm font-medium text-zinc-800 shadow-sm transition hover:border-rose-400 hover:bg-rose-50 hover:text-rose-900 disabled:cursor-wait disabled:opacity-60"
-                          >
-                            {downloadBusyIndex === i ? "下载中…" : "下载"}
-                          </button>
-                          {deg !== 0 ? (
-                            <span className="text-xs text-zinc-500">将下载已旋转 {deg}°</span>
-                          ) : null}
-                        </div>
-                      </figure>
-                    );
-                  })}
+                  {resultUrls.map((url, i) => (
+                    <figure
+                      key={`${url.slice(0, 48)}-${i}`}
+                      className="flex flex-col gap-2"
+                    >
+                      <figcaption className="text-center text-xs font-medium text-zinc-500">
+                        {resultLabels[i] ?? `图 ${i + 1}`}
+                      </figcaption>
+                      <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white p-2 shadow-sm">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={url}
+                          alt={resultLabels[i] ?? `结果 ${i + 1}`}
+                          className="mx-auto max-h-[min(70vh,520px)] w-full object-contain"
+                        />
+                      </div>
+                      <div className="flex flex-wrap items-center justify-center gap-2">
+                        <button
+                          type="button"
+                          disabled={downloadBusyIndex === i}
+                          onClick={() => {
+                            void downloadResult(url, i);
+                          }}
+                          className="inline-flex h-9 min-w-[5.5rem] items-center justify-center rounded-lg border border-zinc-300 bg-white px-3 text-sm font-medium text-zinc-800 shadow-sm transition hover:border-rose-400 hover:bg-rose-50 hover:text-rose-900 disabled:cursor-wait disabled:opacity-60"
+                        >
+                          {downloadBusyIndex === i ? "下载中…" : "下载"}
+                        </button>
+                      </div>
+                    </figure>
+                  ))}
                 </div>
               ) : (
                 <div className="flex min-h-[180px] items-center justify-center">
@@ -814,9 +733,9 @@ export default function Home() {
           >
             {loading
               ? mode === "multi_angle"
-                ? "正在依次生成 3 张多角度图…"
+                ? "正在依次生成 2 张真实感多角度上手图…"
                 : mode === "packaging_mockup"
-                  ? "正在依次生成 2 张包装手握图…"
+                  ? "正在生成包装手握图…"
                   : mode === "flat_to_3d_packaging"
                     ? "正在依次生成 4 张 3D 包装效果图…"
                     : mode === "model_tryon"
