@@ -4,6 +4,7 @@ export type GenerationMode =
   | "multi_angle"
   | "packaging_mockup"
   | "flat_to_3d_packaging"
+  | "nails_in_box"
   | "model_tryon"
   | "accessory_tryon"
   | "ten_singles_grid";
@@ -50,6 +51,12 @@ export const GENERATION_MODE_OPTIONS: {
       "上传一张平面包装稿（正面/背面展开、刀版图或屏显效果图）。依次生成 3D 纸盒、独立小袋/铝箔包、另一视角与场景陈列图，尽量保持字体、色值、Logo 与稿面一致。",
   },
   {
+    value: "nails_in_box",
+    label: "开窗盒装 · 甲片入盒效果图",
+    description:
+      "双图：① 美甲款式/甲片产品图（窗内**只**用这一套）；② 包装盒样式参考（学盒型/开窗/印刷；若参考图开窗里已有别的甲片，**成品会整窗替换为①的款式**）。生成甲片陈列在开窗内的主图。可选**竖向双列**或**横向 2×5**。",
+  },
+  {
     value: "model_tryon",
     label: "指甲 × 模特 · 精准试戴",
     description:
@@ -72,6 +79,7 @@ export function parseGenerationMode(raw: FormDataEntryValue | null): GenerationM
     s === "multi_angle" ||
     s === "packaging_mockup" ||
     s === "flat_to_3d_packaging" ||
+    s === "nails_in_box" ||
     s === "model_tryon" ||
     s === "accessory_tryon" ||
     s === "ten_singles_grid" ||
@@ -88,7 +96,8 @@ export type DualUploadKind =
   | "model"
   | "accessory"
   | "packaging_pose"
-  | "packaging_3d_ref";
+  | "packaging_3d_ref"
+  | "nails_box";
 
 export function getDualUploadKind(
   mode: GenerationMode,
@@ -97,7 +106,19 @@ export function getDualUploadKind(
   if (mode === "accessory_tryon") return "accessory";
   if (mode === "packaging_mockup") return "packaging_pose";
   if (mode === "flat_to_3d_packaging") return "packaging_3d_ref";
+  if (mode === "nails_in_box") return "nails_box";
   return null;
+}
+
+/** 开窗盒内甲片排列：竖向双列（橱窗式）或横向 2×5 栅格 */
+export type NailsInBoxArrangement = "vertical" | "horizontal";
+
+export function parseNailsInBoxArrangement(
+  raw: FormDataEntryValue | null,
+): NailsInBoxArrangement {
+  const s = typeof raw === "string" ? raw.trim().toLowerCase() : "";
+  if (s === "horizontal" || s === "h" || s === "rows") return "horizontal";
+  return "vertical";
 }
 
 /** 需一次上传 10 张单枚甲片（表单字段名 `nail`，可重复 append） */
@@ -123,6 +144,53 @@ export const WHITE_BG_NAIL_GRID_TOP_BASELINE = `ROW-WISE TOP BASELINE (mandatory
 - In **each** row, the **cuticle / root / proximal TOP edge** of **every** nail in that row lies on **one shared horizontal straight line** — as if a ruler rests on top of all five nails — **not** a staircase along the tops.
 - **Forbidden:** aligning the **bottom free edges (tips)** to one line while the **tops** step up/down like stairs. Tips may end at different heights; only the **top / root** line must be shared.
 （每一行：所有美甲的甲根/上缘必须在同一条水平线上；禁止只对齐指尖、甲根呈阶梯。）`;
+
+const NAILS_IN_BOX_VERTICAL_LAYOUT_EN = `**ARRANGEMENT — VERTICAL two-column window (user-selected; mandatory inside the clear window):**
+- Show **exactly two vertical columns × five nail positions** (10 slots when the FIRST reference implies a full set). **No** third column, radial fan, or staggered “galaxy” layout.
+- **Slot fill (when FIRST is a standard 2×5 sheet, left→right top row then bottom row):** **Left column** top→bottom = nails from **columns 1–5 of the top row** (thumb→pinky of that row). **Right column** top→bottom = **columns 1–5 of the bottom row**. **Do not** swap art between any two slots.
+- **Per-nail pose in window:** each nail’s **long axis roughly horizontal** across the box width. **Left column:** free edge / tip toward the **left** inner edge of the window, cuticle/root toward the **vertical midline** (or support strip). **Right column:** tips toward the **right** edge, roots toward midline — symmetric boutique “butterfly” display.
+- **Optional retail strips:** subtle **vertical** clear or metallic hanger strips; nails face the camera with **readable** art (printed face outward).
+- **Size rhythm:** within each column use a **gentle** width increase **top→bottom** (narrower toward the top of the window, slightly wider toward the bottom) — one cohesive SKU family, not toy scaling.`;
+
+const NAILS_IN_BOX_HORIZONTAL_LAYOUT_EN = `**ARRANGEMENT — HORIZONTAL 2×5 grid inside window (user-selected; mandatory):**
+- Inside the window show **two horizontal rows × five columns** (classic press-on sheet). **Top row:** left→right = thumb→pinky; **bottom row:** left→right = same column semantics for the second row of the FIRST reference. **Never** mirror the row or shuffle columns.
+- On the backing card inside the window, nails follow **tips generally toward the bottom** of each cell; **cuticle/root tops** share a **straight horizontal baseline per row**.
+${WHITE_BG_NAIL_GRID_FINGER_LADDER}
+
+${WHITE_BG_NAIL_GRID_TOP_BASELINE}
+- **Column alignment:** slots line up vertically through both rows; **pixel-faithful** art from the FIRST image per cell.`;
+
+/**
+ * 双图「款式图 + 盒样式」→ 甲片陈列于开窗盒内（竖向双列或横向 2×5）。与 API 传入顺序一致：FIRST=美甲款式，SECOND=包装盒参考。
+ */
+export function buildNailsInBoxPackagingPrompt(
+  arrangement: NailsInBoxArrangement,
+): string {
+  const arrangementBlock =
+    arrangement === "vertical"
+      ? NAILS_IN_BOX_VERTICAL_LAYOUT_EN
+      : NAILS_IN_BOX_HORIZONTAL_LAYOUT_EN;
+
+  return `You receive TWO input images in this fixed editor order:
+1) **FIRST — NAIL ART / PRODUCT SOURCE OF TRUTH:** press-on nails on a card, tray, flat-lay, or white grid — the **exact** artwork (colors, patterns, 3D chrome drips, charms, French edges, silhouettes) that must appear on every nail **visible inside the carton window**. **Zero** creative reinterpretation per nail.
+2) **SECOND — PACKAGING / BOX STYLE REFERENCE:** retail box, sleeve, mockup, or photo of a windowed carton — use for **box proportions**, **window shape and position**, **frame color**, **typography bands** (top strap / bottom title stack), **inner backing** (e.g. pearlescent / iridescent sheet), and **overall print style**. **Forbidden:** stealing unrelated category branding; use **generic placeholder copy** (e.g. × HANDMADE PRESS-ON NAILS ×, stacked “YOUR COLLECTION” style title) unless the user’s SECOND image is clearly their own final brand art to preserve verbatim.
+
+**CRITICAL — WINDOW NAILS vs BOX SHELL (failure if violated):**
+- The **SECOND** image may already show **different** press-on art inside its window (demo stock, cartoon nails, another SKU). That nail art is **NOT** the user’s target. **You must completely REPLACE** every nail **visible through the window** with the **FIRST** image’s nail designs only — mapped per the arrangement rules below. **Forbidden:** keeping, retouching, color-matching, or “merging” the nail graphics that were inside the SECOND image’s window; **forbidden:** outputting the SECOND reference’s nails as the hero product.
+- Treat the **SECOND** image as supplying **cardboard / plastic window / outer print / backdrop texture / optional hand pose** only; the **interior nail pixels** are **always** sourced from the **FIRST** image.
+（中文：**盒型、开窗、外盒印刷、背板质感**学第二张；**开窗里每一枚甲片的款式**必须**全部换成第一张图**里的对应甲片，禁止沿用第二张开窗里原有的美甲图案。）
+
+${arrangementBlock}
+
+TASK — one photorealistic **windowed press-on retail pack** hero (finished “nails in box” like a polished e-commerce main image):
+- Output **one** new **3D-correct** slim rectangular carton whose **design language matches the SECOND reference** (re-light and re-render; do not simply flatten-image paste unless the reference is already a perfect neutral mockup).
+- **Window interior:** every nail must **match the FIRST reference** for its mapped slot — same motifs, micro-detail, gloss. **Perspective** and soft shadows on curved nails are allowed; **2D motif layout** must stay recognizable per slot.
+- **Scene:** seamless **#FFFFFF** or very light neutral studio; soft commercial lighting; crisp edges; believable cardboard thickness; optional faint ground shadow.
+- **No human hands** unless the SECOND reference explicitly demands a holding crop — default **product-only**.
+- If the FIRST image has **fewer than 10** distinct nails, show only those with clean spacing; **never** invent missing nail art.
+
+Return **one** square high-resolution photograph only.`;
+}
 
 /**
  * 有法/深色指尖（法式、豹纹尖等）时：深色必须在解剖学**指尖**（游离缘），拇指最易反贴。
@@ -542,6 +610,8 @@ export function promptsForMode(mode: GenerationMode): { prompt: string; label: s
       return PACKAGING_PROMPTS;
     case "flat_to_3d_packaging":
       return FLAT_TO_3D_PACKAGING_PROMPTS;
+    case "nails_in_box":
+      return [];
     case "model_tryon":
     case "accessory_tryon":
     case "ten_singles_grid":

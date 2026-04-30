@@ -3,7 +3,9 @@ import {
   ACCESSORY_TRYON_PROMPT,
   MODEL_TRYON_PROMPT,
   TEN_SINGLES_COLLAGE_REF_PROMPT,
+  buildNailsInBoxPackagingPrompt,
   parseGenerationMode,
+  parseNailsInBoxArrangement,
   promptsForMode,
   type GenerationMode,
 } from "@/lib/generation-modes";
@@ -105,6 +107,23 @@ async function imageUrlToBuffer(url: string): Promise<Buffer> {
     throw new Error("模型生成的单甲结果不是图片格式。");
   }
   return Buffer.from(await upstream.arrayBuffer());
+}
+
+/**
+ * 网关常返回短期 https URL；浏览器 <img> 易受跨域/防盗链影响显示破图。
+ * 在服务端拉取后转为 data URL 再写入 JSON，前端即可稳定显示。
+ */
+async function toClientDisplayableImageUrl(
+  urlOrData: string | null,
+): Promise<string | null> {
+  if (!urlOrData) return null;
+  if (urlOrData.startsWith("data:")) return urlOrData;
+  try {
+    const buf = await imageUrlToBuffer(urlOrData);
+    return `data:image/png;base64,${buf.toString("base64")}`;
+  } catch {
+    return urlOrData;
+  }
 }
 
 async function editOnce(
@@ -264,10 +283,11 @@ export async function POST(request: Request) {
           { status: 502 },
         );
       }
+      const displayUrl = await toClientDisplayableImageUrl(url);
       return Response.json({
-        imageUrls: [url],
+        imageUrls: [displayUrl],
         labels: ["十枚单甲 · 白底合集"],
-        imageUrl: url,
+        imageUrl: displayUrl,
         mode,
       });
     } catch (e) {
@@ -322,10 +342,61 @@ export async function POST(request: Request) {
           { status: 502 },
         );
       }
+      const displayUrl = await toClientDisplayableImageUrl(url);
       return Response.json({
-        imageUrls: [url],
+        imageUrls: [displayUrl],
         labels: [label],
-        imageUrl: url,
+        imageUrl: displayUrl,
+        mode,
+      });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "图像编辑接口调用失败";
+      return Response.json({ error: message }, { status: 502 });
+    }
+  }
+
+  if (mode === "nails_in_box") {
+    const nailsRes = await validateImageFile(
+      formData.get("image"),
+      "美甲款式图（字段 image）",
+    );
+    if (!nailsRes.ok) {
+      return Response.json({ error: nailsRes.error }, { status: 400 });
+    }
+    const boxRes = await validateImageFile(
+      formData.get("packagingBoxImage"),
+      "包装盒样式图（字段 packagingBoxImage）",
+    );
+    if (!boxRes.ok) {
+      return Response.json({ error: boxRes.error }, { status: 400 });
+    }
+
+    const arrangement = parseNailsInBoxArrangement(
+      formData.get("nailArrangement"),
+    );
+    const prompt = withNotes(buildNailsInBoxPackagingPrompt(arrangement));
+    const label = "开窗盒装效果图";
+
+    try {
+      const url = await editDualSceneNails(
+        openai,
+        nailsRes.buffer,
+        nailsRes.mime,
+        boxRes.buffer,
+        boxRes.mime,
+        prompt,
+      );
+      if (!url) {
+        return Response.json(
+          { error: "模型未返回图片（既无 url 也无 b64_json）。" },
+          { status: 502 },
+        );
+      }
+      const displayUrl = await toClientDisplayableImageUrl(url);
+      return Response.json({
+        imageUrls: [displayUrl],
+        labels: [label],
+        imageUrl: displayUrl,
         mode,
       });
     } catch (e) {
@@ -374,7 +445,7 @@ export async function POST(request: Request) {
             { status: 502 },
           );
         }
-        imageUrls.push(url);
+        imageUrls.push((await toClientDisplayableImageUrl(url)) ?? url);
         labels.push(label);
       }
       return Response.json({
@@ -432,7 +503,7 @@ export async function POST(request: Request) {
             { status: 502 },
           );
         }
-        imageUrls.push(url);
+        imageUrls.push((await toClientDisplayableImageUrl(url)) ?? url);
         labels.push(label);
       }
       return Response.json({
@@ -523,7 +594,7 @@ export async function POST(request: Request) {
           { status: 502 },
         );
       }
-      imageUrls.push(url);
+      imageUrls.push((await toClientDisplayableImageUrl(url)) ?? url);
       labels.push(label);
     }
 

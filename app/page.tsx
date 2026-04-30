@@ -7,6 +7,7 @@ import {
   getDualUploadKind,
   requiresTenSingleNails,
   type GenerationMode,
+  type NailsInBoxArrangement,
 } from "@/lib/generation-modes";
 import { DEFAULT_USER_PROMPT_PRESETS } from "@/lib/prompt-presets-defaults";
 
@@ -114,6 +115,8 @@ export default function Home() {
   const [secondFile, setSecondFile] = useState<File | null>(null);
   const [secondPreviewUrl, setSecondPreviewUrl] = useState<string | null>(null);
   const [mode, setMode] = useState<GenerationMode>("extract_ten_grid");
+  const [nailBoxArrangement, setNailBoxArrangement] =
+    useState<NailsInBoxArrangement>("vertical");
   const [resultUrls, setResultUrls] = useState<string[]>([]);
   const [resultLabels, setResultLabels] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
@@ -306,7 +309,9 @@ export default function Home() {
       setError(
         mode === "flat_to_3d_packaging"
           ? "2D 包装平面稿请选择图片文件。"
-          : "美甲产品图请选择图片文件。",
+          : mode === "nails_in_box"
+            ? "美甲款式图请选择图片文件。"
+            : "美甲产品图请选择图片文件。",
       );
       setFile(null);
       setPreviewUrl(null);
@@ -337,7 +342,9 @@ export default function Home() {
               ? "握姿参考图请选择图片文件。"
               : dualKind === "packaging_3d_ref"
                 ? "3D/摄影参考图请选择图片文件。"
-                : "模特图请选择图片文件。",
+                : dualKind === "nails_box"
+                  ? "包装盒样式参考图请选择图片文件。"
+                  : "模特图请选择图片文件。",
         );
         setSecondFile(null);
         setSecondPreviewUrl(null);
@@ -424,7 +431,9 @@ export default function Home() {
               ? "请同时上传「美甲产品图」与「握姿参考图」（真实手握盒构图）。"
               : dualKind === "packaging_3d_ref"
                 ? "请同时上传「2D 包装平面稿」与「3D/摄影参考图」。"
-                : "请同时上传「美甲产品图」与「模特图」。",
+                : dualKind === "nails_box"
+                  ? "请同时上传「美甲款式图」与「包装盒样式参考图」。"
+                  : "请同时上传「美甲产品图」与「模特图」。",
         );
         return;
       }
@@ -457,6 +466,10 @@ export default function Home() {
         }
         if (dualKind === "packaging_3d_ref" && secondFile) {
           body.set("packaging3dReferenceImage", secondFile);
+        }
+        if (dualKind === "nails_box" && secondFile) {
+          body.set("packagingBoxImage", secondFile);
+          body.set("nailArrangement", nailBoxArrangement);
         }
       }
       body.set("userExtraNotes", userExtraNotes);
@@ -497,6 +510,7 @@ export default function Home() {
     tenMode,
     tenSlots,
     userExtraNotes,
+    nailBoxArrangement,
   ]);
 
   const clearUserNotes = useCallback(() => {
@@ -571,7 +585,9 @@ export default function Home() {
         ? "产出（包装 + 手握 · 1张）"
         : mode === "flat_to_3d_packaging"
           ? "产出（2D→3D 包装 · 固定4张）"
-          : mode === "model_tryon"
+          : mode === "nails_in_box"
+            ? "产出（开窗盒装 · 甲片入盒）"
+            : mode === "model_tryon"
             ? "产出（试戴效果图）"
             : mode === "accessory_tryon"
               ? "产出（手模 · 指甲+饰品试戴）"
@@ -605,7 +621,9 @@ export default function Home() {
         ? "点击选择握姿 / 构图参考"
         : dualKind === "packaging_3d_ref"
           ? "点击选择 3D/摄影参考图"
-          : "点击选择模特照片";
+          : dualKind === "nails_box"
+            ? "点击选择包装盒样式参考图"
+            : "点击选择模特照片";
   const secondSlotHint =
     dualKind === "accessory"
       ? "可含多只戒指；成片会生成手模并同时戴上甲片与这些饰品"
@@ -613,7 +631,9 @@ export default function Home() {
         ? "真实手握包装盒（或相近握持）照片；用于锁定手型与镜头，款式以左侧产品图为准"
         : dualKind === "packaging_3d_ref"
           ? "实拍盒型、竞品主图、电商光影氛围等；盒面印刷与配色以左侧平面稿为准"
-        : "需清晰露出指甲区域";
+          : dualKind === "nails_box"
+            ? "盒型、开窗比例、背板质感与印刷风格；甲片款式以左侧图为准"
+            : "需清晰露出指甲区域";
 
   const firstDualProductHint =
     dualKind === "packaging_pose"
@@ -622,7 +642,9 @@ export default function Home() {
         ? "正面/背面展开、屏显效果图、刀版图截图均可；为盒面图文唯一来源"
         : dualKind === "model" || dualKind === "accessory"
           ? "美甲产品图约定：甲尖朝下；每行从左到右大拇指→小指；试戴成图按格严格还原款式"
-          : "平铺、卡纸、白底商品图均可";
+          : dualKind === "nails_box"
+            ? "款式图：托盘/背卡/白底栅格均可；将按所选排列映射到盒内开窗"
+            : "平铺、卡纸、白底商品图均可";
 
   const singleUploadTitle =
     mode === "extract_ten_grid"
@@ -807,41 +829,88 @@ export default function Home() {
                 </p>
               </div>
             ) : dualKind ? (
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <div className="flex flex-col gap-2">
-                  <span className="text-xs font-medium text-zinc-500">
-                    {dualKind === "packaging_3d_ref"
-                      ? "① 2D 包装平面稿"
-                      : "① 美甲产品图"}
-                  </span>
-                  <UploadTile
-                    title={
-                      dualKind === "packaging_3d_ref"
-                        ? "点击选择 2D 包装平面稿"
-                        : "点击选择产品 / 甲片款式图"
-                    }
-                    hint={firstDualProductHint}
-                    previewUrl={previewUrl}
-                    onPick={onPickFile}
-                  />
+              <div className="flex flex-col gap-4">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div className="flex flex-col gap-2">
+                    <span className="text-xs font-medium text-zinc-500">
+                      {dualKind === "packaging_3d_ref"
+                        ? "① 2D 包装平面稿"
+                        : dualKind === "nails_box"
+                          ? "① 美甲款式 / 甲片产品图"
+                          : "① 美甲产品图"}
+                    </span>
+                    <UploadTile
+                      title={
+                        dualKind === "packaging_3d_ref"
+                          ? "点击选择 2D 包装平面稿"
+                          : dualKind === "nails_box"
+                            ? "点击选择美甲款式图"
+                            : "点击选择产品 / 甲片款式图"
+                      }
+                      hint={firstDualProductHint}
+                      previewUrl={previewUrl}
+                      onPick={onPickFile}
+                    />
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <span className="text-xs font-medium text-zinc-500">
+                      {dualKind === "accessory"
+                        ? "② 饰品参考图（戒指等）"
+                        : dualKind === "packaging_pose"
+                          ? "② 握姿参考（真实手握盒）"
+                          : dualKind === "packaging_3d_ref"
+                            ? "② 3D/摄影参考图"
+                            : dualKind === "nails_box"
+                              ? "② 包装盒样式参考"
+                              : "② 模特图"}
+                    </span>
+                    <UploadTile
+                      title={secondSlotTitle}
+                      hint={secondSlotHint}
+                      previewUrl={secondPreviewUrl}
+                      onPick={onPickSecond}
+                    />
+                  </div>
                 </div>
-                <div className="flex flex-col gap-2">
-                  <span className="text-xs font-medium text-zinc-500">
-                    {dualKind === "accessory"
-                      ? "② 饰品参考图（戒指等）"
-                      : dualKind === "packaging_pose"
-                        ? "② 握姿参考（真实手握盒）"
-                        : dualKind === "packaging_3d_ref"
-                          ? "② 3D/摄影参考图"
-                          : "② 模特图"}
-                  </span>
-                  <UploadTile
-                    title={secondSlotTitle}
-                    hint={secondSlotHint}
-                    previewUrl={secondPreviewUrl}
-                    onPick={onPickSecond}
-                  />
-                </div>
+                {dualKind === "nails_box" ? (
+                  <fieldset className="rounded-lg border border-zinc-200 bg-zinc-50/90 px-3 py-3">
+                    <legend className="px-1 text-xs font-semibold text-zinc-600">
+                      盒内甲片排列
+                    </legend>
+                    <div className="mt-1 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:gap-6">
+                      <label className="flex cursor-pointer items-start gap-2 text-sm text-zinc-800">
+                        <input
+                          type="radio"
+                          name="nailArrangement"
+                          className="mt-1"
+                          checked={nailBoxArrangement === "vertical"}
+                          onChange={() => setNailBoxArrangement("vertical")}
+                        />
+                        <span>
+                          <span className="font-medium">竖向双列</span>
+                          <span className="block text-xs font-normal text-zinc-500">
+                            橱窗式：左右各一列、指尖朝外，适合长条开窗盒
+                          </span>
+                        </span>
+                      </label>
+                      <label className="flex cursor-pointer items-start gap-2 text-sm text-zinc-800">
+                        <input
+                          type="radio"
+                          name="nailArrangement"
+                          className="mt-1"
+                          checked={nailBoxArrangement === "horizontal"}
+                          onChange={() => setNailBoxArrangement("horizontal")}
+                        />
+                        <span>
+                          <span className="font-medium">横向 2×5</span>
+                          <span className="block text-xs font-normal text-zinc-500">
+                            两行五列白底栅格，与常见背卡排版一致
+                          </span>
+                        </span>
+                      </label>
+                    </div>
+                  </fieldset>
+                ) : null}
               </div>
             ) : (
               <button
@@ -1078,7 +1147,9 @@ export default function Home() {
                   ? "正在生成包装手握图…"
                   : mode === "flat_to_3d_packaging"
                     ? "正在依次生成 4 张 3D 包装效果图…"
-                    : mode === "model_tryon"
+                    : mode === "nails_in_box"
+                      ? "正在生成开窗盒装效果图…"
+                      : mode === "model_tryon"
                       ? "正在生成试戴图…"
                       : mode === "accessory_tryon"
                         ? "正在生成手模试戴广告图…"
