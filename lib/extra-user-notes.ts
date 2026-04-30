@@ -17,5 +17,5 @@ export function appendUserRefinementToPrompt(
   notes: string | null,
 ): string {
   if (!notes) return basePrompt;
-  return `${basePrompt}\n\n---\nUSER REFINEMENT (highest priority for this edit; still obey hard layout / slot / safety rules above):\n${notes}\n`;
+  return `${basePrompt}\n\n---\nUSER REFINEMENT (high priority for nail-art mapping, per-finger details, jewelry, and lighting tweaks; **keep the same overall scene type, props, crop, and pose** as the task above unless the user explicitly asks to change the shot, background, or framing. Still obey hard layout / slot / safety rules.):\n${notes}\n`;
 }

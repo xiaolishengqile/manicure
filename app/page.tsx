@@ -620,7 +620,9 @@ export default function Home() {
       ? "款式来源：托盘、背卡、白底栅格等均可；不用于锁手型"
       : dualKind === "packaging_3d_ref"
         ? "正面/背面展开、屏显效果图、刀版图截图均可；为盒面图文唯一来源"
-        : "平铺、卡纸、白底商品图均可";
+        : dualKind === "model" || dualKind === "accessory"
+          ? "美甲产品图约定：甲尖朝下；每行从左到右大拇指→小指；试戴成图按格严格还原款式"
+          : "平铺、卡纸、白底商品图均可";
 
   const singleUploadTitle =
     mode === "extract_ten_grid"
