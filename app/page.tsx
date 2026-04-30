@@ -584,7 +584,7 @@ export default function Home() {
       : mode === "packaging_mockup"
         ? "产出（包装 + 手握 · 1张）"
         : mode === "flat_to_3d_packaging"
-          ? "产出（2D→3D 包装 · 固定4张）"
+          ? "产出（2D→3D 开窗盒装 · 1张）"
           : mode === "nails_in_box"
             ? "产出（开窗盒装 · 甲片入盒）"
             : mode === "model_tryon"
@@ -605,7 +605,7 @@ export default function Home() {
       : mode === "packaging_mockup"
         ? "grid grid-cols-1"
         : mode === "flat_to_3d_packaging"
-          ? "grid grid-cols-1 gap-6 sm:grid-cols-2 xl:grid-cols-4"
+          ? "grid grid-cols-1"
           : "grid grid-cols-1";
 
   const canSubmit =
@@ -630,7 +630,7 @@ export default function Home() {
       : dualKind === "packaging_pose"
         ? "真实手握包装盒（或相近握持）照片；用于锁定手型与镜头，款式以左侧产品图为准"
         : dualKind === "packaging_3d_ref"
-          ? "实拍盒型、竞品主图、电商光影氛围等；盒面印刷与配色以左侧平面稿为准"
+          ? "实拍盒型、竞品主图、电商光影与白底投影等；若参考为「开窗见甲片」更佳。盒面印刷与配色仍以左侧 2D 稿为准"
           : dualKind === "nails_box"
             ? "盒型、开窗比例、背板质感与印刷风格；甲片款式以左侧图为准"
             : "需清晰露出指甲区域";
@@ -1146,7 +1146,7 @@ export default function Home() {
                 : mode === "packaging_mockup"
                   ? "正在生成包装手握图…"
                   : mode === "flat_to_3d_packaging"
-                    ? "正在依次生成 4 张 3D 包装效果图…"
+                    ? "正在生成 3D 开窗盒装主视图…"
                     : mode === "nails_in_box"
                       ? "正在生成开窗盒装效果图…"
                       : mode === "model_tryon"

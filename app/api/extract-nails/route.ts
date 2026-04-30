@@ -485,12 +485,13 @@ export async function POST(request: Request) {
 
     try {
       for (const { prompt, label } of jobs) {
+        /** flat_to_3d：先传摄影参考、再传 2D 稿，与 `FLAT_TO_3D_*` 提示中 FIRST/SECOND 定义一致，减轻整图复刻参考。 */
         const url = await editDualSceneNails(
           openai,
-          flatRes.buffer,
-          flatRes.mime,
           refRes.buffer,
           refRes.mime,
+          flatRes.buffer,
+          flatRes.mime,
           withNotes(prompt),
         );
         if (!url) {

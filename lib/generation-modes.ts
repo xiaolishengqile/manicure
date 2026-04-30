@@ -46,9 +46,9 @@ export const GENERATION_MODE_OPTIONS: {
   },
   {
     value: "flat_to_3d_packaging",
-    label: "2D 文稿 → 稳定 3D 包装效果图",
+    label: "2D 文稿 → 3D 开窗盒装主视图",
     description:
-      "上传一张平面包装稿（正面/背面展开、刀版图或屏显效果图）。依次生成 3D 纸盒、独立小袋/铝箔包、另一视角与场景陈列图，尽量保持字体、色值、Logo 与稿面一致。",
+      "双图：① 2D 包装平面稿（盒面印刷、色值、Logo、窗内甲片示意**均以稿为准**）；② 摄影/3D **氛围参考**（取景、光影、白底投影）。**只输出 1 张**立体开窗盒；窗内甲片与外盒图文须来自①，勿照搬②上的竞品品牌与甲片款式（服务端将②先于①送模型以抑制「抄成参考图」）。",
   },
   {
     value: "nails_in_box",
@@ -533,58 +533,37 @@ Return **one** photorealistic square image only.`,
   },
 ];
 
-/** 双图 2D 平面稿 + 3D/摄影参考 → 多张稳定 3D 渲染（与 API 中 image 顺序一致：FIRST=平面稿，SECOND=参考图） */
-const FLAT_TO_3D_DUAL_PREFIX = `You receive TWO input images in this fixed order:
-1) **FIRST — FLAT GRAPHIC SOURCE OF TRUTH:** 2D packaging artwork / print proof / die-line sheet (may show front, back, or unfolded panels). **All** logos, wordmarks, color blocks, barcodes, micro-copy, and icons that appear on any 3D carton, pouch, or label in your output must be taken **only** from this first image — faithful color and legible typography; no invented alternate brands.
-2) **SECOND — PHOTO / 3D STYLE REFERENCE:** a packshot, lifestyle crop, competitor hero, or render mood reference. Use it **only** for hints about **camera angle, key vs fill light, specular strength, backdrop tone, surface reflectivity, depth cues, and spacing** between multiple units when relevant. **Forbidden:** copying foreign trademarks, unrelated product categories, human models, or **graphic layouts printed on packaging** from the second image — printed faces must still match the FIRST image.
+/**
+ * 双图 → **单张**开窗盒装主视图。
+ * **API 传入顺序（与 `editDualSceneNails` 一致）：FIRST = 摄影/3D 氛围参考图，SECOND = 2D 平面稿。**
+ * 先传实拍易锚定光影；**禁止**把 FIRST 当最终画面像素级复刻，所有印刷与窗内甲片须来自 SECOND。
+ */
+const FLAT_TO_3D_DUAL_PREFIX = `You receive TWO input images supplied to the editor in this **fixed** order:
+1) **FIRST — SCENE / LIGHTING ANCHOR ONLY (not final artwork):** A finished photograph or render of a retail box on white (often a competitor or mood packshot with window + nails). **You may use ONLY:** camera viewpoint, lens feel, **key vs fill light direction**, **cast-shadow shape and softness on the sweep**, backdrop brightness, overall exposure, and “premium shelf” depth cues. **You must NOT treat this as the product to duplicate.** **Forbidden (failure):** keeping the **same printed brand name / logotype / colorway / bottom legal strip** as in this FIRST photo when they differ from the SECOND flat; **forbidden:** keeping the **same nail art inside the window** (e.g. same metallic + gem layout) if the SECOND flat shows **different** nails (e.g. plain peach gloss). The FIRST image is a **lighting template**, not the SKU.
+2) **SECOND — FLAT 2D SOURCE OF TRUTH (graphics + window nails):** Packaging flat, die-line, or screen mock. **Every** exterior graphic on the final 3D box — panel colors, logos, placeholder text like “YOUR LOGO”, bow icons, barcodes, micro-copy — and the **visual design of press-ons shown in the window area on this flat** (color, simplicity, French shape, etc.) must be **faithfully realized in photoreal 3D**. If the flat is schematic, infer a believable 3D window layout that **honors** that schematic — **do not** import unrelated hero nails from the FIRST photo.
 
 `;
 
+const FLAT_TO_3D_ANTI_LITERAL_COPY_EN = `ANTI–“COPY THE PHOTO” (critical QA gate):
+- If your result would still be **instantly recognizable as the same branded pack** as the **FIRST** input (same unrelated trademark wordmark, same nail jewelry motif), you **failed** — **re-skin** the entire box print and **re-place** window nails from the **SECOND** flat only.
+- **Self-check before finalize:** (a) Does the box text / logo match the **SECOND** image, not the first? (b) Do the nails in the window match the **SECOND** image’s nail look, not the first photo’s nails?
+
+`;
+
+const FLAT_TO_3D_WINDOWED_BOX_PROMPT = `${FLAT_TO_3D_DUAL_PREFIX}${FLAT_TO_3D_ANTI_LITERAL_COPY_EN}TASK — output **exactly ONE** photorealistic 3D hero photograph: **one** retail press-on carton with a **real clear window**, **re-lit** like the FIRST reference’s scene, but **built from the SECOND flat’s identity**.
+
+HARD STRUCTURE (failure if violated):
+- **Single subject:** one folding carton, slight three-quarter or hero angle; **product-only** on white / very light seamless sweep; **natural cast shadow** (derive from FIRST lighting template).
+- **Transparent window:** large central **PET / clear plastic** with gloss and refraction; interior **readable** through glass.
+- **Window interior nails:** **must** match the **SECOND** flat’s implied or drawn nail set (color, finish, shape). **Never** default to the FIRST photo’s nail styling when it conflicts with the SECOND.
+- **Exterior print:** **only** from the **SECOND** flat, correctly warped in 3D perspective onto cardboard.
+
+Return **exactly ONE** square high-resolution image.`;
+
 const FLAT_TO_3D_PACKAGING_PROMPTS: { prompt: string; label: string }[] = [
   {
-    label: "① 3D 纸盒主视图",
-    prompt: `${FLAT_TO_3D_DUAL_PREFIX}TASK — photorealistic 3D product visualization:
-- Reconstruct a PHYSICAL folding carton / retail box in accurate 3D perspective (slight three-quarter hero angle); you may subtly align camera and light mood with the SECOND reference when it helps believability.
-- Map ALL visible graphics from the **FIRST** image onto the box faces with correct UV-style alignment: logos, product name, legal copy, icons, barcodes if present, and EXACT brand colors. Typography must stay legible and proportionally consistent—no invented alternate fonts.
-- Realistic cardboard thickness, clean die-cut edges, subtle print texture; backdrop may follow the SECOND reference’s brightness (prefer pure white #FFFFFF or very light seamless if the reference is busy—never import clutter or props from image 2).
-- Do not add unrelated branding; do not distort the FIRST image’s artwork into unreadable warps.
-
-Single square catalog-quality render.`,
-  },
-  {
-    label: "② 3D 独立小袋 / 箔袋",
-    prompt: `${FLAT_TO_3D_DUAL_PREFIX}TASK — photorealistic 3D render of the PRIMARY small flexible pouch / foil sachet / single-use packet implied by the **FIRST** flat sheet’s design language.
-
-Requirements:
-- If the flat art clearly describes a pouch shape, follow it; otherwise infer a plausible pouch consistent with the colors and typography on the FIRST sheet.
-- Front face artwork must match the FIRST reference (logo, titles, color blocks) with correct perspective; specular highlights on foil or matte film may echo the SECOND reference’s lighting character.
-- Floating or standing product shot on clean white #FFFFFF backdrop unless the SECOND reference strongly suggests a minimal neutral seamless; crisp edges; stable, repeatable look.
-
-Single square image.`,
-  },
-  {
-    label: "③ 3D 另一视角 / 组合",
-    prompt: `${FLAT_TO_3D_DUAL_PREFIX}TASK — produce a SECOND stable 3D packaging view that feels like a sibling shot to a hero pack render, still driven by the **FIRST** flat manuscript.
-
-Choose ONE coherent variant:
-- alternate camera angle (lower three-quarter OR top-down), optionally informed by the SECOND reference’s framing, OR
-- two identical units slightly staggered showing depth, OR
-- box + pouch together in one frame if both appear in the flat layout.
-
-Keep fonts, Pantone-like colors, and logo lockups faithful to the **FIRST** source. Professional packshot lighting; white or very light seamless studio background.
-
-Single square image.`,
-  },
-  {
-    label: "④ 场景陈列 · 多包装",
-    prompt: `${FLAT_TO_3D_DUAL_PREFIX}TASK — premium LIFESTYLE packshot: several finished 3D units (pouches and/or small boxes) naturally scattered on a bright white or lightly reflective surface—like an Amazon-ready group product photo. **Staging density and shadow softness** may take cues from the SECOND reference when helpful.
-
-Rules:
-- Every visible 3D item must carry the SAME graphics/color system as the **FIRST** flat reference (no random redesign).
-- Natural overlaps and soft shadows; high clarity; no human model.
-- Cohesive “stable series” look suitable next to the other renders from this batch.
-
-Single square photorealistic image.`,
+    label: "3D 开窗盒装主视图",
+    prompt: FLAT_TO_3D_WINDOWED_BOX_PROMPT,
   },
 ];
 
