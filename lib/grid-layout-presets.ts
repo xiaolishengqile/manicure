@@ -1,7 +1,10 @@
 /** 白底栅格排版本地预设（最多 5 套） */
 
-import type { InterNailColGapMode } from "@/lib/ten-singles-grid-layout";
-import { nearestInterNailColGapModeFromLegacyPct } from "@/lib/ten-singles-grid-layout";
+import {
+  COL_GUTTER_SUM_INNER_WIDTH_PCT_MAX,
+  colGutterTotalInnerWidthPctRounded,
+  type InterNailColGapMode,
+} from "@/lib/ten-singles-grid-layout";
 
 export const LS_GRID_LAYOUT_PRESETS = "manicure_grid_layout_presets_v1";
 export const MAX_GRID_LAYOUT_PRESETS = 5;
@@ -9,8 +12,9 @@ export const MAX_GRID_LAYOUT_PRESETS = 5;
 export type GridLayoutPresetPayload = {
   colWidthDrafts: string[];
   marginPctDraft: string;
+  /** 四条竖缝合计占内宽 %，0～COL_GUTTER_SUM_INNER_WIDTH_PCT_MAX */
+  colGutterSumPctDraft: string;
   rowGutterPctDraft: string;
-  colGapMode: InterNailColGapMode;
 };
 
 export type GridLayoutPreset = { id: string } & GridLayoutPresetPayload;
@@ -22,6 +26,13 @@ export function newGridPresetId(): string {
   return `g-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
 }
 
+function clampPct(n: number): number {
+  return Math.min(
+    COL_GUTTER_SUM_INNER_WIDTH_PCT_MAX,
+    Math.max(0, n),
+  );
+}
+
 function normalizeColDrafts(raw: unknown, fallback: string[]): string[] {
   if (!Array.isArray(raw) || raw.length === 0) return [...fallback];
   const mapped = raw.map((c) => (typeof c === "string" ? c : String(c)));
@@ -31,10 +42,14 @@ function normalizeColDrafts(raw: unknown, fallback: string[]): string[] {
   return next;
 }
 
-function parseColGapMode(
-  o: Record<string, unknown>,
-  legacyPctDraft: string,
-): InterNailColGapMode {
+function migrateColGutterSumPctDraft(o: Record<string, unknown>): string {
+  if (
+    typeof o.colGutterSumPctDraft === "string" &&
+    o.colGutterSumPctDraft.trim() !== ""
+  ) {
+    const v = parseFloat(o.colGutterSumPctDraft);
+    if (Number.isFinite(v)) return String(clampPct(v));
+  }
   const raw = o.colGapMode;
   if (
     raw === "tight" ||
@@ -42,12 +57,16 @@ function parseColGapMode(
     raw === "third" ||
     raw === "fifth"
   ) {
-    return raw;
+    return String(
+      colGutterTotalInnerWidthPctRounded(raw as InterNailColGapMode),
+    );
   }
-  const pct = parseFloat(legacyPctDraft);
-  return nearestInterNailColGapModeFromLegacyPct(
-    Number.isFinite(pct) ? pct : 0,
-  );
+  const legacy =
+    typeof o.colGutterPctDraft === "string"
+      ? parseFloat(o.colGutterPctDraft)
+      : NaN;
+  if (Number.isFinite(legacy)) return String(clampPct(legacy));
+  return "0";
 }
 
 /** 从 localStorage 读出 0～5 条合法预设 */
@@ -71,17 +90,15 @@ export function parseGridLayoutPresets(
       );
       const marginPctDraft =
         typeof o.marginPctDraft === "string" ? o.marginPctDraft : "1.8";
-      const legacyGutter =
-        typeof o.colGutterPctDraft === "string" ? o.colGutterPctDraft : "0";
       const rowGutterPctDraft =
         typeof o.rowGutterPctDraft === "string" ? o.rowGutterPctDraft : "0";
-      const colGapMode = parseColGapMode(o, legacyGutter);
+      const colGutterSumPctDraft = migrateColGutterSumPctDraft(o);
       out.push({
         id,
         colWidthDrafts,
         marginPctDraft,
+        colGutterSumPctDraft,
         rowGutterPctDraft,
-        colGapMode,
       });
       if (out.length >= MAX_GRID_LAYOUT_PRESETS) break;
     }

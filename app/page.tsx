@@ -17,10 +17,14 @@ import {
   type GridLayoutPreset,
 } from "@/lib/grid-layout-presets";
 import {
+  COL_GUTTER_SUM_INNER_WIDTH_PCT_MAX,
+  COL_GUTTER_SUM_QUICK_PRESET_PCTS,
   DEFAULT_TEN_SINGLES_GRID_LAYOUT,
-  INTER_NAIL_COL_GAP_OPTIONS,
-  type InterNailColGapMode,
 } from "@/lib/ten-singles-grid-layout";
+
+function clampColGutterSumPct(n: number): number {
+  return Math.min(COL_GUTTER_SUM_INNER_WIDTH_PCT_MAX, Math.max(0, n));
+}
 
 const DEFAULT_COL_WIDTH_DRAFTS = DEFAULT_TEN_SINGLES_GRID_LAYOUT.colWidthFrac.map(
   (n) => String(n),
@@ -181,8 +185,7 @@ export default function Home() {
     ...DEFAULT_COL_WIDTH_DRAFTS,
   ]);
   const [marginPctDraft, setMarginPctDraft] = useState("1.8");
-  const [colInterNailGap, setColInterNailGap] =
-    useState<InterNailColGapMode>("tight");
+  const [colGutterSumPct, setColGutterSumPct] = useState(0);
   const [rowGutterPctDraft, setRowGutterPctDraft] = useState("0");
   const [gridPresets, setGridPresets] = useState<GridLayoutPreset[]>([]);
   const [gridPresetSelectedIndex, setGridPresetSelectedIndex] = useState<
@@ -329,7 +332,12 @@ export default function Home() {
       if (!p) return;
       setColWidthDrafts([...p.colWidthDrafts]);
       setMarginPctDraft(p.marginPctDraft);
-      setColInterNailGap(p.colGapMode);
+      {
+        const g = parseFloat(p.colGutterSumPctDraft);
+        setColGutterSumPct(
+          clampColGutterSumPct(Number.isFinite(g) ? g : 0),
+        );
+      }
       setRowGutterPctDraft(p.rowGutterPctDraft);
       setGridPresetSelectedIndex(index);
       setGridPresetNotice(null);
@@ -353,7 +361,7 @@ export default function Home() {
     const snap = {
       colWidthDrafts: [...colWidthDrafts],
       marginPctDraft,
-      colGapMode: colInterNailGap,
+      colGutterSumPctDraft: String(colGutterSumPct),
       rowGutterPctDraft,
     };
     const sel = gridPresetSelectedIndex;
@@ -390,7 +398,7 @@ export default function Home() {
   }, [
     colWidthDrafts,
     marginPctDraft,
-    colInterNailGap,
+    colGutterSumPct,
     rowGutterPctDraft,
     gridPresetSelectedIndex,
     gridPresets.length,
@@ -725,7 +733,7 @@ export default function Home() {
           "nailGridMarginPct",
           String(parsePctInput(marginPctDraft, 0.5, 8, 1.8)),
         );
-        body.set("nailGridColGapMode", colInterNailGap);
+        body.set("nailGridColGutterPct", String(colGutterSumPct));
         body.set(
           "nailGridRowGutterPct",
           String(parsePctInput(rowGutterPctDraft, 0, 12, 0)),
@@ -757,7 +765,7 @@ export default function Home() {
             "nailGridMarginPct",
             String(parsePctInput(marginPctDraft, 0.5, 8, 1.8)),
           );
-          body.set("nailGridColGapMode", colInterNailGap);
+          body.set("nailGridColGutterPct", String(colGutterSumPct));
           body.set(
             "nailGridRowGutterPct",
             String(parsePctInput(rowGutterPctDraft, 0, 12, 0)),
@@ -805,7 +813,7 @@ export default function Home() {
     nailBoxArrangement,
     colWidthDrafts,
     marginPctDraft,
-    colInterNailGap,
+    colGutterSumPct,
     rowGutterPctDraft,
   ]);
 
@@ -1306,7 +1314,7 @@ export default function Home() {
                     </p>
                     <p className="text-xs leading-relaxed text-rose-900/90">
                       <span className="font-medium">关于「缝」：</span>
-                      <strong>同一行相邻美甲</strong>的左右留白由下方「相邻间距」按<strong>单格宽度</strong>（内区五等分后的列槽宽）的 ½ / ⅓ / ⅕ 设定；选「贴紧」则四列缝为 0。
+                      <strong>同一行相邻美甲</strong>的左右留白用下方滑条控制：<strong>四条竖缝合计占「内区宽度」的百分之几</strong>（内区 = 去掉外留白后的中间区域）；下方会显示<strong>每条竖缝约占内宽的几%</strong>（合计÷4）。
                       行与行之间的上下留白仍用「行间缝」百分比（占内高，<span className="font-mono">0</span>～<span className="font-mono">12</span>，失焦夹紧）。
                       外留白失焦后会在 <span className="font-mono">0.5</span>～<span className="font-mono">8</span> 之间。
                       <span className="mt-1.5 block text-zinc-700">
@@ -1368,28 +1376,61 @@ export default function Home() {
                           className="w-full rounded border border-zinc-300 bg-white px-2 py-1.5 text-sm tabular-nums outline-none ring-rose-500 focus:border-rose-500 focus:ring-1"
                         />
                       </label>
-                      <label className="flex flex-col gap-1 text-xs text-zinc-700">
+                      <label className="flex min-w-0 flex-col gap-2 text-xs text-zinc-700">
                         <span className="font-medium leading-snug text-zinc-800">
                           同一行相邻美甲间距
                         </span>
                         <span className="text-[11px] leading-snug text-zinc-500">
-                          每条竖缝宽度 = k × 单格宽（五列等分内宽）
+                          拖动滑条：四条竖缝合计占「内区宽度」0～
+                          {COL_GUTTER_SUM_INNER_WIDTH_PCT_MAX}%（步进 0.5）
                         </span>
-                        <select
-                          value={colInterNailGap}
-                          onChange={(e) =>
-                            setColInterNailGap(
-                              e.target.value as InterNailColGapMode,
-                            )
-                          }
-                          className="w-full rounded border border-zinc-300 bg-white px-2 py-1.5 text-sm text-zinc-900 outline-none ring-rose-500 focus:border-rose-500 focus:ring-1"
-                        >
-                          {INTER_NAIL_COL_GAP_OPTIONS.map((o) => (
-                            <option key={o.value} value={o.value}>
-                              {o.label}
-                            </option>
+                        <div className="flex min-w-0 items-center gap-3">
+                          <input
+                            type="range"
+                            min={0}
+                            max={COL_GUTTER_SUM_INNER_WIDTH_PCT_MAX}
+                            step={0.5}
+                            value={colGutterSumPct}
+                            onChange={(e) =>
+                              setColGutterSumPct(
+                                clampColGutterSumPct(
+                                  parseFloat(e.target.value),
+                                ),
+                              )
+                            }
+                            className="h-2 min-w-0 flex-1 cursor-pointer accent-rose-600"
+                            aria-valuemin={0}
+                            aria-valuemax={COL_GUTTER_SUM_INNER_WIDTH_PCT_MAX}
+                            aria-valuenow={colGutterSumPct}
+                            aria-label="同一行四条竖缝合计占内区宽度百分比"
+                          />
+                          <span className="w-12 shrink-0 text-right text-sm font-semibold tabular-nums text-zinc-900">
+                            {colGutterSumPct.toFixed(1)}%
+                          </span>
+                        </div>
+                        <p className="text-[11px] leading-snug text-zinc-600">
+                          合计约 {colGutterSumPct.toFixed(1)}% 内宽 · 每条约{" "}
+                          {(colGutterSumPct / 4).toFixed(1)}% 内宽
+                        </p>
+                        <div className="flex flex-wrap gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => setColGutterSumPct(0)}
+                            className="rounded border border-zinc-200 bg-white px-2 py-0.5 text-[11px] font-medium text-zinc-700 hover:border-rose-300 hover:bg-rose-50"
+                          >
+                            无
+                          </button>
+                          {COL_GUTTER_SUM_QUICK_PRESET_PCTS.map((pct) => (
+                            <button
+                              key={pct}
+                              type="button"
+                              onClick={() => setColGutterSumPct(pct)}
+                              className="rounded border border-zinc-200 bg-white px-2 py-0.5 text-[11px] font-medium text-zinc-700 hover:border-rose-300 hover:bg-rose-50"
+                            >
+                              {pct}%
+                            </button>
                           ))}
-                        </select>
+                        </div>
                       </label>
                       <label className="flex flex-col gap-1 text-xs text-zinc-700">
                         <span className="font-medium leading-snug text-zinc-800">
@@ -1418,7 +1459,7 @@ export default function Home() {
                           onClick={() => {
                             setColWidthDrafts([...DEFAULT_COL_WIDTH_DRAFTS]);
                             setMarginPctDraft("1.8");
-                            setColInterNailGap("tight");
+                            setColGutterSumPct(0);
                             setRowGutterPctDraft("0");
                             setGridPresetNotice(null);
                           }}

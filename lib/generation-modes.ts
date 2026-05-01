@@ -334,8 +334,12 @@ RECTIFY GEOMETRY — DO NOT COPY CASUAL TILT FROM THE SOURCE:
 UNIFORM MODULAR GRID + COLUMN ALIGNMENT:
 - **2 rows × 5 columns**; columns align across rows; **minimal** gutters and slim outer margins (tight SKU look).
 
-CELL PLACEMENT:
-- Center each nail in its cell; empty cells remain blank white.
+CELL PLACEMENT — **mandatory retail stagger (hard QA gate; failure if violated):**
+- **Root line (hard):** in **each** row, every **occupied** nail’s **cuticle / proximal TOP** lies on **one** ruler-straight horizontal baseline (same Y across that row).
+- **Tip line (hard — kills “AI grid” look):** for **each full row of five** occupied nails, you **MUST** render a **stair-stepped / staggered free-edge silhouette** at the **bottom** — **at least two clearly different** tip Y positions; longer plates extend **lower**, shorter plates end **higher**, following natural retail sheet physics. **Treat unequal nail lengths as the default** on a five-finger row. **Absolute failure / forbidden:** all five **free edges / tips** co-aligned on **one** ruler-straight horizontal line (reads as synthetic collage, not a real SKU sheet).
+- **Do NOT** vertically **center** whole nails in cells if that would break the shared root baseline or **erase** the required tip stagger.
+- **Horizontal:** center each nail in its column slot unless the source clearly used a deliberate offset.
+- **Empty cells:** solid **#FFFFFF** only.
 
 WHITE-GRID PRODUCT RULES (apply to **every occupied** nail when the output is a retail-style **2×5** on white; columns 1→5 = thumb → index → middle → ring → pinky):
 ${WHITE_BG_NAIL_GRID_FINGER_LADDER}

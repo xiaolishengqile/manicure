@@ -2,17 +2,51 @@
  * 十枚单甲拼图 / 单甲补齐 10 支 共用的白底栅格排版参数（服务端 Sharp 拼版）。
  */
 
-/** 同一行内相邻两列之间的竖向留白：单条缝宽 = k × 列槽宽度（与 Sharp 拼图一致） */
+/** 四条竖缝合计占「内宽」百分比 — 与滑条、解析上限一致 */
+export const COL_GUTTER_SUM_INNER_WIDTH_PCT_MAX = 35;
+
+/** 滑条下方「一键填入」参考值（与略疏/适中/较疏档位一致） */
+export const COL_GUTTER_SUM_QUICK_PRESET_PCTS = [14, 21, 29] as const;
+
+/** 同一行内相邻两列之间的竖向留白（内部用 k×列槽换算，界面用「占内宽 %」更好懂） */
 export type InterNailColGapMode = "tight" | "half" | "third" | "fifth";
+
+/** 四条竖缝宽度之和 ÷ 去掉外留白后的内区宽度（0～1） */
+export function colGutterTotalFracForMode(mode: InterNailColGapMode): number {
+  return colGutterSumFracFromInterNailMode(mode);
+}
+
+/** 四条竖缝合计约占内宽的整数百分比（用于文案） */
+export function colGutterTotalInnerWidthPctRounded(mode: InterNailColGapMode): number {
+  return Math.round(colGutterTotalFracForMode(mode) * 100);
+}
+
+/** 单条竖缝约占内宽的整数百分比 */
+export function colGutterEachInnerWidthPctRounded(mode: InterNailColGapMode): number {
+  const s = colGutterTotalFracForMode(mode);
+  if (s <= 1e-9) return 0;
+  return Math.round((s / 4) * 100);
+}
+
+function interNailColGapOptionLabel(mode: InterNailColGapMode): string {
+  if (mode === "tight") {
+    return "无（四条竖缝合计 0% 内宽）";
+  }
+  const total = colGutterTotalInnerWidthPctRounded(mode);
+  const each = colGutterEachInnerWidthPctRounded(mode);
+  const title =
+    mode === "fifth" ? "略疏" : mode === "third" ? "适中" : "较疏";
+  return `${title}（合计≈${total}% 内宽，每条缝≈${each}%）`;
+}
 
 export const INTER_NAIL_COL_GAP_OPTIONS: {
   value: InterNailColGapMode;
   label: string;
 }[] = [
-  { value: "tight", label: "贴紧（无间距）" },
-  { value: "half", label: "间距 = ½ 单格宽" },
-  { value: "third", label: "间距 = ⅓ 单格宽" },
-  { value: "fifth", label: "间距 = ⅕ 单格宽" },
+  { value: "tight", label: interNailColGapOptionLabel("tight") },
+  { value: "fifth", label: interNailColGapOptionLabel("fifth") },
+  { value: "third", label: interNailColGapOptionLabel("third") },
+  { value: "half", label: interNailColGapOptionLabel("half") },
 ];
 
 /** 五列相对宽度（拇→小），已归一化使最大值为 1 */
@@ -74,11 +108,11 @@ function parseInterNailColGapModeRaw(
   return null;
 }
 
-/** 将旧版「列缝占内宽 %」迁到离散档位（用于本地预设） */
+/** 将任意「列缝合计占内宽 %」迁到离散档位（兼容旧数据） */
 export function nearestInterNailColGapModeFromLegacyPct(
   pct0To100: number,
 ): InterNailColGapMode {
-  const S = clamp(pct0To100 / 100, 0, 0.12);
+  const S = clamp(pct0To100 / 100, 0, 0.35);
   if (S <= 1e-9) return "tight";
   const modes: InterNailColGapMode[] = ["tight", "fifth", "third", "half"];
   let best: InterNailColGapMode = "tight";
@@ -117,7 +151,7 @@ export function normalizeColFracs(values: number[]): [number, number, number, nu
  * - `nailGridColWidths`: 逗号分隔五数，如 `1,0.95,0.98,0.95,0.9`
  * - `nailGridMarginPct`: 外留白占边长百分比，默认 1.8（即 0.018）
  * - `nailGridColGapMode`: `tight` | `half` | `third` | `fifth`（相邻列缝宽 = k×列槽宽，优先）
- * - `nailGridColGutterPct`: 旧版列缝总宽占「内宽」百分比（无 `nailGridColGapMode` 时使用），0–12，默认 0
+ * - `nailGridColGutterPct`: 四条竖缝合计占「内宽」百分比（无 `nailGridColGapMode` 时使用），0–35，默认 0
  * - `nailGridRowGutterPct`: 行间缝占「内高」百分比，0–12，默认 0
  */
 export function parseTenSinglesGridLayoutFromFormData(
@@ -154,8 +188,9 @@ export function parseTenSinglesGridLayoutFromFormData(
     const colGutterPct = parseFloat(
       String(formData.get("nailGridColGutterPct") ?? "").trim(),
     );
+    const maxColGutterSumFrac = COL_GUTTER_SUM_INNER_WIDTH_PCT_MAX / 100;
     colGutterSumFrac = Number.isFinite(colGutterPct)
-      ? clamp(colGutterPct / 100, 0, 0.12)
+      ? clamp(colGutterPct / 100, 0, maxColGutterSumFrac)
       : DEFAULT_TEN_SINGLES_GRID_LAYOUT.colGutterSumFrac;
     interNailColGapMode = null;
   }
@@ -179,29 +214,16 @@ export function parseTenSinglesGridLayoutFromFormData(
 /**
  * 供「白底栅格 · 仅抠出已有甲片」等纯模型排版场景：把与 Sharp 拼图一致的数值写进提示词。
  */
-function interNailGapKLabel(mode: InterNailColGapMode | null | undefined): string {
-  if (mode === "half") return "1/2";
-  if (mode === "third") return "1/3";
-  if (mode === "fifth") return "1/5";
-  return "";
-}
-
 export function buildWhiteGridLayoutPromptAddendum(
   layout: TenSinglesGridLayout,
 ): string {
   const [c0, c1, c2, c3, c4] = layout.colWidthFrac;
   const marginPct = (layout.marginFrac * 100).toFixed(2);
-  const colGutterPct = (layout.colGutterSumFrac * 100).toFixed(2);
+  const colGutterPct = (layout.colGutterSumFrac * 100).toFixed(1);
+  const colGutterEachPct = ((layout.colGutterSumFrac / 4) * 100).toFixed(1);
   const rowGutterPct = (layout.rowGutterSumFrac * 100).toFixed(2);
-  const kLab = interNailGapKLabel(layout.interNailColGapMode);
-  const gapRuleEn =
-    kLab !== ""
-      ? `- **Horizontal spacing between adjacent nail columns:** the inner width splits into **5 equal column slots** of width **cellW** plus **4** vertical gaps. Each gap width = **${kLab} × cellW** (same k for all 4 gaps). Equivalently, the **sum of the 4 gaps** = **${colGutterPct}%** of inner width.`
-      : `- **Total width of the four vertical gutters between the five columns** = **${colGutterPct}%** of the **inner width** (not the full canvas); split evenly across the 4 gaps. If this is 0, columns abut with no intentional white between them except cell fit.`;
-  const gapRuleZh =
-    kLab !== ""
-      ? `**相邻列留白**：每条竖缝宽度 = **${kLab} 个列槽宽**（列槽为五等分后的单格宽度）；四条缝合计占内宽约 ${colGutterPct}%。`
-      : `**列缝合计**占内宽约 ${colGutterPct}%；`;
+  const gapRuleEn = `- **Horizontal spacing between adjacent nail columns:** the **combined width of the four vertical white gaps** between the five columns = **${colGutterPct}%** of the **inner width** (after outer margins), split evenly — each gap ≈ **${colGutterEachPct}%** of inner width. If 0%, columns abut horizontally except natural cell fit.`;
+  const gapRuleZh = `**相邻列留白**：四条竖缝**合计**占「内区宽度」约 **${colGutterPct}%**，**每条竖缝**约 **${colGutterEachPct}%**（内区 = 去掉外留白后的中间区域）；`;
   return `
 
 USER-SUPPLIED GRID LAYOUT (mandatory proportions — match this modular sheet math on the square canvas):
