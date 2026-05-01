@@ -13,7 +13,10 @@ import {
   buildScaledSingleNailGrid,
   buildTenSinglesCollageReference,
 } from "@/lib/ten-singles-collage";
-import { parseTenSinglesGridLayoutFromFormData } from "@/lib/ten-singles-grid-layout";
+import {
+  buildWhiteGridLayoutPromptAddendum,
+  parseTenSinglesGridLayoutFromFormData,
+} from "@/lib/ten-singles-grid-layout";
 import {
   exifRotate180TipDownToPng,
   exifUprightToPng,
@@ -590,10 +593,18 @@ export async function POST(request: Request) {
   const jobs = promptsForMode(mode);
   const imageUrls: string[] = [];
   const labels: string[] = [];
+  const extractGridAddendum =
+    mode === "extract_ten_grid"
+      ? buildWhiteGridLayoutPromptAddendum(
+          parseTenSinglesGridLayoutFromFormData(formData),
+        )
+      : "";
 
   try {
     for (const { prompt, label } of jobs) {
-      const url = await editOnce(openai, buffer, ext, mime, withNotes(prompt));
+      const composed =
+        mode === "extract_ten_grid" ? `${prompt}${extractGridAddendum}` : prompt;
+      const url = await editOnce(openai, buffer, ext, mime, withNotes(composed));
       if (!url) {
         return Response.json(
           {

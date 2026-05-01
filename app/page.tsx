@@ -16,7 +16,11 @@ import {
   parseGridLayoutPresets,
   type GridLayoutPreset,
 } from "@/lib/grid-layout-presets";
-import { DEFAULT_TEN_SINGLES_GRID_LAYOUT } from "@/lib/ten-singles-grid-layout";
+import {
+  DEFAULT_TEN_SINGLES_GRID_LAYOUT,
+  INTER_NAIL_COL_GAP_OPTIONS,
+  type InterNailColGapMode,
+} from "@/lib/ten-singles-grid-layout";
 
 const DEFAULT_COL_WIDTH_DRAFTS = DEFAULT_TEN_SINGLES_GRID_LAYOUT.colWidthFrac.map(
   (n) => String(n),
@@ -177,7 +181,8 @@ export default function Home() {
     ...DEFAULT_COL_WIDTH_DRAFTS,
   ]);
   const [marginPctDraft, setMarginPctDraft] = useState("1.8");
-  const [colGutterPctDraft, setColGutterPctDraft] = useState("0");
+  const [colInterNailGap, setColInterNailGap] =
+    useState<InterNailColGapMode>("tight");
   const [rowGutterPctDraft, setRowGutterPctDraft] = useState("0");
   const [gridPresets, setGridPresets] = useState<GridLayoutPreset[]>([]);
   const [gridPresetSelectedIndex, setGridPresetSelectedIndex] = useState<
@@ -196,6 +201,9 @@ export default function Home() {
   const [downloadBusyIndex, setDownloadBusyIndex] = useState<number | null>(
     null,
   );
+  const [feedFromResultBusyIndex, setFeedFromResultBusyIndex] = useState<
+    number | null
+  >(null);
   /** 下标 0–9 即合成第 1–10 位顺序，与 FormData append 顺序一致 */
   const [tenSlots, setTenSlots] = useState<TenSlotCell[]>(() => emptyTenSlots());
 
@@ -321,7 +329,7 @@ export default function Home() {
       if (!p) return;
       setColWidthDrafts([...p.colWidthDrafts]);
       setMarginPctDraft(p.marginPctDraft);
-      setColGutterPctDraft(p.colGutterPctDraft);
+      setColInterNailGap(p.colGapMode);
       setRowGutterPctDraft(p.rowGutterPctDraft);
       setGridPresetSelectedIndex(index);
       setGridPresetNotice(null);
@@ -345,7 +353,7 @@ export default function Home() {
     const snap = {
       colWidthDrafts: [...colWidthDrafts],
       marginPctDraft,
-      colGutterPctDraft,
+      colGapMode: colInterNailGap,
       rowGutterPctDraft,
     };
     const sel = gridPresetSelectedIndex;
@@ -382,7 +390,7 @@ export default function Home() {
   }, [
     colWidthDrafts,
     marginPctDraft,
-    colGutterPctDraft,
+    colInterNailGap,
     rowGutterPctDraft,
     gridPresetSelectedIndex,
     gridPresets.length,
@@ -458,6 +466,65 @@ export default function Home() {
       setDownloadBusyIndex(null);
     }
   }, []);
+
+  const convertResultToFeedImage = useCallback(
+    async (url: string, index: number) => {
+      if (tenMode) return;
+      setFeedFromResultBusyIndex(index);
+      setError(null);
+      try {
+        let blob: Blob;
+        if (url.startsWith("data:image/")) {
+          const res = await fetch(url);
+          blob = await res.blob();
+        } else if (url.startsWith("http://") || url.startsWith("https://")) {
+          const res = await fetch("/api/download-image", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ url }),
+          });
+          if (!res.ok) {
+            const text = await res.text();
+            let msg = "获取图片失败";
+            try {
+              const j = JSON.parse(text) as { error?: string };
+              if (j.error) msg = j.error;
+            } catch {
+              if (text) msg = text.slice(0, 120);
+            }
+            throw new Error(msg);
+          }
+          blob = await res.blob();
+        } else {
+          throw new Error("不支持的图片地址格式");
+        }
+        const mime = blob.type || "image/png";
+        const ext = mime.includes("webp")
+          ? "webp"
+          : mime.includes("jpeg") || mime.includes("jpg")
+            ? "jpg"
+            : "png";
+        const newFile = new File([blob], `投喂图_${index + 1}.${ext}`, {
+          type: mime.startsWith("image/") ? mime : "image/png",
+        });
+        setPreviewUrl((prev) => {
+          if (prev) URL.revokeObjectURL(prev);
+          return URL.createObjectURL(newFile);
+        });
+        setFile(newFile);
+        clearResults();
+      } catch (e) {
+        setError(
+          e instanceof Error
+            ? e.message
+            : "无法将该图设为投喂图片，请稍后重试。",
+        );
+      } finally {
+        setFeedFromResultBusyIndex(null);
+      }
+    },
+    [tenMode, clearResults],
+  );
 
   const onPickFile = useCallback(() => {
     fileInputRef.current?.click();
@@ -658,10 +725,7 @@ export default function Home() {
           "nailGridMarginPct",
           String(parsePctInput(marginPctDraft, 0.5, 8, 1.8)),
         );
-        body.set(
-          "nailGridColGutterPct",
-          String(parsePctInput(colGutterPctDraft, 0, 12, 0)),
-        );
+        body.set("nailGridColGapMode", colInterNailGap);
         body.set(
           "nailGridRowGutterPct",
           String(parsePctInput(rowGutterPctDraft, 0, 12, 0)),
@@ -684,16 +748,16 @@ export default function Home() {
           body.set("packagingBoxImage", secondFile);
           body.set("nailArrangement", nailBoxArrangement);
         }
-        if (mode === "complete_single_grid") {
+        if (
+          mode === "complete_single_grid" ||
+          mode === "extract_ten_grid"
+        ) {
           body.set("nailGridColWidths", serializeColWidthDrafts(colWidthDrafts));
           body.set(
             "nailGridMarginPct",
             String(parsePctInput(marginPctDraft, 0.5, 8, 1.8)),
           );
-          body.set(
-            "nailGridColGutterPct",
-            String(parsePctInput(colGutterPctDraft, 0, 12, 0)),
-          );
+          body.set("nailGridColGapMode", colInterNailGap);
           body.set(
             "nailGridRowGutterPct",
             String(parsePctInput(rowGutterPctDraft, 0, 12, 0)),
@@ -741,7 +805,7 @@ export default function Home() {
     nailBoxArrangement,
     colWidthDrafts,
     marginPctDraft,
-    colGutterPctDraft,
+    colInterNailGap,
     rowGutterPctDraft,
   ]);
 
@@ -895,11 +959,8 @@ export default function Home() {
     <div className="min-h-full bg-zinc-50 text-zinc-900">
       <main className="mx-auto flex max-w-5xl flex-col gap-10 px-6 py-14">
         <header className="space-y-2">
-          <p className="text-xl font-semibold tracking-wide text-rose-600 sm:text-2xl">
+          <h1 className="text-xl font-semibold tracking-wide text-rose-600 sm:text-2xl">
             美甲商家专用
-          </p>
-          <h1 className="text-3xl font-semibold tracking-tight text-zinc-950">
-            白底产品图、多角度、包装示意、2D 转 3D 包装、模特/手模饰品试戴
           </h1>
         </header>
 
@@ -1199,6 +1260,21 @@ export default function Home() {
                         >
                           {downloadBusyIndex === i ? "下载中…" : "下载"}
                         </button>
+                        {!tenMode ? (
+                          <button
+                            type="button"
+                            disabled={feedFromResultBusyIndex === i}
+                            onClick={() => {
+                              void convertResultToFeedImage(url, i);
+                            }}
+                            title="用该图替换左侧「投喂图片」中的主图，便于继续处理"
+                            className="inline-flex h-9 min-w-[6.5rem] items-center justify-center rounded-lg border border-rose-200 bg-rose-50 px-3 text-sm font-medium text-rose-900 shadow-sm transition hover:border-rose-400 hover:bg-rose-100 disabled:cursor-wait disabled:opacity-60"
+                          >
+                            {feedFromResultBusyIndex === i
+                              ? "处理中…"
+                              : "转为投喂图片"}
+                          </button>
+                        ) : null}
                       </div>
                     </figure>
                   ))}
@@ -1212,7 +1288,9 @@ export default function Home() {
               )}
             </div>
           </div>
-          {mode === "ten_singles_grid" || mode === "complete_single_grid" ? (
+          {mode === "ten_singles_grid" ||
+          mode === "complete_single_grid" ||
+          mode === "extract_ten_grid" ? (
             <div className="min-w-0 lg:col-span-2">
               <fieldset className="w-full rounded-lg border border-rose-100 bg-rose-50/40 px-3 py-3 lg:px-5">
                 <legend className="px-1 text-xs font-semibold text-rose-800">
@@ -1221,15 +1299,18 @@ export default function Home() {
                 <div className="flex w-full min-w-0 flex-col gap-3">
                   <div className="space-y-2.5">
                     <p className="text-xs leading-relaxed text-zinc-600">
-                      五列相对宽度对应上排左→右拇→小（下排同列再重复一遍）。提交时服务端会按最大列归一；缝过大时可能自动缩小甲片以适配画布。
+                      五列相对宽度对应上排左→右拇→小（下排同列再重复一遍）。
+                      {mode === "extract_ten_grid"
+                        ? "本模式由模型按下列数值排版；数值含义与十枚单甲/单甲补齐的服务端拼图一致。"
+                        : "提交时服务端会按最大列归一；缝过大时可能自动缩小甲片以适配画布。"}
                     </p>
                     <p className="text-xs leading-relaxed text-rose-900/90">
                       <span className="font-medium">关于「缝」：</span>
-                      列缝、行缝填 <span className="font-mono">0</span> 表示<strong>指甲之间不留空</strong>（贴紧排版）；不支持负数，失焦后会按 <span className="font-mono">0</span>～<span className="font-mono">12</span> 夹紧。想要白缝，把数字<strong>调大</strong>即可，例如列缝填{" "}
-                      <span className="font-mono">2～6</span>、行缝填 <span className="font-mono">1～4</span>{" "}
-                      再试（单位都是占内宽/内高的百分之几）。外留白失焦后会在 <span className="font-mono">0.5</span>～<span className="font-mono">8</span> 之间。
+                      <strong>同一行相邻美甲</strong>的左右留白由下方「相邻间距」按<strong>单格宽度</strong>（内区五等分后的列槽宽）的 ½ / ⅓ / ⅕ 设定；选「贴紧」则四列缝为 0。
+                      行与行之间的上下留白仍用「行间缝」百分比（占内高，<span className="font-mono">0</span>～<span className="font-mono">12</span>，失焦夹紧）。
+                      外留白失焦后会在 <span className="font-mono">0.5</span>～<span className="font-mono">8</span> 之间。
                       <span className="mt-1.5 block text-zinc-700">
-                        若列缝、行缝已是 <span className="font-mono">0</span> 仍觉得整图偏「宽」，多半是<strong>四边留白</strong>偏大，可把上面的<strong>外留白（占边长 %）</strong>适当<strong>调小</strong>（最低 <span className="font-mono">0.5%</span>）；指甲之间的缝<strong>不能</strong>再靠把列缝/行缝改成负数来缩小。
+                        若横向已贴紧仍觉得整图偏「宽」，多半是<strong>四边外留白</strong>偏大，可把<strong>外留白（占边长 %）</strong>适当<strong>调小</strong>。
                       </span>
                     </p>
                   </div>
@@ -1289,22 +1370,26 @@ export default function Home() {
                       </label>
                       <label className="flex flex-col gap-1 text-xs text-zinc-700">
                         <span className="font-medium leading-snug text-zinc-800">
-                          列缝总宽（占内宽 %）
+                          同一行相邻美甲间距
                         </span>
-                        <input
-                          type="text"
-                          inputMode="decimal"
-                          autoComplete="off"
-                          spellCheck={false}
-                          value={colGutterPctDraft}
-                          onChange={(e) => setColGutterPctDraft(e.target.value)}
-                          onBlur={() =>
-                            setColGutterPctDraft((v) =>
-                              pctDraftAfterBlur(v, 0, 12, 0),
+                        <span className="text-[11px] leading-snug text-zinc-500">
+                          每条竖缝宽度 = k × 单格宽（五列等分内宽）
+                        </span>
+                        <select
+                          value={colInterNailGap}
+                          onChange={(e) =>
+                            setColInterNailGap(
+                              e.target.value as InterNailColGapMode,
                             )
                           }
-                          className="w-full rounded border border-zinc-300 bg-white px-2 py-1.5 text-sm tabular-nums outline-none ring-rose-500 focus:border-rose-500 focus:ring-1"
-                        />
+                          className="w-full rounded border border-zinc-300 bg-white px-2 py-1.5 text-sm text-zinc-900 outline-none ring-rose-500 focus:border-rose-500 focus:ring-1"
+                        >
+                          {INTER_NAIL_COL_GAP_OPTIONS.map((o) => (
+                            <option key={o.value} value={o.value}>
+                              {o.label}
+                            </option>
+                          ))}
+                        </select>
                       </label>
                       <label className="flex flex-col gap-1 text-xs text-zinc-700">
                         <span className="font-medium leading-snug text-zinc-800">
@@ -1333,7 +1418,7 @@ export default function Home() {
                           onClick={() => {
                             setColWidthDrafts([...DEFAULT_COL_WIDTH_DRAFTS]);
                             setMarginPctDraft("1.8");
-                            setColGutterPctDraft("0");
+                            setColInterNailGap("tight");
                             setRowGutterPctDraft("0");
                             setGridPresetNotice(null);
                           }}

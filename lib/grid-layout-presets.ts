@@ -1,13 +1,16 @@
 /** 白底栅格排版本地预设（最多 5 套） */
 
+import type { InterNailColGapMode } from "@/lib/ten-singles-grid-layout";
+import { nearestInterNailColGapModeFromLegacyPct } from "@/lib/ten-singles-grid-layout";
+
 export const LS_GRID_LAYOUT_PRESETS = "manicure_grid_layout_presets_v1";
 export const MAX_GRID_LAYOUT_PRESETS = 5;
 
 export type GridLayoutPresetPayload = {
   colWidthDrafts: string[];
   marginPctDraft: string;
-  colGutterPctDraft: string;
   rowGutterPctDraft: string;
+  colGapMode: InterNailColGapMode;
 };
 
 export type GridLayoutPreset = { id: string } & GridLayoutPresetPayload;
@@ -26,6 +29,25 @@ function normalizeColDrafts(raw: unknown, fallback: string[]): string[] {
   const next = [...fallback];
   for (let i = 0; i < mapped.length; i++) next[i] = mapped[i] ?? next[i];
   return next;
+}
+
+function parseColGapMode(
+  o: Record<string, unknown>,
+  legacyPctDraft: string,
+): InterNailColGapMode {
+  const raw = o.colGapMode;
+  if (
+    raw === "tight" ||
+    raw === "half" ||
+    raw === "third" ||
+    raw === "fifth"
+  ) {
+    return raw;
+  }
+  const pct = parseFloat(legacyPctDraft);
+  return nearestInterNailColGapModeFromLegacyPct(
+    Number.isFinite(pct) ? pct : 0,
+  );
 }
 
 /** 从 localStorage 读出 0～5 条合法预设 */
@@ -49,16 +71,17 @@ export function parseGridLayoutPresets(
       );
       const marginPctDraft =
         typeof o.marginPctDraft === "string" ? o.marginPctDraft : "1.8";
-      const colGutterPctDraft =
+      const legacyGutter =
         typeof o.colGutterPctDraft === "string" ? o.colGutterPctDraft : "0";
       const rowGutterPctDraft =
         typeof o.rowGutterPctDraft === "string" ? o.rowGutterPctDraft : "0";
+      const colGapMode = parseColGapMode(o, legacyGutter);
       out.push({
         id,
         colWidthDrafts,
         marginPctDraft,
-        colGutterPctDraft,
         rowGutterPctDraft,
+        colGapMode,
       });
       if (out.length >= MAX_GRID_LAYOUT_PRESETS) break;
     }
