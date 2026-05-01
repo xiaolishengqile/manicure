@@ -9,6 +9,61 @@ import {
   type GenerationMode,
   type NailsInBoxArrangement,
 } from "@/lib/generation-modes";
+import {
+  LS_GRID_LAYOUT_PRESETS,
+  MAX_GRID_LAYOUT_PRESETS,
+  newGridPresetId,
+  parseGridLayoutPresets,
+  type GridLayoutPreset,
+} from "@/lib/grid-layout-presets";
+import { DEFAULT_TEN_SINGLES_GRID_LAYOUT } from "@/lib/ten-singles-grid-layout";
+
+const DEFAULT_COL_WIDTH_DRAFTS = DEFAULT_TEN_SINGLES_GRID_LAYOUT.colWidthFrac.map(
+  (n) => String(n),
+);
+
+function parsePctInput(
+  raw: string,
+  min: number,
+  max: number,
+  emptyFallback: number,
+): number {
+  const t = raw.trim().replace(/,/g, ".");
+  if (t === "") return emptyFallback;
+  const v = parseFloat(t);
+  if (Number.isNaN(v)) return emptyFallback;
+  return Math.min(max, Math.max(min, v));
+}
+
+/** 失焦后与提交一致：列缝/行缝、外留白不支持负数，会夹到合法区间 */
+function pctDraftAfterBlur(
+  raw: string,
+  min: number,
+  max: number,
+  emptyFallback: number,
+): string {
+  return String(parsePctInput(raw, min, max, emptyFallback));
+}
+
+function colWidthDraftAfterBlur(raw: string, colIndex: number): string {
+  const t = raw.trim().replace(/,/g, ".");
+  if (t === "") return DEFAULT_COL_WIDTH_DRAFTS[colIndex] ?? "1";
+  const v = parseFloat(t);
+  if (Number.isNaN(v)) return DEFAULT_COL_WIDTH_DRAFTS[colIndex] ?? "1";
+  return String(Math.min(1, Math.max(0.55, v)));
+}
+
+/** 提交用：空或非数字则回退到默认该列 */
+function serializeColWidthDrafts(drafts: string[]): string {
+  const nums = drafts.map((s, i) => {
+    const t = s.trim().replace(/,/g, ".");
+    if (t === "") return DEFAULT_TEN_SINGLES_GRID_LAYOUT.colWidthFrac[i] ?? 1;
+    const v = parseFloat(t);
+    if (Number.isNaN(v)) return DEFAULT_TEN_SINGLES_GRID_LAYOUT.colWidthFrac[i] ?? 1;
+    return Math.min(1, Math.max(0.55, v));
+  });
+  return nums.join(",");
+}
 import { DEFAULT_USER_PROMPT_PRESETS } from "@/lib/prompt-presets-defaults";
 
 const LS_LAST_USER_NOTES = "manicure_last_user_extra_notes";
@@ -117,6 +172,23 @@ export default function Home() {
   const [mode, setMode] = useState<GenerationMode>("extract_ten_grid");
   const [nailBoxArrangement, setNailBoxArrangement] =
     useState<NailsInBoxArrangement>("vertical");
+  /** 文本草稿：可删光再输入，提交时再解析成数字 */
+  const [colWidthDrafts, setColWidthDrafts] = useState<string[]>(() => [
+    ...DEFAULT_COL_WIDTH_DRAFTS,
+  ]);
+  const [marginPctDraft, setMarginPctDraft] = useState("1.8");
+  const [colGutterPctDraft, setColGutterPctDraft] = useState("0");
+  const [rowGutterPctDraft, setRowGutterPctDraft] = useState("0");
+  const [gridPresets, setGridPresets] = useState<GridLayoutPreset[]>([]);
+  const [gridPresetSelectedIndex, setGridPresetSelectedIndex] = useState<
+    number | null
+  >(null);
+  const [gridPresetNotice, setGridPresetNotice] = useState<string | null>(null);
+  const skipFirstGridPresetPersist = useRef(true);
+  /** 新增一套后由 effect 写入选中下标与提示，避免 updater 内副作用 */
+  const pendingGridAppendRef = useRef(false);
+  const gridPresetChipsRowRef = useRef<HTMLDivElement>(null);
+  const gridLayoutSavePresetButtonRef = useRef<HTMLButtonElement>(null);
   const [resultUrls, setResultUrls] = useState<string[]>([]);
   const [resultLabels, setResultLabels] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
@@ -162,6 +234,56 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    try {
+      const raw = localStorage.getItem(LS_GRID_LAYOUT_PRESETS);
+      setGridPresets(parseGridLayoutPresets(raw, DEFAULT_COL_WIDTH_DRAFTS));
+    } catch {
+      setGridPresets([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (skipFirstGridPresetPersist.current) {
+      skipFirstGridPresetPersist.current = false;
+      return;
+    }
+    try {
+      localStorage.setItem(LS_GRID_LAYOUT_PRESETS, JSON.stringify(gridPresets));
+    } catch {
+      /* private mode */
+    }
+  }, [gridPresets]);
+
+  useEffect(() => {
+    if (!gridPresetNotice) return;
+    const t = setTimeout(() => setGridPresetNotice(null), 3500);
+    return () => clearTimeout(t);
+  }, [gridPresetNotice]);
+
+  useEffect(() => {
+    if (!pendingGridAppendRef.current) return;
+    pendingGridAppendRef.current = false;
+    if (gridPresets.length === 0) return;
+    const n = gridPresets.length;
+    setGridPresetSelectedIndex(null);
+    setGridPresetNotice(`已保存为第 ${n} 套`);
+  }, [gridPresets]);
+
+  useEffect(() => {
+    const onPointerDown = (e: PointerEvent) => {
+      if (gridPresetSelectedIndex === null) return;
+      const t = e.target;
+      if (!(t instanceof Node)) return;
+      if (gridPresetChipsRowRef.current?.contains(t)) return;
+      if (gridLayoutSavePresetButtonRef.current?.contains(t)) return;
+      setGridPresetSelectedIndex(null);
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    return () =>
+      document.removeEventListener("pointerdown", onPointerDown, true);
+  }, [gridPresetSelectedIndex]);
+
+  useEffect(() => {
     if (skipNextNotesPersist.current) {
       skipNextNotesPersist.current = false;
       return;
@@ -187,6 +309,84 @@ export default function Home() {
 
   const dualKind = getDualUploadKind(mode);
   const tenMode = requiresTenSingleNails(mode);
+
+  const applyGridPresetAt = useCallback(
+    (index: number) => {
+      if (gridPresetSelectedIndex === index) {
+        setGridPresetSelectedIndex(null);
+        setGridPresetNotice(null);
+        return;
+      }
+      const p = gridPresets[index];
+      if (!p) return;
+      setColWidthDrafts([...p.colWidthDrafts]);
+      setMarginPctDraft(p.marginPctDraft);
+      setColGutterPctDraft(p.colGutterPctDraft);
+      setRowGutterPctDraft(p.rowGutterPctDraft);
+      setGridPresetSelectedIndex(index);
+      setGridPresetNotice(null);
+    },
+    [gridPresets, gridPresetSelectedIndex],
+  );
+
+  const deleteGridPresetAt = useCallback((index: number) => {
+    setGridPresets((prev) => prev.filter((_, i) => i !== index));
+    setGridPresetSelectedIndex((sel) => {
+      if (sel === null) return null;
+      if (sel === index) return null;
+      if (sel > index) return sel - 1;
+      return sel;
+    });
+    setGridPresetNotice(null);
+  }, []);
+
+  const saveGridLayoutPreset = useCallback(() => {
+    setGridPresetNotice(null);
+    const snap = {
+      colWidthDrafts: [...colWidthDrafts],
+      marginPctDraft,
+      colGutterPctDraft,
+      rowGutterPctDraft,
+    };
+    const sel = gridPresetSelectedIndex;
+    if (
+      sel !== null &&
+      sel >= 0 &&
+      sel < gridPresets.length
+    ) {
+      setGridPresets((prev) =>
+        prev.map((p, i) => (i === sel ? { ...p, ...snap } : p)),
+      );
+      setGridPresetNotice(`已覆盖第 ${sel + 1} 套`);
+      return;
+    }
+    if (gridPresets.length >= MAX_GRID_LAYOUT_PRESETS) {
+      setGridPresetNotice(
+        "已满 5 套，请先点选要覆盖的一套再点「保存配置」，或点 × 删除一套。",
+      );
+      return;
+    }
+    pendingGridAppendRef.current = true;
+    setGridPresets((prev) => {
+      if (prev.length >= MAX_GRID_LAYOUT_PRESETS) {
+        pendingGridAppendRef.current = false;
+        queueMicrotask(() =>
+          setGridPresetNotice(
+            "已满 5 套，请先点选要覆盖的一套再点「保存配置」，或点 × 删除一套。",
+          ),
+        );
+        return prev;
+      }
+      return [...prev, { id: newGridPresetId(), ...snap }];
+    });
+  }, [
+    colWidthDrafts,
+    marginPctDraft,
+    colGutterPctDraft,
+    rowGutterPctDraft,
+    gridPresetSelectedIndex,
+    gridPresets.length,
+  ]);
 
   const clearResults = useCallback(() => {
     setResultUrls([]);
@@ -453,6 +653,19 @@ export default function Home() {
           const f = tenSlots[i]!.file;
           if (f) body.append("nail", f);
         }
+        body.set("nailGridColWidths", serializeColWidthDrafts(colWidthDrafts));
+        body.set(
+          "nailGridMarginPct",
+          String(parsePctInput(marginPctDraft, 0.5, 8, 1.8)),
+        );
+        body.set(
+          "nailGridColGutterPct",
+          String(parsePctInput(colGutterPctDraft, 0, 12, 0)),
+        );
+        body.set(
+          "nailGridRowGutterPct",
+          String(parsePctInput(rowGutterPctDraft, 0, 12, 0)),
+        );
       } else {
         body.set("image", file!);
         if (dualKind === "model" && secondFile) {
@@ -470,6 +683,21 @@ export default function Home() {
         if (dualKind === "nails_box" && secondFile) {
           body.set("packagingBoxImage", secondFile);
           body.set("nailArrangement", nailBoxArrangement);
+        }
+        if (mode === "complete_single_grid") {
+          body.set("nailGridColWidths", serializeColWidthDrafts(colWidthDrafts));
+          body.set(
+            "nailGridMarginPct",
+            String(parsePctInput(marginPctDraft, 0.5, 8, 1.8)),
+          );
+          body.set(
+            "nailGridColGutterPct",
+            String(parsePctInput(colGutterPctDraft, 0, 12, 0)),
+          );
+          body.set(
+            "nailGridRowGutterPct",
+            String(parsePctInput(rowGutterPctDraft, 0, 12, 0)),
+          );
         }
       }
       body.set("userExtraNotes", userExtraNotes);
@@ -511,6 +739,10 @@ export default function Home() {
     tenSlots,
     userExtraNotes,
     nailBoxArrangement,
+    colWidthDrafts,
+    marginPctDraft,
+    colGutterPctDraft,
+    rowGutterPctDraft,
   ]);
 
   const clearUserNotes = useCallback(() => {
@@ -756,7 +988,7 @@ export default function Home() {
                 <p className="text-xs leading-relaxed text-zinc-500">
                   共 10 格：第 1–5 格 → 上排左→右；第 6–10 格 → 下排左→右。每格可单独添加、替换或删除；亦可一次选 10 张按顺序填满。提交后服务端会先将每格做「指尖朝下」校正，再按位置拼成**一张 2×5 白底参考图**，**每行内上对齐**使甲根后缘共线（格角带 1–10 小标）；模型成品提示词要求**不保留**小标。
                 </p>
-                <div className="grid w-full max-w-md grid-cols-5 gap-2">
+                <div className="grid w-full max-w-md grid-cols-5 gap-2 lg:max-w-full">
                   {tenSlots.map((cell, i) => (
                     <div
                       key={i}
@@ -980,6 +1212,201 @@ export default function Home() {
               )}
             </div>
           </div>
+          {mode === "ten_singles_grid" || mode === "complete_single_grid" ? (
+            <div className="min-w-0 lg:col-span-2">
+              <fieldset className="w-full rounded-lg border border-rose-100 bg-rose-50/40 px-3 py-3 lg:px-5">
+                <legend className="px-1 text-xs font-semibold text-rose-800">
+                  白底栅格排版（可选）
+                </legend>
+                <div className="flex w-full min-w-0 flex-col gap-3">
+                  <div className="space-y-2.5">
+                    <p className="text-xs leading-relaxed text-zinc-600">
+                      五列相对宽度对应上排左→右拇→小（下排同列再重复一遍）。提交时服务端会按最大列归一；缝过大时可能自动缩小甲片以适配画布。
+                    </p>
+                    <p className="text-xs leading-relaxed text-rose-900/90">
+                      <span className="font-medium">关于「缝」：</span>
+                      列缝、行缝填 <span className="font-mono">0</span> 表示<strong>指甲之间不留空</strong>（贴紧排版）；不支持负数，失焦后会按 <span className="font-mono">0</span>～<span className="font-mono">12</span> 夹紧。想要白缝，把数字<strong>调大</strong>即可，例如列缝填{" "}
+                      <span className="font-mono">2～6</span>、行缝填 <span className="font-mono">1～4</span>{" "}
+                      再试（单位都是占内宽/内高的百分之几）。外留白失焦后会在 <span className="font-mono">0.5</span>～<span className="font-mono">8</span> 之间。
+                      <span className="mt-1.5 block text-zinc-700">
+                        若列缝、行缝已是 <span className="font-mono">0</span> 仍觉得整图偏「宽」，多半是<strong>四边留白</strong>偏大，可把上面的<strong>外留白（占边长 %）</strong>适当<strong>调小</strong>（最低 <span className="font-mono">0.5%</span>）；指甲之间的缝<strong>不能</strong>再靠把列缝/行缝改成负数来缩小。
+                      </span>
+                    </p>
+                  </div>
+                  <div className="min-w-0 space-y-3 border-t border-rose-100/80 pt-3">
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-5 sm:gap-x-3 sm:gap-y-2">
+                      {(["拇", "食", "中", "无", "小"] as const).map((lab, i) => (
+                        <label
+                          key={lab}
+                          className="flex flex-col gap-1 text-xs text-zinc-700"
+                        >
+                          <span className="font-medium text-zinc-800">{lab}指列宽</span>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            autoComplete="off"
+                            spellCheck={false}
+                            value={colWidthDrafts[i] ?? ""}
+                            onChange={(e) => {
+                              const t = e.target.value;
+                              setColWidthDrafts((prev) => {
+                                const next = [...prev];
+                                next[i] = t;
+                                return next;
+                              });
+                            }}
+                            onBlur={() => {
+                              setColWidthDrafts((prev) => {
+                                const next = [...prev];
+                                next[i] = colWidthDraftAfterBlur(prev[i] ?? "", i);
+                                return next;
+                              });
+                            }}
+                            className="w-full rounded border border-zinc-300 bg-white px-2 py-1.5 text-sm tabular-nums outline-none ring-rose-500 focus:border-rose-500 focus:ring-1"
+                          />
+                        </label>
+                      ))}
+                    </div>
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 sm:gap-3">
+                      <label className="flex flex-col gap-1 text-xs text-zinc-700">
+                        <span className="font-medium leading-snug text-zinc-800">
+                          外留白（占边长 %）
+                        </span>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          autoComplete="off"
+                          spellCheck={false}
+                          value={marginPctDraft}
+                          onChange={(e) => setMarginPctDraft(e.target.value)}
+                          onBlur={() =>
+                            setMarginPctDraft((v) =>
+                              pctDraftAfterBlur(v, 0.5, 8, 1.8),
+                            )
+                          }
+                          className="w-full rounded border border-zinc-300 bg-white px-2 py-1.5 text-sm tabular-nums outline-none ring-rose-500 focus:border-rose-500 focus:ring-1"
+                        />
+                      </label>
+                      <label className="flex flex-col gap-1 text-xs text-zinc-700">
+                        <span className="font-medium leading-snug text-zinc-800">
+                          列缝总宽（占内宽 %）
+                        </span>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          autoComplete="off"
+                          spellCheck={false}
+                          value={colGutterPctDraft}
+                          onChange={(e) => setColGutterPctDraft(e.target.value)}
+                          onBlur={() =>
+                            setColGutterPctDraft((v) =>
+                              pctDraftAfterBlur(v, 0, 12, 0),
+                            )
+                          }
+                          className="w-full rounded border border-zinc-300 bg-white px-2 py-1.5 text-sm tabular-nums outline-none ring-rose-500 focus:border-rose-500 focus:ring-1"
+                        />
+                      </label>
+                      <label className="flex flex-col gap-1 text-xs text-zinc-700">
+                        <span className="font-medium leading-snug text-zinc-800">
+                          行间缝（占内高 %）
+                        </span>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          autoComplete="off"
+                          spellCheck={false}
+                          value={rowGutterPctDraft}
+                          onChange={(e) => setRowGutterPctDraft(e.target.value)}
+                          onBlur={() =>
+                            setRowGutterPctDraft((v) =>
+                              pctDraftAfterBlur(v, 0, 12, 0),
+                            )
+                          }
+                          className="w-full rounded border border-zinc-300 bg-white px-2 py-1.5 text-sm tabular-nums outline-none ring-rose-500 focus:border-rose-500 focus:ring-1"
+                        />
+                      </label>
+                    </div>
+                    <div className="flex flex-col gap-2 border-t border-rose-100/80 pt-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-3 sm:gap-y-2">
+                      <div className="flex min-w-0 max-w-full flex-nowrap items-center gap-1.5 overflow-x-auto py-0.5 sm:gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setColWidthDrafts([...DEFAULT_COL_WIDTH_DRAFTS]);
+                            setMarginPctDraft("1.8");
+                            setColGutterPctDraft("0");
+                            setRowGutterPctDraft("0");
+                            setGridPresetNotice(null);
+                          }}
+                          className="shrink-0 text-xs font-medium whitespace-nowrap text-rose-700 underline decoration-rose-300 underline-offset-2 hover:text-rose-900"
+                        >
+                          恢复默认排版
+                        </button>
+                        {gridPresets.length > 0 ? (
+                          <span className="hidden shrink-0 text-zinc-300 sm:inline" aria-hidden>
+                            |
+                          </span>
+                        ) : null}
+                        <div
+                          ref={gridPresetChipsRowRef}
+                          className="flex shrink-0 flex-nowrap items-center gap-1.5 sm:gap-2"
+                        >
+                          {gridPresets.map((p, i) => (
+                            <div
+                              key={p.id}
+                              className="relative inline-flex h-8 min-w-[2rem] shrink-0 items-stretch sm:h-9 sm:min-w-[2.25rem]"
+                            >
+                              <button
+                                type="button"
+                                onClick={() => applyGridPresetAt(i)}
+                                title={`载入第 ${i + 1} 套；已选中时再点此可取消选中`}
+                                className={`rounded-md border px-2 pr-5 text-[11px] font-semibold tabular-nums transition sm:rounded-lg sm:px-2.5 sm:pr-5 sm:text-xs ${
+                                  gridPresetSelectedIndex === i
+                                    ? "border-rose-500 bg-rose-100 text-rose-950 ring-1 ring-rose-400"
+                                    : "border-zinc-300 bg-white text-zinc-800 hover:border-rose-300 hover:bg-rose-50/80"
+                                }`}
+                              >
+                                {i + 1}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  deleteGridPresetAt(i);
+                                }}
+                                className="absolute -right-1 -top-1 flex h-5 min-h-[1.25rem] min-w-[1.25rem] items-center justify-center rounded-full border border-zinc-300 bg-white text-[11px] font-bold leading-none text-zinc-600 shadow-sm hover:border-rose-400 hover:bg-rose-50 hover:text-rose-800"
+                                aria-label={`删除排版预设 ${i + 1}`}
+                              >
+                                ×
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                        <button
+                          ref={gridLayoutSavePresetButtonRef}
+                          type="button"
+                          onClick={() => saveGridLayoutPreset()}
+                          title="保存当前栅格参数到预设"
+                          className="shrink-0 whitespace-nowrap rounded-md border border-rose-400 bg-rose-600 px-2 py-1 text-[11px] font-semibold leading-none text-white shadow-sm transition hover:bg-rose-700 sm:rounded-lg sm:px-2.5 sm:py-1.5 sm:text-xs"
+                        >
+                          保存配置
+                        </button>
+                      </div>
+                      {gridPresetNotice ? (
+                        <p className="min-w-0 flex-1 text-xs text-rose-800 sm:pt-0.5">
+                          {gridPresetNotice}
+                        </p>
+                      ) : (
+                        <p className="min-w-0 flex-1 text-xs text-zinc-500 sm:pt-0.5">
+                          预设保存在本机浏览器；未选中数字时保存会新增一套（最多 5 套）。再次点击已高亮的数字，或点击数字区域以外（「保存配置」除外）可取消选中。
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </fieldset>
+            </div>
+          ) : null}
         </section>
 
         <div className="flex flex-col items-stretch gap-4">

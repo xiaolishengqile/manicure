@@ -1,16 +1,10 @@
 import sharp from "sharp";
 
+import type { TenSinglesGridLayout } from "@/lib/ten-singles-grid-layout";
+import { DEFAULT_TEN_SINGLES_GRID_LAYOUT } from "@/lib/ten-singles-grid-layout";
+
 /** 白底参考拼图边长；与常见 image edit 上限兼容，单格仍有足够细节 */
 const COLLAGE_SIDE = 1600;
-
-/**
- * 列 0–4 = 拇指、食指、中指、无名指、小指：拇最大、中指第二大、食≈名、小指最小。
- * 宽度上限级差刻意收窄，避免参考图里相邻指「悬殊过大」导致模型把成品画成玩具比例。
- */
-const COL_MAX_WIDTH_FRAC: readonly number[] = [1, 0.945, 0.975, 0.945, 0.905];
-
-/** 补全/单甲尺码合集的最终列宽比例：代码直接复制缩放一枚单甲，比例可以更精确。 */
-const COL_WIDTH_FRAC: readonly number[] = [1, 0.945, 0.975, 0.945, 0.89];
 
 /** 去掉近似白边 */
 async function trimWhiteEdges(input: Buffer): Promise<Buffer> {
@@ -143,25 +137,32 @@ function cellSlotBadgeSvg(slot1Based: number, box: number): Buffer {
 
 /**
  * 将已归一化的 10 枚 PNG（顺序 = 用户第 1–10 格）拼成一张 2×5 白底参考图，左上起第 1–5 为上排。
- * 每行内强制「甲根」同一水平线（按内容顶边对齐）；列间仅轻微左大右小。
+ * 每行内强制「甲根」同一水平线（按内容顶边对齐）；列宽与缝由 `layout` 控制。
  */
 export async function buildTenSinglesCollageReference(
   cellPngBuffers: Buffer[],
+  layout: TenSinglesGridLayout = DEFAULT_TEN_SINGLES_GRID_LAYOUT,
 ): Promise<Buffer> {
   if (cellPngBuffers.length !== 10) {
     throw new Error("buildTenSinglesCollageReference requires exactly 10 buffers");
   }
   const W = COLLAGE_SIDE;
   const H = COLLAGE_SIDE;
-  /** 外边距与格间缝：尽量小，让十枚在画布里更紧凑（仍留 1px 级缝隙避免拼版粘连感） */
-  const margin = Math.round(W * 0.018);
-  const gutter = 0;
+  const margin = Math.round(W * layout.marginFrac);
   const cols = 5;
   const rows = 2;
   const innerW = W - 2 * margin;
   const innerH = H - 2 * margin;
+  const gutter =
+    cols > 1
+      ? Math.round((innerW * layout.colGutterSumFrac) / (cols - 1))
+      : 0;
+  const rowGutter =
+    rows > 1
+      ? Math.round((innerH * layout.rowGutterSumFrac) / (rows - 1))
+      : 0;
   const cellW = (innerW - (cols - 1) * gutter) / cols;
-  const cellH = (innerH - (rows - 1) * gutter) / rows;
+  const cellH = (innerH - (rows - 1) * rowGutter) / rows;
 
   const cw = Math.round(cellW);
   const ch = Math.round(cellH);
@@ -172,7 +173,7 @@ export async function buildTenSinglesCollageReference(
     const r = Math.floor(i / 5);
     const c = i % 5;
     const trimmed = await trimWhiteEdges(cellPngBuffers[i]!);
-    const frac = COL_MAX_WIDTH_FRAC[c] ?? 0.87;
+    const frac = layout.colWidthFrac[c] ?? 0.87;
     const maxW = Math.max(1, Math.round(cw * frac));
     const inner = await sharp(trimmed)
       .resize({
@@ -196,7 +197,7 @@ export async function buildTenSinglesCollageReference(
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
       const left = Math.round(margin + c * (cellW + gutter));
-      const top = Math.round(margin + r * (cellH + gutter));
+      const top = Math.round(margin + r * (cellH + rowGutter));
       const fitted = alignedRows[r]![c]!;
       composites.push({ input: fitted, left, top });
       const slot1 = r * cols + c + 1;
@@ -228,17 +229,25 @@ export async function buildTenSinglesCollageReference(
  */
 export async function buildScaledSingleNailGrid(
   singleNailBuffer: Buffer,
+  layout: TenSinglesGridLayout = DEFAULT_TEN_SINGLES_GRID_LAYOUT,
 ): Promise<Buffer> {
   const W = COLLAGE_SIDE;
   const H = COLLAGE_SIDE;
-  const margin = Math.round(W * 0.018);
-  const gutter = 0;
+  const margin = Math.round(W * layout.marginFrac);
   const cols = 5;
   const rows = 2;
   const innerW = W - 2 * margin;
   const innerH = H - 2 * margin;
+  const gutter =
+    cols > 1
+      ? Math.round((innerW * layout.colGutterSumFrac) / (cols - 1))
+      : 0;
+  const rowGutter =
+    rows > 1
+      ? Math.round((innerH * layout.rowGutterSumFrac) / (rows - 1))
+      : 0;
   const cellW = (innerW - (cols - 1) * gutter) / cols;
-  const cellH = (innerH - (rows - 1) * gutter) / rows;
+  const cellH = (innerH - (rows - 1) * rowGutter) / rows;
 
   const cw = Math.round(cellW);
   const ch = Math.round(cellH);
@@ -250,7 +259,7 @@ export async function buildScaledSingleNailGrid(
   const rowInners: Buffer[][] = [[], []];
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
-      const frac = COL_WIDTH_FRAC[c] ?? 0.87;
+      const frac = layout.colWidthFrac[c] ?? 0.87;
       const targetW = Math.max(1, Math.round(targetBaseW * frac));
       const inner = await sharp(trimmed)
         .resize({ width: targetW, withoutEnlargement: false })
@@ -271,7 +280,7 @@ export async function buildScaledSingleNailGrid(
       composites.push({
         input: alignedRows[r]![c]!,
         left: Math.round(margin + c * (cellW + gutter)),
-        top: Math.round(margin + r * (cellH + gutter)),
+        top: Math.round(margin + r * (cellH + rowGutter)),
       });
     }
   }

@@ -13,6 +13,7 @@ import {
   buildScaledSingleNailGrid,
   buildTenSinglesCollageReference,
 } from "@/lib/ten-singles-collage";
+import { parseTenSinglesGridLayoutFromFormData } from "@/lib/ten-singles-grid-layout";
 import {
   exifRotate180TipDownToPng,
   exifUprightToPng,
@@ -235,6 +236,7 @@ export async function POST(request: Request) {
   });
 
   if (mode === "ten_singles_grid") {
+    const gridLayout = parseTenSinglesGridLayoutFromFormData(formData);
     /** 与客户端 `body.append("nail", f)` 顺序一致：第 1 张→栅格 input 1，依此类推 */
     const entries = formData.getAll("nail");
     if (entries.length !== 10) {
@@ -263,7 +265,10 @@ export async function POST(request: Request) {
     }
     let collageBuffer: Buffer;
     try {
-      collageBuffer = await buildTenSinglesCollageReference(normalizedCells);
+      collageBuffer = await buildTenSinglesCollageReference(
+        normalizedCells,
+        gridLayout,
+      );
     } catch (e) {
       const message =
         e instanceof Error ? e.message : "服务端拼接十甲参考图失败";
@@ -541,6 +546,7 @@ export async function POST(request: Request) {
   const ext = extFromMime(mime);
 
   if (mode === "complete_single_grid") {
+    const gridLayout = parseTenSinglesGridLayoutFromFormData(formData);
     const job = promptsForMode(mode)[0];
     if (!job) {
       return Response.json({ error: "未找到单甲高清化提示词。" }, { status: 500 });
@@ -562,7 +568,10 @@ export async function POST(request: Request) {
       }
 
       const singleNailBuffer = await imageUrlToBuffer(singleNailUrl);
-      const gridBuffer = await buildScaledSingleNailGrid(singleNailBuffer);
+      const gridBuffer = await buildScaledSingleNailGrid(
+        singleNailBuffer,
+        gridLayout,
+      );
       const gridUrl = `data:image/png;base64,${gridBuffer.toString("base64")}`;
 
       return Response.json({
