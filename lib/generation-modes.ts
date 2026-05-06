@@ -138,12 +138,46 @@ export const WHITE_BG_NAIL_GRID_FINGER_LADDER = `FINGER-SIZE LADDER (mandatory f
 - **Columns 2 and 4 = index and ring:** **About equal** (within a few %); both between middle and pinky.
 - **Column 5 (right) = pinky:** **Smallest** — still a normal adult nail, not a sliver.
 Achieve this with **uniform per-nail scaling inside each cell only**; **never** swap which artwork sits in which column.
+- **Source-faithful footprints:** column-to-column width steps must **match what the source image shows** for each nail where visible — **forbidden:** independently scaling one nail (or stretching it) **solely** to force ladder fit if that diverges from the reference silhouette for that slot.
 （从左到右：大拇指最大、中指第二大、食指与无名指差不多大、小指最小；但相邻指之间级差要**柔和自然**，像同一套成品甲片，不要悬殊过大。）`;
 
 export const WHITE_BG_NAIL_GRID_TOP_BASELINE = `ROW-WISE TOP BASELINE (mandatory whenever nails form one or two **horizontal product rows** on white):
 - In **each** row, the **cuticle / root / proximal TOP edge** of **every** nail in that row lies on **one shared horizontal straight line** — as if a ruler rests on top of all five nails — **not** a staircase along the tops.
 - **Forbidden:** aligning the **bottom free edges (tips)** to one line while the **tops** step up/down like stairs. Tips may end at different heights; only the **top / root** line must be shared.
 （每一行：所有美甲的甲根/上缘必须在同一条水平线上；禁止只对齐指尖、甲根呈阶梯。）`;
+
+/** 白底栅格抠图 / 单甲：保真、允许修图、背景（extract + complete 共用；OUTPUT 单独常量见下） */
+const PACKSHOT_FIDELITY_CLEANUP_BG_EN = `DESIGN & SHAPE FIDELITY (hard — failure if violated):
+- Do **not** change nail **shape, length, C-curve, thickness, or proportions** vs each corresponding source nail.
+- Do **not** alter **colour, gradients, opacity, gloss level, matte finish, or surface texture** beyond the neutral cleanup below.
+- Do **not** add, remove, or modify **patterns, decals, lines, chrome, glitter distribution, or gemstones**; **no** beauty filters, **no** stylised “hero” reinterpretation.
+
+SILHOUETTE & FREE-EDGE GEOMETRY (critical — the outline defines the sold SKU):
+- Treat each nail’s **2D outer contour** (sidewalls + free edge + corner radii) as **CAD-like fidelity**: preserve **straight segments, corner angles, and tip curvature** exactly as in the source for that nail.
+- **Square / squoval / “short square / new short square / medium square” family:** keep **flat or near-flat free edges** and **true corners** — **forbidden:** rounding the tip into an oval, “pill” ends, or a generic soft dome when the source shows a square profile.
+- **Oval / ellipse family:** keep a **smooth symmetric elliptical arc** at the free edge — **forbidden:** sharpening into almond/stiletto or squaring off when the source is curved.
+- **Almond / short almond / long almond:** preserve **side taper and pointed/soft apex** — **forbidden:** blunting into short round, medium oval, or a “balanced” generic tip.
+- **Length class:** short vs medium vs long **overall extension** must match the source nail — **forbidden:** shortening or lengthening the plate to “fit” the cell or look tidier.
+- **Forbidden global drift:** do **not** converge every nail toward a **single generic “pretty” nail shape** (e.g. medium oval). Each nail may look different; **match that nail’s source silhouette**, not a catalogue average.
+
+ALLOWED IMAGE CLEANUP ONLY (subtle; no synthetic “pop”):
+- Remove **dust, lint, fingerprints, glue residue, and background noise**; clean edges **without** changing nail silhouettes.
+- **White balance:** neutralize casts to **true-to-life** colour — **no** creative recolour or saturation boost.
+- **Clarity:** slight sharpen / dehaze only — **no halos, no painted edges, no over-sharpening**.
+- **Exposure:** gentle, even correction only — **no** heavy HDR or theatrical contrast.
+- Reduce **uneven lighting or colour spill** from poor photography; keep speculars and chrome **faithful** to the source (do not repaint highlights).
+
+BACKGROUND (flat packshot):
+- **#FFFFFF** or very light flat **#F7F7F7** only — **uniform**, **no** gradients, paper texture, props, or decorative backdrop shadows. If any shadow: **one minimal uniform contact shadow** under the nail pieces only — never a vignette or graded studio wash on the backdrop.`;
+
+const PACKSHOT_OUTPUT_COMPLIANCE_EN = `OUTPUT:
+- **Exactly one** photorealistic square image; **no** text, watermarks, logos, or UI. **Commercially accurate**; **avoid visible generative artefacts** (waxy plastic, double edges, pasted collage look).`;
+
+const PACKSHOT_FAILSAFE_GRID_EN = `CONFLICT PRIORITY:
+- If strict grid / ladder / stagger rules would require **stretching, non-uniform scaling, shearing, or visible reshaping** of any nail vs the source, **preserve that nail’s exact art and silhouette** and relax alignment instead.`;
+
+const PACKSHOT_FAILSAFE_SINGLE_EN = `CONFLICT PRIORITY:
+- If cleanup would **erase micro-detail** or **change the silhouette** vs the chosen source nail, **preserve fidelity** over “prettier” reconstruction — output must remain the **same SKU nail**, not an invented variant.`;
 
 const NAILS_IN_BOX_VERTICAL_LAYOUT_EN = `**ARRANGEMENT — VERTICAL two-column window (user-selected; mandatory inside the clear window):**
 - Show **exactly two vertical columns × five nail positions** (10 slots when the FIRST reference implies a full set). **No** third column, radial fan, or staggered “galaxy” layout.
@@ -296,12 +330,12 @@ INPUT ORIENTATION — ten singles pipeline:
 - Each cell image was **server-rotated** (EXIF + **180°**) so **tip points down, cuticle up** before collage. Keep **tips down** in the final packshot — never flip cells tips-up.
 
 LAYOUT + LOOK:
-- Pure white **#FFFFFF** background; strict modular **2×5**; **minimal gutters** — only the thinnest #FFFFFF gap between adjacent nails (and between the two rows) so they read as separate pieces but **do not** leave wide white bands; maximize nail area in the frame.
+- Flat **#FFFFFF** or very light **#F7F7F7** background; strict modular **2×5**; **thin, even gutters** between adjacent nails and between the two rows (same neutral as the backdrop) — visually consistent spacing, **no** wide white bands; maximize nail area in the frame.
 - The draft reference was **server-built** with **top-edge (cuticle) row alignment**; preserve that in your output — **never** re-compose so tips share a line while cuticles staircase.
 - Columns must align vertically across both rows (no staircase offset).
 - Each nail: long axis vertical, **0°** yaw in the plane, **horizontally centered** in its column; crisp cutout edges; remove stray background, skin, props from the reference cells.
-- Preserve all artwork, gloss, chrome, glitter, 3D charms with **high input fidelity** — no invented patterns.
-- Soft even studio light; optional tiny uniform contact shadow only.
+- Preserve all artwork, gloss, chrome, glitter, 3D charms with **high input fidelity** — no invented patterns; **no** beauty filters or stylised reinterpretation.
+- Soft even e-commerce studio light; optional tiny uniform contact shadow only; **no halos** or over-sharpening.
 
 FINAL CHECK:
 - No digit badges or label boxes remain in the output.
@@ -311,14 +345,20 @@ FINAL CHECK:
 Return **ONE** square high-resolution product-ready image.`;
 
 /** 从实拍/产品图只抠已出现的甲片，不补全、不发明 */
-const EXTRACT_TEN_GRID_PROMPT = `Edit the provided reference photo of press-on / stick-on nails (display card, tray, flat-lay, hand-held set, noisy background, etc.).
+const EXTRACT_TEN_GRID_PROMPT = `You act as a **professional e-commerce product retoucher**.
 
-GOAL — **Extraction only:** cut out every **clearly visible** artificial nail from the source and place them on a clean **2×5** white grid. This is **NOT** a “fill to 10 with invented nails” task.
+TASK — **extraction and layout normalization only** (not creative nail design, not a new SKU). Do **not** redesign, re-style, or reinterpret the visible set.
+
+${PACKSHOT_FIDELITY_CLEANUP_BG_EN}
+
+Edit the provided reference photo of press-on / stick-on nails (display card, tray, flat-lay, hand-held set, noisy background, etc.).
+
+GOAL — **Extraction only:** cut out every **clearly visible** artificial nail from the source and place them on a clean **2×5** white grid. This is **NOT** a “fill to 10 with invented nails” task and **NOT** a design refresh.
 
 IMAGE EDITING TASK:
 1) Identify every **individual** nail tip that is **unambiguously** visible. Ignore skin, fingers, printed text, logos, packaging, and environment.
 2) Cut out ONLY those pieces with crisp edges (no leftover card, skin, harsh cast shadows).
-3) Composite onto pure **#FFFFFF** in a **2×5** modular grid. Preserve **left-to-right, top-to-bottom** reading order from the reference layout so each design lands in the correct slot — do not swap columns.
+3) Composite onto flat **#FFFFFF** or very light **#F7F7F7** in a **2×5** modular grid. Preserve **left-to-right, top-to-bottom** reading order from the reference layout so each design lands in the correct slot — do not swap columns.
 
 NO INVENTION (hard rule):
 - If fewer than **10** nails are clearly visible: leave every **empty** cell as **solid #FFFFFF** only — no guessed nail art, no duplicates “for symmetry,” no watermark. **Never** fabricate missing nails.
@@ -330,6 +370,7 @@ INPUT — extract_ten_grid pipeline:
 RECTIFY GEOMETRY — DO NOT COPY CASUAL TILT FROM THE SOURCE:
 - Re-pose each extracted nail upright in the grid: long axis vertical, yaw = 0° in the plane.
 - **Fingertips down** per nail in each cell.（须保证指尖朝下，甲根/后缘朝上。）
+- **No warp for layout:** do **not** scale, stretch, shear, or non-uniformly warp any individual nail to satisfy the grid; **in-plane rotation only** as needed for tips-down / straight upright.
 
 UNIFORM MODULAR GRID + COLUMN ALIGNMENT:
 - **2 rows × 5 columns**; columns align across rows; **minimal** gutters and slim outer margins (tight SKU look).
@@ -346,12 +387,25 @@ ${WHITE_BG_NAIL_GRID_FINGER_LADDER}
 
 ${WHITE_BG_NAIL_GRID_TOP_BASELINE}
 
-E-commerce studio light; optional minimal uniform contact shadow; preserve sparkle/chrome fidelity from the originals.
+${PACKSHOT_FAILSAFE_GRID_EN}
+
+LIGHTING — packshot finish:
+- Soft even **e-commerce studio** light on the nail pieces; preserve sparkle/chrome fidelity from the originals; **no** heavy contrast pushes or global colour re-grade beyond neutral cleanup above.
+
+${PACKSHOT_OUTPUT_COMPLIANCE_EN}
 
 Return a single square product-ready image.`;
 
 /** 单枚高清化：服务端先 180°，模型只出一枚真实单甲，最终 2×5 由代码复制缩放拼接。 */
-const COMPLETE_SINGLE_GRID_PROMPT = `Edit the provided reference image of press-on / stick-on nails (single nail, a few nails, card, or noisy background).
+const COMPLETE_SINGLE_GRID_PROMPT = `You act as a **professional e-commerce product retoucher**.
+
+TASK — **single-nail catalog isolation only**: one cleaned, centred cutout from the source — **not** a redesigned “hero” nail, **not** a multi-nail grid.
+
+${PACKSHOT_FIDELITY_CLEANUP_BG_EN}
+
+${PACKSHOT_FAILSAFE_SINGLE_EN}
+
+Edit the provided reference image of press-on / stick-on nails (single nail, a few nails, card, or noisy background).
 
 PIPELINE YOU MUST RESPECT — rotation before layout:
 - The image has **already** been processed on the server: **EXIF upright**, then a **global 180° rotation** so that **fingertips (free edge) point DOWN** and **nail roots / cuticle (甲根) sit at the TOP** of the frame. Treat this as the **canonical** orientation for all nails you output. **Never** undo it (no whole-canvas flip back to tips-up).
@@ -365,16 +419,19 @@ IMAGE EDITING STEPS:
 1) Identify visible nail tips; ignore skin, card text, logos, packaging clutter.
 2) If several nails are visible, choose the clearest / most representative nail art from the reference and render that design as ONE standalone nail.
 3) Reconstruct it as a realistic high-resolution catalog product cutout: long axis vertical, yaw 0°, **tips down / roots up**.（指尖朝下，甲根朝上。）
+- **No warp for hero framing:** do **not** stretch, squish, or non-uniformly scale the nail to fill the frame; preserve **true** proportions vs the source nail you chose.
 
 LIGHTING & FIDELITY:
-- Photorealistic material, natural curved press-on shape, glossy gel finish, believable thickness and highlights.
+- Photorealistic material, natural curved press-on shape, believable thickness and highlights — **match** the source finish (glossy, matte, etc.), do **not** invent a different material system.
 - Preserve the source nail art faithfully: color, gradient, chrome, glitter, gloss, decals, 3D charms, and micro-detail.
-- Soft even studio light; optional tiny uniform contact shadow; no watermark.
+- Soft even **e-commerce studio** light; optional tiny uniform contact shadow only; **no** heavy HDR.
 
 FINAL CHECK:
 - Exactly ONE nail is visible.
 - No 2×5 layout, no ten-nail set, no duplicated copies.
-- Pure white background; single centered nail; tip down; root up.
+- Pure **#FFFFFF** (or flat **#F7F7F7** if you must match a pale-neutral SKU look) background; single centered nail; tip down; root up.
+
+${PACKSHOT_OUTPUT_COMPLIANCE_EN}
 
 Return **one** square, catalog-ready image.`;
 

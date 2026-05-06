@@ -73,6 +73,7 @@ function serializeColWidthDrafts(drafts: string[]): string {
   return nums.join(",");
 }
 import { DEFAULT_USER_PROMPT_PRESETS } from "@/lib/prompt-presets-defaults";
+import { SiteAccessLogout } from "@/components/site-access-logout";
 
 const LS_LAST_USER_NOTES = "manicure_last_user_extra_notes";
 const LS_PROMPT_PRESETS = "manicure_user_prompt_presets";
@@ -966,10 +967,11 @@ export default function Home() {
   return (
     <div className="min-h-full bg-zinc-50 text-zinc-900">
       <main className="mx-auto flex max-w-5xl flex-col gap-10 px-6 py-14">
-        <header className="space-y-2">
+        <header className="flex flex-wrap items-start justify-between gap-3 space-y-2">
           <h1 className="text-xl font-semibold tracking-wide text-rose-600 sm:text-2xl">
             美甲商家专用
           </h1>
+          <SiteAccessLogout />
         </header>
 
         <input
