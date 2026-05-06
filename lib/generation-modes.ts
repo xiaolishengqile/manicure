@@ -175,7 +175,8 @@ const PACKSHOT_OUTPUT_COMPLIANCE_EN = `OUTPUT:
 
 const PACKSHOT_FAILSAFE_GRID_EN = `CONFLICT PRIORITY:
 - **Rigid vertical is non-negotiable:** applying **only** rigid in-plane rotation so **every occupied nail has yaw = 0°** (long axis parallel to the frame vertical) is **mandatory** and **does not** count as “reshaping” or violating silhouette fidelity — **never** skip rotation to preserve a source slant.
-- If strict grid / ladder / stagger rules would require **stretching, non-uniform scaling, shearing, or non-rigid warping** of any nail vs the source, **preserve that nail’s exact art and silhouette** and relax **only** those alignment shortcuts instead — **still** keep that nail **perfectly vertical**.`;
+- If strict grid / ladder / stagger rules would require **stretching, non-uniform scaling, shearing, or non-rigid warping** of any nail vs the source, **preserve that nail’s exact art and silhouette** and relax **only** non-destructive micro-adjustments (e.g. a few pixels of horizontal nudge) — **still** keep that nail **perfectly vertical**.
+- **Never “relax” these (not optional):** (1) **yaw = 0°** for every occupied nail; (2) **shared root baseline** per row where the row has five occupied nails; (3) **mandatory tip stagger** for a full row of five — **forbidden** using this fail-safe to flatten all free edges onto one line or to drop retail stair-step tips “for neatness.”`;
 
 const PACKSHOT_FAILSAFE_SINGLE_EN = `CONFLICT PRIORITY:
 - If cleanup would **erase micro-detail** or **change the silhouette** vs the chosen source nail, **preserve fidelity** over “prettier” reconstruction — output must remain the **same SKU nail**, not an invented variant.`;
@@ -186,8 +187,15 @@ const PACKSHOT_GRID_VERTICAL_QA_EN = `CANVAS-VERTICAL — **ABSOLUTE REQUIREMENT
 - **Row parity:** within **each** horizontal row, **all occupied** nails are **perfectly vertical** in the **same** direction — **forbidden:** one nail even **slightly** canted while others are straight (e.g. **only column 2 or only column 5** crooked).
 - **Column pair parity:** for **2×5** pairs (**1↔6, 2↔7, 3↔8, 4↔9, 5↔10**), when both cells show product art, **top and bottom nails in that column share the same yaw** (both **0°**) — **forbidden:** vertical bottom + tilted top (or the reverse).
 - **Rigid rotation only:** remove **all** source sheet / camera slant using **only** rigid in-plane rotation; **never** preserve partial tilt to “match” the photo.
-- **Priority:** **Vertical first, always.** If perfecting yaw = 0° slightly shifts horizontal centering or root-baseline micro-fit, **accept that** — **never** trade away verticality to keep a slant or nudge a baseline.
-- **Final self-check (mandatory):** before output, mentally verify **each of the 10 slots** — if occupied, its long axis is **indistinguishable from the frame vertical**; if any slot fails, **fix that slot**.`;
+- **Priority:** **yaw = 0° first** for every occupied nail. After rotation, you may apply **small rigid translations** (horizontal or vertical) to satisfy **shared root baseline** and **mandatory tip stagger** below — **never** keep non-zero yaw or source slant to “fit” those layout goals.
+- **Final self-check (mandatory):** before output, mentally verify **each of the 10 slots** — if occupied, its long axis is **indistinguishable from the frame vertical**; if any slot fails, **fix that slot**.
+- **Does not cancel tip stagger:** verticality is **rotation-only**. The **mandatory free-edge stair-step** (see FREE-EDGE STAGGER block below) must **still** appear for each full row of five — achieve it by **translating each nail rigidly up/down** along the vertical (different tip Y), **never** by tilting nails or aligning all tips to one horizontal ruler line for a “clean” grid.`;
+
+/** 2×5 白底每行五枚：甲根一条线 + 指尖阶梯（与 extract / ten_singles 对齐） */
+const PACKSHOT_TIP_STAGGER_ROW_EN = `FREE-EDGE STAGGER (mandatory for each **full horizontal row of five** occupied nails on the 2×5 grid):
+- **Shared root line:** all five **cuticle / proximal TOPs** on **one** ruler-straight horizontal baseline in that row.
+- **Staggered tips:** **at least two clearly different** free-edge Y positions — longer plates extend **lower**, shorter end **higher** (natural retail sheet). **Unequal visible lengths are the default.** **Forbidden:** all five **tips** collinear on **one** ruler-straight horizontal line (“flat tabletop” / synthetic grid).
+- **With yaw = 0°:** achieve stagger **only** by **vertical translation** of each upright nail — **never** by canted rotation, **never** by dropping stagger for neatness.`;
 
 const NAILS_IN_BOX_VERTICAL_LAYOUT_EN = `**ARRANGEMENT — VERTICAL two-column window (user-selected; mandatory inside the clear window):**
 - Show **exactly two vertical columns × five nail positions** (10 slots when the FIRST reference implies a full set). **No** third column, radial fan, or staggered “galaxy” layout.
@@ -336,6 +344,8 @@ ${WHITE_BG_NAIL_GRID_FINGER_LADDER}
 ${WHITE_BG_NAIL_GRID_TOP_BASELINE}
 - Top row (slots 1–5) and bottom row (slots 6–10) share the **same** column semantics (slots 1 & 6 = thumb … slots 5 & 10 = pinky).
 
+${PACKSHOT_TIP_STAGGER_ROW_EN}
+
 INPUT ORIENTATION — ten singles pipeline:
 - Each cell image was **server-rotated** (EXIF + **180°**) so **tip points down, cuticle up** before collage. Keep **tips down** in the final packshot — never flip cells tips-up.
 
@@ -352,6 +362,7 @@ FINAL CHECK:
 - No digit badges or label boxes remain in the output.
 - Slot 1 art is still top-left; slot 10 still bottom-right.
 - **Every occupied slot: nail perfectly vertical (yaw = 0°)** — re-read CANVAS-VERTICAL; **forbidden** any visible tilt in any row or column pair.
+- **Each full row of five:** FREE-EDGE STAGGER satisfied (staggered tips, **not** flat tabletop); stagger with **vertical translation** only, **yaw = 0°** preserved.
 - Finger ladder + per-row top baseline satisfied with **subtle** size steps (one SKU family); do not collapse index/ring to one tiny and one huge; **do not** exaggerate thumb vs pinky beyond the reference’s gentle spread.
 
 Return **ONE** square high-resolution product-ready image.`;
@@ -373,7 +384,7 @@ IMAGE EDITING TASK:
 3) Composite onto flat **#FFFFFF** or very light **#F7F7F7** in a **2×5** modular grid. Preserve **left-to-right, top-to-bottom** reading order from the reference layout so each design lands in the correct slot — do not swap columns.
 
 NO INVENTION (hard rule):
-- If fewer than **10** nails are clearly visible: leave every **empty** cell as **solid #FFFFFF** only — no guessed nail art, no duplicates “for symmetry,” no watermark. **Never** fabricate missing nails.
+- If fewer than **10** nails are clearly visible: leave every **empty** cell as **solid flat backdrop only** (**#FFFFFF** or **#F7F7F7**, same as the chosen canvas) — no guessed nail art, no duplicates “for symmetry,” no watermark. **Never** fabricate missing nails.
 - If more than 10 nails are visible, output **exactly 10** by following the dominant product layout (prefer the primary tray rows in reading order) and omit extras.
 
 INPUT — extract_ten_grid pipeline:
@@ -391,11 +402,12 @@ UNIFORM MODULAR GRID + COLUMN ALIGNMENT:
 - **2 rows × 5 columns**; columns align across rows; **minimal** gutters and slim outer margins (tight SKU look).
 
 CELL PLACEMENT — **mandatory retail stagger (hard QA gate; failure if violated):**
-- **Root line (hard):** in **each** row, every **occupied** nail’s **cuticle / proximal TOP** lies on **one** ruler-straight horizontal baseline (same Y across that row).
-- **Tip line (hard — kills “AI grid” look):** for **each full row of five** occupied nails, you **MUST** render a **stair-stepped / staggered free-edge silhouette** at the **bottom** — **at least two clearly different** tip Y positions; longer plates extend **lower**, shorter plates end **higher**, following natural retail sheet physics. **Treat unequal nail lengths as the default** on a five-finger row. **Absolute failure / forbidden:** all five **free edges / tips** co-aligned on **one** ruler-straight horizontal line (reads as synthetic collage, not a real SKU sheet).
+- **Co-equal with verticality:** **yaw = 0°** for every occupied nail (see CANVAS-VERTICAL) **and** the FREE-EDGE STAGGER rules **both** apply — stagger is achieved by **vertical translation** of each upright nail, **not** by rotation or by flattening tips.
+
+${PACKSHOT_TIP_STAGGER_ROW_EN}
 - **Do NOT** vertically **center** whole nails in cells if that would break the shared root baseline or **erase** the required tip stagger.
-- **Horizontal:** center each nail in its column slot unless the source clearly used a deliberate offset.
-- **Empty cells:** solid **#FFFFFF** only.
+- **Horizontal:** center each nail in its column slot unless the source clearly used a deliberate offset; keep **gutter widths visually even** across columns — **forbidden** one column gap obviously wider than its neighbours.
+- **Empty cells:** solid flat backdrop **only**, matching the canvas colour (**#FFFFFF** or **#F7F7F7** — same as the chosen background above).
 
 WHITE-GRID PRODUCT RULES (apply to **every occupied** nail when the output is a retail-style **2×5** on white; columns 1→5 = thumb → index → middle → ring → pinky):
 ${WHITE_BG_NAIL_GRID_FINGER_LADDER}
@@ -406,6 +418,9 @@ ${PACKSHOT_FAILSAFE_GRID_EN}
 
 LIGHTING — packshot finish:
 - Soft even **e-commerce studio** light on the nail pieces; preserve sparkle/chrome fidelity from the originals; **no** heavy contrast pushes or global colour re-grade beyond neutral cleanup above.
+
+FINAL QA SWEEP (internal — before output):
+- Every **occupied** slot: **yaw = 0°** (CANVAS-VERTICAL). Each **full row of five** occupied nails: **FREE-EDGE STAGGER** present (tips **not** collinear on one line). **Defringe** on white: no obvious light halos along cutout edges.
 
 ${PACKSHOT_OUTPUT_COMPLIANCE_EN}
 
