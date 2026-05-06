@@ -26,6 +26,11 @@ import {
   appendUserRefinementToPrompt,
   parseUserExtraNotes,
 } from "@/lib/extra-user-notes";
+import {
+  getReplicateApiToken,
+  imageProviderIsReplicate,
+  runReplicateGptImage2,
+} from "@/lib/replicate-gpt-image-2";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -49,6 +54,14 @@ function getBaseURL(): string {
 
 function getImageModel(): string {
   return process.env.OPENAI_IMAGE_MODEL?.trim() || "gpt-image-1.5";
+}
+
+type ImageCtx =
+  | { provider: "openai"; openai: OpenAI }
+  | { provider: "replicate"; token: string };
+
+function replicateDownloadAuth(ctx: ImageCtx): string | undefined {
+  return ctx.provider === "replicate" ? ctx.token : undefined;
 }
 
 function extFromMime(mime: string): string {
@@ -75,7 +88,10 @@ function imageDataUrlToBuffer(url: string): Buffer | null {
   return Buffer.from(decodeURIComponent(payload));
 }
 
-async function imageUrlToBuffer(url: string): Promise<Buffer> {
+async function imageUrlToBuffer(
+  url: string,
+  opts?: { replicateDownloadAuth?: string },
+): Promise<Buffer> {
   const dataBuffer = imageDataUrlToBuffer(url);
   if (dataBuffer) return dataBuffer;
 
@@ -92,11 +108,20 @@ async function imageUrlToBuffer(url: string): Promise<Buffer> {
     throw new Error("模型返回的单甲图片地址不允许下载。");
   }
 
+  const headers: Record<string, string> = { "User-Agent": "ManicureApp/1.0" };
+  if (
+    opts?.replicateDownloadAuth &&
+    (parsed.hostname === "api.replicate.com" ||
+      parsed.hostname.endsWith("replicate.delivery"))
+  ) {
+    headers.Authorization = `Bearer ${opts.replicateDownloadAuth}`;
+  }
+
   const upstream = await fetch(url, {
     redirect: "follow",
     cache: "no-store",
     signal: AbortSignal.timeout(60_000),
-    headers: { "User-Agent": "ManicureApp/1.0" },
+    headers,
   });
   if (!upstream.ok) {
     throw new Error("无法下载模型生成的单甲图片。");
@@ -119,11 +144,12 @@ async function imageUrlToBuffer(url: string): Promise<Buffer> {
  */
 async function toClientDisplayableImageUrl(
   urlOrData: string | null,
+  replicateDownloadAuth?: string,
 ): Promise<string | null> {
   if (!urlOrData) return null;
   if (urlOrData.startsWith("data:")) return urlOrData;
   try {
-    const buf = await imageUrlToBuffer(urlOrData);
+    const buf = await imageUrlToBuffer(urlOrData, { replicateDownloadAuth });
     return `data:image/png;base64,${buf.toString("base64")}`;
   } catch {
     return urlOrData;
@@ -152,6 +178,23 @@ async function editOnce(
     stream: false,
   });
   return firstImageUrl(res);
+}
+
+async function editOnceRoute(
+  ctx: ImageCtx,
+  buffer: Buffer,
+  ext: string,
+  mime: string,
+  prompt: string,
+): Promise<string | null> {
+  if (ctx.provider === "replicate") {
+    return runReplicateGptImage2({
+      token: ctx.token,
+      prompt,
+      images: [{ buffer, mime, filename: `input.${ext}` }],
+    });
+  }
+  return editOnce(ctx.openai, buffer, ext, mime, prompt);
 }
 
 /** 第一张：场景（模特或饰品陈列），第二张：美甲产品 */
@@ -187,6 +230,36 @@ async function editDualSceneNails(
   return firstImageUrl(res);
 }
 
+async function editDualSceneNailsRoute(
+  ctx: ImageCtx,
+  firstBuffer: Buffer,
+  firstMime: string,
+  secondBuffer: Buffer,
+  secondMime: string,
+  prompt: string,
+): Promise<string | null> {
+  if (ctx.provider === "replicate") {
+    const firstExt = extFromMime(firstMime);
+    const secondExt = extFromMime(secondMime);
+    return runReplicateGptImage2({
+      token: ctx.token,
+      prompt,
+      images: [
+        { buffer: firstBuffer, mime: firstMime, filename: `first.${firstExt}` },
+        { buffer: secondBuffer, mime: secondMime, filename: `second.${secondExt}` },
+      ],
+    });
+  }
+  return editDualSceneNails(
+    ctx.openai,
+    firstBuffer,
+    firstMime,
+    secondBuffer,
+    secondMime,
+    prompt,
+  );
+}
+
 async function validateImageFile(
   entry: FormDataEntryValue | null,
   fieldLabel: string,
@@ -211,8 +284,21 @@ async function validateImageFile(
 }
 
 export async function POST(request: Request) {
+  const useReplicate = imageProviderIsReplicate();
+  const replicateToken = getReplicateApiToken();
   const apiKey = getApiKey();
-  if (!apiKey) {
+
+  if (useReplicate) {
+    if (!replicateToken) {
+      return Response.json(
+        {
+          error:
+            "IMAGE_PROVIDER=replicate 时请在环境变量中设置 REPLICATE_API_TOKEN（Replicate 账户 API Token）。",
+        },
+        { status: 500 },
+      );
+    }
+  } else if (!apiKey) {
     return Response.json(
       {
         error:
@@ -221,6 +307,10 @@ export async function POST(request: Request) {
       { status: 500 },
     );
   }
+
+  const imageCtx: ImageCtx = useReplicate
+    ? { provider: "replicate", token: replicateToken! }
+    : { provider: "openai", openai: new OpenAI({ apiKey: apiKey!, baseURL: getBaseURL() }) };
 
   let formData: FormData;
   try {
@@ -233,10 +323,7 @@ export async function POST(request: Request) {
   const userExtraNotes = parseUserExtraNotes(formData.get("userExtraNotes"));
   const withNotes = (p: string) => appendUserRefinementToPrompt(p, userExtraNotes);
 
-  const openai = new OpenAI({
-    apiKey,
-    baseURL: getBaseURL(),
-  });
+  const replAuth = replicateDownloadAuth(imageCtx);
 
   if (mode === "ten_singles_grid") {
     const gridLayout = parseTenSinglesGridLayoutFromFormData(formData);
@@ -278,8 +365,8 @@ export async function POST(request: Request) {
       return Response.json({ error: message }, { status: 500 });
     }
     try {
-      const url = await editOnce(
-        openai,
+      const url = await editOnceRoute(
+        imageCtx,
         collageBuffer,
         "png",
         "image/png",
@@ -291,7 +378,7 @@ export async function POST(request: Request) {
           { status: 502 },
         );
       }
-      const displayUrl = await toClientDisplayableImageUrl(url);
+      const displayUrl = await toClientDisplayableImageUrl(url, replAuth);
       return Response.json({
         imageUrls: [displayUrl],
         labels: ["十枚单甲 · 白底合集"],
@@ -336,8 +423,8 @@ export async function POST(request: Request) {
       mode === "model_tryon" ? "试戴效果图" : "手模饰品试戴图";
 
     try {
-      const url = await editDualSceneNails(
-        openai,
+      const url = await editDualSceneNailsRoute(
+        imageCtx,
         sceneRes.buffer,
         sceneRes.mime,
         nailsRes.buffer,
@@ -350,7 +437,7 @@ export async function POST(request: Request) {
           { status: 502 },
         );
       }
-      const displayUrl = await toClientDisplayableImageUrl(url);
+      const displayUrl = await toClientDisplayableImageUrl(url, replAuth);
       return Response.json({
         imageUrls: [displayUrl],
         labels: [label],
@@ -386,8 +473,8 @@ export async function POST(request: Request) {
     const label = "开窗盒装效果图";
 
     try {
-      const url = await editDualSceneNails(
-        openai,
+      const url = await editDualSceneNailsRoute(
+        imageCtx,
         nailsRes.buffer,
         nailsRes.mime,
         boxRes.buffer,
@@ -400,7 +487,7 @@ export async function POST(request: Request) {
           { status: 502 },
         );
       }
-      const displayUrl = await toClientDisplayableImageUrl(url);
+      const displayUrl = await toClientDisplayableImageUrl(url, replAuth);
       return Response.json({
         imageUrls: [displayUrl],
         labels: [label],
@@ -435,8 +522,8 @@ export async function POST(request: Request) {
 
     try {
       for (const { prompt, label } of jobs) {
-        const url = await editDualSceneNails(
-          openai,
+        const url = await editDualSceneNailsRoute(
+          imageCtx,
           poseRes.buffer,
           poseRes.mime,
           nailsRes.buffer,
@@ -453,7 +540,7 @@ export async function POST(request: Request) {
             { status: 502 },
           );
         }
-        imageUrls.push((await toClientDisplayableImageUrl(url)) ?? url);
+        imageUrls.push((await toClientDisplayableImageUrl(url, replAuth)) ?? url);
         labels.push(label);
       }
       return Response.json({
@@ -494,8 +581,8 @@ export async function POST(request: Request) {
     try {
       for (const { prompt, label } of jobs) {
         /** flat_to_3d：先传摄影参考、再传 2D 稿，与 `FLAT_TO_3D_*` 提示中 FIRST/SECOND 定义一致，减轻整图复刻参考。 */
-        const url = await editDualSceneNails(
-          openai,
+        const url = await editDualSceneNailsRoute(
+          imageCtx,
           refRes.buffer,
           refRes.mime,
           flatRes.buffer,
@@ -512,7 +599,7 @@ export async function POST(request: Request) {
             { status: 502 },
           );
         }
-        imageUrls.push((await toClientDisplayableImageUrl(url)) ?? url);
+        imageUrls.push((await toClientDisplayableImageUrl(url, replAuth)) ?? url);
         labels.push(label);
       }
       return Response.json({
@@ -556,8 +643,8 @@ export async function POST(request: Request) {
     }
 
     try {
-      const singleNailUrl = await editOnce(
-        openai,
+      const singleNailUrl = await editOnceRoute(
+        imageCtx,
         buffer,
         ext,
         mime,
@@ -570,7 +657,9 @@ export async function POST(request: Request) {
         );
       }
 
-      const singleNailBuffer = await imageUrlToBuffer(singleNailUrl);
+      const singleNailBuffer = await imageUrlToBuffer(singleNailUrl, {
+        replicateDownloadAuth: replAuth,
+      });
       const gridBuffer = await buildScaledSingleNailGrid(
         singleNailBuffer,
         gridLayout,
@@ -604,7 +693,13 @@ export async function POST(request: Request) {
     for (const { prompt, label } of jobs) {
       const composed =
         mode === "extract_ten_grid" ? `${prompt}${extractGridAddendum}` : prompt;
-      const url = await editOnce(openai, buffer, ext, mime, withNotes(composed));
+      const url = await editOnceRoute(
+        imageCtx,
+        buffer,
+        ext,
+        mime,
+        withNotes(composed),
+      );
       if (!url) {
         return Response.json(
           {
@@ -615,7 +710,7 @@ export async function POST(request: Request) {
           { status: 502 },
         );
       }
-      imageUrls.push((await toClientDisplayableImageUrl(url)) ?? url);
+      imageUrls.push((await toClientDisplayableImageUrl(url, replAuth)) ?? url);
       labels.push(label);
     }
 
