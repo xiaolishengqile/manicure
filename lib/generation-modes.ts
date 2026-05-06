@@ -179,6 +179,14 @@ const PACKSHOT_FAILSAFE_GRID_EN = `CONFLICT PRIORITY:
 const PACKSHOT_FAILSAFE_SINGLE_EN = `CONFLICT PRIORITY:
 - If cleanup would **erase micro-detail** or **change the silhouette** vs the chosen source nail, **preserve fidelity** over “prettier” reconstruction — output must remain the **same SKU nail**, not an invented variant.`;
 
+/** 2×5 白底：强制每格竖直、行内与上下列旋转一致（extract + ten_singles 终稿共用意图） */
+const PACKSHOT_GRID_VERTICAL_QA_EN = `CANVAS-VERTICAL ALIGNMENT (hard QA — failure if violated):
+- **Every occupied cell:** the nail plate’s **long axis must be parallel to the image vertical** (**yaw = 0°** in the plane). **No noticeable** lean. **Forbidden:** leaving one nail canted from the source while **other nails in the same row** read as perfectly upright.
+- **Row parity:** within **each** horizontal row, all **occupied** nails share the **same** upright direction — **forbidden:** a single “odd one out” tilt (common failure: **only column 2** crooked).
+- **Column pair parity:** for the standard **2×5** column pairs (**slots 1↔6, 2↔7, 3↔8, 4↔9, 5↔10**), when **both** cells show product art from the **same SKU / repeated row**, **in-plane rotation must match** top vs bottom — **forbidden:** bottom nail perfectly vertical and top nail tilted for the **same** column’s design.
+- **Rigid rotation only:** correct any slant using **only** rigid in-plane rotation to vertical — **does not** violate silhouette rules; do **not** “keep” a slight sheet/camera tilt when neighbours were straightened.
+- **Priority vs baselines:** if zeroing yaw would slightly nudge horizontal position or root baseline fit, **still enforce yaw = 0° first** — **true vertical overrides** shortcuts that preserve residual source tilt.`;
+
 const NAILS_IN_BOX_VERTICAL_LAYOUT_EN = `**ARRANGEMENT — VERTICAL two-column window (user-selected; mandatory inside the clear window):**
 - Show **exactly two vertical columns × five nail positions** (10 slots when the FIRST reference implies a full set). **No** third column, radial fan, or staggered “galaxy” layout.
 - **Slot fill (when FIRST is a standard 2×5 sheet, left→right top row then bottom row):** **Left column** top→bottom = nails from **columns 1–5 of the top row** (thumb→pinky of that row). **Right column** top→bottom = **columns 1–5 of the bottom row**. **Do not** swap art between any two slots.
@@ -334,6 +342,7 @@ LAYOUT + LOOK:
 - The draft reference was **server-built** with **top-edge (cuticle) row alignment**; preserve that in your output — **never** re-compose so tips share a line while cuticles staircase.
 - Columns must align vertically across both rows (no staircase offset).
 - Each nail: long axis vertical, **0°** yaw in the plane, **horizontally centered** in its column; crisp cutout edges; remove stray background, skin, props from the reference cells.
+${PACKSHOT_GRID_VERTICAL_QA_EN}
 - Preserve all artwork, gloss, chrome, glitter, 3D charms with **high input fidelity** — no invented patterns; **no** beauty filters or stylised reinterpretation.
 - Soft even e-commerce studio light; optional tiny uniform contact shadow only; **no halos** or over-sharpening.
 
@@ -371,6 +380,8 @@ RECTIFY GEOMETRY — DO NOT COPY CASUAL TILT FROM THE SOURCE:
 - Re-pose each extracted nail upright in the grid: long axis vertical, yaw = 0° in the plane.
 - **Fingertips down** per nail in each cell.（须保证指尖朝下，甲根/后缘朝上。）
 - **No warp for layout:** do **not** scale, stretch, shear, or non-uniformly warp any individual nail to satisfy the grid; **in-plane rotation only** as needed for tips-down / straight upright.
+
+${PACKSHOT_GRID_VERTICAL_QA_EN}
 
 UNIFORM MODULAR GRID + COLUMN ALIGNMENT:
 - **2 rows × 5 columns**; columns align across rows; **minimal** gutters and slim outer margins (tight SKU look).
