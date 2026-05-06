@@ -174,18 +174,20 @@ const PACKSHOT_OUTPUT_COMPLIANCE_EN = `OUTPUT:
 - **Exactly one** photorealistic square image; **no** text, watermarks, logos, or UI. **Commercially accurate**; **avoid visible generative artefacts** (waxy plastic, double edges, pasted collage look).`;
 
 const PACKSHOT_FAILSAFE_GRID_EN = `CONFLICT PRIORITY:
-- If strict grid / ladder / stagger rules would require **stretching, non-uniform scaling, shearing, or visible reshaping** of any nail vs the source, **preserve that nail’s exact art and silhouette** and relax alignment instead.`;
+- **Rigid vertical is non-negotiable:** applying **only** rigid in-plane rotation so **every occupied nail has yaw = 0°** (long axis parallel to the frame vertical) is **mandatory** and **does not** count as “reshaping” or violating silhouette fidelity — **never** skip rotation to preserve a source slant.
+- If strict grid / ladder / stagger rules would require **stretching, non-uniform scaling, shearing, or non-rigid warping** of any nail vs the source, **preserve that nail’s exact art and silhouette** and relax **only** those alignment shortcuts instead — **still** keep that nail **perfectly vertical**.`;
 
 const PACKSHOT_FAILSAFE_SINGLE_EN = `CONFLICT PRIORITY:
 - If cleanup would **erase micro-detail** or **change the silhouette** vs the chosen source nail, **preserve fidelity** over “prettier” reconstruction — output must remain the **same SKU nail**, not an invented variant.`;
 
-/** 2×5 白底：强制每格竖直、行内与上下列旋转一致（extract + ten_singles 终稿共用意图） */
-const PACKSHOT_GRID_VERTICAL_QA_EN = `CANVAS-VERTICAL ALIGNMENT (hard QA — failure if violated):
-- **Every occupied cell:** the nail plate’s **long axis must be parallel to the image vertical** (**yaw = 0°** in the plane). **No noticeable** lean. **Forbidden:** leaving one nail canted from the source while **other nails in the same row** read as perfectly upright.
-- **Row parity:** within **each** horizontal row, all **occupied** nails share the **same** upright direction — **forbidden:** a single “odd one out” tilt (common failure: **only column 2** crooked).
-- **Column pair parity:** for the standard **2×5** column pairs (**slots 1↔6, 2↔7, 3↔8, 4↔9, 5↔10**), when **both** cells show product art from the **same SKU / repeated row**, **in-plane rotation must match** top vs bottom — **forbidden:** bottom nail perfectly vertical and top nail tilted for the **same** column’s design.
-- **Rigid rotation only:** correct any slant using **only** rigid in-plane rotation to vertical — **does not** violate silhouette rules; do **not** “keep” a slight sheet/camera tilt when neighbours were straightened.
-- **Priority vs baselines:** if zeroing yaw would slightly nudge horizontal position or root baseline fit, **still enforce yaw = 0° first** — **true vertical overrides** shortcuts that preserve residual source tilt.`;
+/** 2×5 白底：每枚必须竖直（extract + ten_singles 共用；不可妥协） */
+const PACKSHOT_GRID_VERTICAL_QA_EN = `CANVAS-VERTICAL — **ABSOLUTE REQUIREMENT (zero exceptions for occupied cells):**
+- **Every occupied cell** without exception: the nail plate’s **long axis MUST be parallel to the image vertical** (**yaw = 0°** in the plane, tips-down / roots-up already satisfied). Treat **any visible tilt** (clockwise or counter-clockwise) as **QA failure** — **correct it** with rigid rotation before finishing. **There is no** “acceptable small lean.”
+- **Row parity:** within **each** horizontal row, **all occupied** nails are **perfectly vertical** in the **same** direction — **forbidden:** one nail even **slightly** canted while others are straight (e.g. **only column 2 or only column 5** crooked).
+- **Column pair parity:** for **2×5** pairs (**1↔6, 2↔7, 3↔8, 4↔9, 5↔10**), when both cells show product art, **top and bottom nails in that column share the same yaw** (both **0°**) — **forbidden:** vertical bottom + tilted top (or the reverse).
+- **Rigid rotation only:** remove **all** source sheet / camera slant using **only** rigid in-plane rotation; **never** preserve partial tilt to “match” the photo.
+- **Priority:** **Vertical first, always.** If perfecting yaw = 0° slightly shifts horizontal centering or root-baseline micro-fit, **accept that** — **never** trade away verticality to keep a slant or nudge a baseline.
+- **Final self-check (mandatory):** before output, mentally verify **each of the 10 slots** — if occupied, its long axis is **indistinguishable from the frame vertical**; if any slot fails, **fix that slot**.`;
 
 const NAILS_IN_BOX_VERTICAL_LAYOUT_EN = `**ARRANGEMENT — VERTICAL two-column window (user-selected; mandatory inside the clear window):**
 - Show **exactly two vertical columns × five nail positions** (10 slots when the FIRST reference implies a full set). **No** third column, radial fan, or staggered “galaxy” layout.
@@ -349,6 +351,7 @@ ${PACKSHOT_GRID_VERTICAL_QA_EN}
 FINAL CHECK:
 - No digit badges or label boxes remain in the output.
 - Slot 1 art is still top-left; slot 10 still bottom-right.
+- **Every occupied slot: nail perfectly vertical (yaw = 0°)** — re-read CANVAS-VERTICAL; **forbidden** any visible tilt in any row or column pair.
 - Finger ladder + per-row top baseline satisfied with **subtle** size steps (one SKU family); do not collapse index/ring to one tiny and one huge; **do not** exaggerate thumb vs pinky beyond the reference’s gentle spread.
 
 Return **ONE** square high-resolution product-ready image.`;
@@ -377,6 +380,7 @@ INPUT — extract_ten_grid pipeline:
 - The server applied **EXIF upright only** (no automatic global **180°** on the whole upload). Still rectify **each placed nail** so **free edge points down** and **cuticle up** inside its cell.
 
 RECTIFY GEOMETRY — DO NOT COPY CASUAL TILT FROM THE SOURCE:
+- **ABSOLUTE — every occupied nail must be perfectly vertical:** source photo tilt is **noise to remove**, not a look to keep. After placement, **each** occupied nail’s long axis must coincide with the frame vertical (**yaw = 0°**); see CANVAS-VERTICAL block — **no** “almost vertical.”
 - Re-pose each extracted nail upright in the grid: long axis vertical, yaw = 0° in the plane.
 - **Fingertips down** per nail in each cell.（须保证指尖朝下，甲根/后缘朝上。）
 - **No warp for layout:** do **not** scale, stretch, shear, or non-uniformly warp any individual nail to satisfy the grid; **in-plane rotation only** as needed for tips-down / straight upright.
