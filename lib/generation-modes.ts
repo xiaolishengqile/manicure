@@ -24,7 +24,7 @@ export const GENERATION_MODE_OPTIONS: {
     value: "complete_single_grid",
     label: "白底栅格 · 单甲补齐10支",
     description:
-      "服务端先 EXIF + 整图转 180° 再送模型；模型只生成一枚高清单甲，再由服务端按 2×5 复制拼成白底栅格。**可选**：在「白底栅格排版」里调节五列相对宽度、外留白与列/行缝（与十枚单甲模式共用同一套参数逻辑）。",
+      "约定上传**甲尖朝下**的单枚（或含一枚主款）照片；服务端仅 **EXIF 转正**（不整图 180°）后送模型高清抠出一枚，再由服务端按五列**相对宽度**复制成 2×5 白底栅格以体现拇→小的尺码差。**可选**：「白底栅格排版」调节五列宽、外留白与列/行缝。",
   },
   {
     value: "ten_singles_grid",
@@ -34,9 +34,9 @@ export const GENERATION_MODE_OPTIONS: {
   },
   {
     value: "multi_angle",
-    label: "多角度上手图（固定2张）",
+    label: "多角度上手图（固定4张）",
     description:
-      "固定 **2 张**、每张**单手**真手棚拍质感（非插画）。① 正视上手主图（手背或手心朝上，指尖纹样对齐解剖游离缘）。② 约 45° 特写（同一只手、3–4 指 macro；小花等点缀须与背卡列位一致）。白底、光影一致，禁止双掌、反关节与蜡皮假肤。",
+      "固定 **4 张**、同一只手、同一棚拍。① **整手正视主图**（甲面可读）。② **指尖朝镜 cup-forward 特写**（指尖与立体厚度）。③ **侧沿指列 traverse macro**（沿尺侧或桡侧扫过指列，看 C-curve 与叠压透视）。④ **斜俯视半侧上手**（高机位约 ¾，强调指节弧与纵深，禁止与①同轴微调）。白底、光影、肤色、款式一致；小花等点缀严格按背卡列位。禁止双掌、反关节、蜡皮假肤。",
   },
   {
     value: "packaging_mockup",
@@ -426,7 +426,7 @@ ${PACKSHOT_OUTPUT_COMPLIANCE_EN}
 
 Return a single square product-ready image.`;
 
-/** 单枚高清化：服务端先 180°，模型只出一枚真实单甲，最终 2×5 由代码复制缩放拼接。 */
+/** 单枚高清化：仅 EXIF 转正；用户约定甲尖朝下；模型只出一枚抠图单甲，2×5 由服务端复制列缩放拼接。 */
 const COMPLETE_SINGLE_GRID_PROMPT = `You act as a **professional e-commerce product retoucher**.
 
 TASK — **single-nail catalog isolation only**: one cleaned, centred cutout from the source — **not** a redesigned “hero” nail, **not** a multi-nail grid.
@@ -437,8 +437,14 @@ ${PACKSHOT_FAILSAFE_SINGLE_EN}
 
 Edit the provided reference image of press-on / stick-on nails (single nail, a few nails, card, or noisy background).
 
-PIPELINE YOU MUST RESPECT — rotation before layout:
-- The image has **already** been processed on the server: **EXIF upright**, then a **global 180° rotation** so that **fingertips (free edge) point DOWN** and **nail roots / cuticle (甲根) sit at the TOP** of the frame. Treat this as the **canonical** orientation for all nails you output. **Never** undo it (no whole-canvas flip back to tips-up).
+PIPELINE / ORIENTATION (must match server — failure if violated):
+- The server applied **EXIF orientation correction only** — **no** automatic whole-image **180°** rotation on upload.
+- **User upload convention:** the frame is already **tip-down / root-up** (**free edge toward the bottom**, **cuticle toward the top**). **Do not** apply a global **180°** flip to “fix” orientation — you would **invert** correctly oriented files.
+- **Allowed:** if the chosen nail is only **slightly canted** in-plane, apply **rigid rotation** so that nail ends at **yaw = 0°**, still **tips down / roots up**. **Forbidden:** remodelling the plate to “look more vertical” by changing C-curve, length, or tip geometry.
+
+RETAIL LADDER IS SERVER-SIDE (do not simulate in one image):
+- A later **server** step duplicates your **single** cutout into a **2×5** sheet using **per-column width scaling** to suggest **thumb → pinky** sizes. **Your** job is **one** faithful cutout only — **forbidden:** painting five different nail widths, five different lengths, or a mini 5-up “preview grid” inside one output.
+- **One SKU = one silhouette:** keep the **exact** nail-plate outline, **length class**, and **tip family** (square / squoval / oval / almond / stiletto / etc.) of the source nail you isolate — **forbidden:** converging toward a generic “pretty” medium-oval catalogue default.
 
 PRIMARY OUTPUT GOAL — single realistic source nail only:
 - Output **exactly ONE** press-on nail, centered on a pure **#FFFFFF** background.
@@ -500,7 +506,7 @@ const MULTI_ANGLE_ARTWORK_AND_ORIENTATION_BLOCK = `ART FIDELITY + ORIENTATION (e
 const ANGLE_PROMPTS: { prompt: string; label: string }[] = [
   {
     label: "图1 · 正视上手主图",
-    prompt: `Using ONLY the nail artwork from the reference image (tray, card, or product photo), create shot **1 of 2**: a **photoreal** premium e-commerce **on-hand** hero — must look like a real photo, not rendered illustration.
+    prompt: `Using ONLY the nail artwork from the reference image (tray, card, or product photo), create shot **1 of 4**: a **photoreal** premium e-commerce **on-hand** hero — must look like a real photo, not rendered illustration.
 
 ${MULTI_ANGLE_HAND_ON_BODY_RULES}
 
@@ -508,27 +514,71 @@ ${MULTI_ANGLE_ARTWORK_AND_ORIENTATION_BLOCK}
 
 SHOT 1 — **front hero — dorsal OR palm-up (正视可手背或手心朝上):**
 - **Single** elegant adult **hand** with the **full set** on that hand visible. Camera may be **straight-on to the dorsal nail side** **OR** a **palm-up / palm-toward** beauty pose (common for “正视” catalog). **If palm faces up or toward camera:** follow **PALM-UP** rule in the block above — **tip/French art must sit at the real fingertip**, never inverted toward the cuticle.
+- **Shot 1 grammar:** **broadside / catalog hero** — the **main nail plate plane** (dorsal or palmar) should face the camera within roughly **0–25°** of frontal; show **most or all five nails** in one readable sheet-like composition. **Avoid** fingertip-only dominance, extreme side-on traverse, or “tips rushing the lens” here — reserve those grammars for shots **2–4**.
 - Every visible nail must reproduce the reference art with **high fidelity** (color, gradients, chrome, glitter, 3D blobs/charms) with **correct per-column accents** (flowers only where the sheet has them — typically **index + ring only** if columns 2 & 4 only).
-- Pose must stay **anatomically plausible**. This frame must read as a **different camera relationship** than shot 2 (more frontal / hero), not a mild crop of the same angle.
+- Pose must stay **anatomically plausible**. This frame must read as a **different camera relationship** than shots 2–4 (more frontal / hero), not a mild crop of the same angle.
 
 Single square frame, catalog-ready.`,
   },
   {
-    label: "图2 · 约45°上手特写",
-    prompt: `Using ONLY the nail artwork from the reference image, create shot **2 of 2**: a **photoreal** **three-quarter macro** — clearly **not** the same camera angle as shot 1; must still feel like the **same real hand** and session.
+    label: "图2 · 指尖朝镜 cup-forward 特写",
+    prompt: `Using ONLY the nail artwork from the reference image, create shot **2 of 4**: a **photoreal** **tip-forward / cup-forward macro** of the same hand and same press-ons as shot 1. This shot has **one fixed lens grammar** — do **not** improvise into a “three-quarter dorsal” or “45° catalog” version.
 
 ${MULTI_ANGLE_HAND_ON_BODY_RULES}
 
 ${MULTI_ANGLE_ARTWORK_AND_ORIENTATION_BLOCK}
 
-SHOT 2 — **~45° three-quarter macro (accent discipline — e.g. flowers on index + ring only):**
-- Still **one hand only** — macro crop must be **the same anatomical hand** (3–4 adjacent fingers of one palm), **not** a collage of fingers from different hands.
-- **Camera:** about **35–50° off the nail plane** so **depth, C-curve, and 3D relief** read clearly; **dorsal nail emphasis** preferred so column-to-finger mapping is unambiguous — **must** feel more “oblique / macro” than shot 1.
-- **Crop tighter** on **3–4 fingers** — beauty **macro** framing; knuckles and skin in shallow depth-of-field welcome.
-- **Column check:** if the reference has small flowers **only** on **sheet columns 2 and 4**, only **index and ring** show flowers; **thumb, middle, pinky = base + leopard tip only** — **re-verify** before finalizing; **no** flowers on thumb.
-- Same nail designs as reference; **do not** fall back to a flat nail sheet on white.
+SHOT 2 — **TIP-FORWARD / CUP-FORWARD MACRO (mandatory; treat any other framing as failure):**
+- **Pose:** the **same single hand** from shot 1, fingers **gently curled / cupped toward the camera** as in a salon “tip check” — **distal free edges face the lens**, knuckles and back of the hand **recede into the frame**. Wrist may exit frame at the bottom or side.
+- **Hero read:** the picture is **about the fingertips** — French bands, ombré tips, leopard tip, chrome tip caps, 3D charms or florals **at the distal end**, and the **C-curve thickness / underside glint** of each press-on must be the **dominant subject**.
+- **Crop:** tight macro on **3–5 fingertips of the SAME hand** (thumb may be in or out of frame). **Forbidden:** a wide whole-hand catalog frame, a flat-on dorsal billboard, or a side-traverse profile — those are shot 1 territory or other modes.
+- **Camera axis:** roughly **head-on into the fingertips**, with the **nail plates tilted back ~30–60°** away from the lens because of the natural cup. **Forbidden:** keeping the dorsal nail plane parallel to the sensor (that becomes shot 1 again).
+- **Depth & light:** shallow DOF welcome (front fingertips crisp, knuckles softer); soft beauty key + subtle rim light that **catches gloss / chrome / glitter on the free edge**; pure **#FFFFFF** seamless backdrop, same studio session as shot 1.
+- **Same hand, same skin, same set:** identical skin tone, ring/no-ring choice, and nail art as shot 1 — this must read as **the next click in the same shoot**, not a different model.
+- **Anatomy still holds:** exactly five digits on one hand even when some are occluded by the cup; **never** invent partial finger stubs to fill empty white.
 
-Single square frame.`,
+ART FIDELITY (hard, same as shot 1):
+- Each visible fingernail = **only** the artwork from the matching slot on the product reference (thumb=col1 … pinky=col5). **Per-column accent rule still applies** (e.g. flowers only on cols 2 & 4 → only index + ring carry florals; thumb/middle/pinky stay clean).
+- **Distal art at the real fingertip:** because the lens looks straight at the free edges, dark/French/leopard tips, chrome caps, and any “tip” motif **must read at the front-of-frame edge of each nail**, never flipped toward the cuticle.
+
+Single square frame, photoreal macro — **must be visibly a different shot type from shot 1**, not a yaw variant.`,
+  },
+  {
+    label: "图3 · 侧沿指列 traverse 特写",
+    prompt: `Using ONLY the nail artwork from the reference image, create shot **3 of 4**: a **photoreal** **side-on traverse macro** along the **finger row** of the **same single hand** and press-ons as the prior shots — same skin tone, same studio session, **#FFFFFF** seamless backdrop.
+
+${MULTI_ANGLE_HAND_ON_BODY_RULES}
+
+${MULTI_ANGLE_ARTWORK_AND_ORIENTATION_BLOCK}
+
+SHOT 3 — **RADIAL OR ULNAR TRAVERSE MACRO (mandatory lens grammar):**
+- **Camera:** place the camera **along the side of the hand** (pick **ulnar OR radial** edge — pinky-side OR thumb-side row) so the viewer **travels down the arc of 3–4 adjacent fingers** with **strong parallax** between nails — **side walls, free-edge silhouette, C-curve thickness, and length class** must read clearly.
+- **Hero read:** **depth stacking** and **sculpted rim / short-side light** on nail edges — **not** a flat dorsal billboard parallel to the sensor (that is shot 1), **not** fingertips rushing straight at the lens (that is shot 2), **not** a mild ~15–35° yaw tweak of shot 1.
+- **Pose:** fingers may be **slightly fanned or relaxed** so side planes open to the lens; **one hand only**, **five digits** anatomically correct; occluded digits stay hidden — **never** invent stubs.
+- **Crop:** macro on **3–4 fingers** of the same hand; wrist optional at frame edge.
+
+ART FIDELITY (hard):
+- Per-slot nail art + accent columns exactly as the product reference; **distal dark / French / leopard tips at anatomical free edges** on every visible nail including thumb if shown.
+
+Single square frame — must be **instantly distinguishable** from shots 1 and 2.`,
+  },
+  {
+    label: "图4 · 斜俯视半侧上手",
+    prompt: `Using ONLY the nail artwork from the reference image, create shot **4 of 4**: a **photoreal** **oblique high-angle three-quarter** view of the **same single hand** wearing the same press-ons — same skin tone, same session, **#FFFFFF** seamless backdrop. This is **neither** the frontal hero of shot 1 **nor** the tip-forward cup of shot 2 **nor** the side traverse of shot 3.
+
+${MULTI_ANGLE_HAND_ON_BODY_RULES}
+
+${MULTI_ANGLE_ARTWORK_AND_ORIENTATION_BLOCK}
+
+SHOT 4 — **HIGH-OBLIQUE / BIRD’S-THREE-QUARTER ON-HAND (mandatory contrast):**
+- **Camera:** **noticeably above** the hand (high angle) and **off-axis** (~**35–55°** combined pitch+yaw vs a straight-down or straight-on dorsal pass) so **knuckle relief, finger spacing, and foreshortening** sell **3D volume** while **most nail plates remain readable** for color/pattern QA.
+- **Pose:** hand may **rest or hover** over white with a **gentle wrist pronation/supination twist** that feels like a **second catalog angle** in the same shoot — **full set** or **4–5 nails** clearly visible; **forbidden:** duplicating shot 1’s near-orthogonal broadside (keep principal axis **clearly** different).
+- **Forbidden:** reverting to cup-forward (shot 2) or side-row traverse (shot 3); **forbidden:** another mild dorsal yaw clone of shot 1.
+
+ART FIDELITY (hard):
+- Per-slot nail art + accent columns exactly as the product reference; **distal tips** correct on every visible nail.
+
+Single square frame — **clear fourth angle** in the same premium on-hand series.`,
   },
 ];
 

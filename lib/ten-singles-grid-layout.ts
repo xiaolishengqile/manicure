@@ -62,9 +62,12 @@ export type TenSinglesGridLayout = {
   readonly interNailColGapMode?: InterNailColGapMode | null;
 };
 
-/** 与历史 `COL_MAX_WIDTH_FRAC` 一致，作默认 */
+/**
+ * 五列相对宽度（拇→食→中→名→小），与「单甲复制成 10 格」时的列内缩放一致。
+ * 略拉开拇/小与中间三指的差距，成品白底栅格上指位更易读（仍保持拇最大、中指第二大、食名接近）。
+ */
 export const DEFAULT_COL_WIDTH_FRAC: readonly [number, number, number, number, number] = [
-  1, 0.945, 0.975, 0.945, 0.905,
+  1, 0.91, 0.98, 0.91, 0.86,
 ];
 
 export const DEFAULT_TEN_SINGLES_GRID_LAYOUT: TenSinglesGridLayout = {

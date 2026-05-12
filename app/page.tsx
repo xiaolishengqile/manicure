@@ -21,6 +21,7 @@ import {
   COL_GUTTER_SUM_QUICK_PRESET_PCTS,
   DEFAULT_TEN_SINGLES_GRID_LAYOUT,
 } from "@/lib/ten-singles-grid-layout";
+import { IMAGE_MODEL_PRESET_OPTIONS } from "@/lib/image-gateway-fields";
 
 function clampColGutterSumPct(n: number): number {
   return Math.min(COL_GUTTER_SUM_INNER_WIDTH_PCT_MAX, Math.max(0, n));
@@ -179,6 +180,8 @@ export default function Home() {
   const [secondFile, setSecondFile] = useState<File | null>(null);
   const [secondPreviewUrl, setSecondPreviewUrl] = useState<string | null>(null);
   const [mode, setMode] = useState<GenerationMode>("extract_ten_grid");
+  /** 空字符串：不传 imageModel，由服务器 OPENAI_IMAGE_MODEL 决定（未设置则为 gpt-image-2） */
+  const [imageModelChoice, setImageModelChoice] = useState("");
   const [nailBoxArrangement, setNailBoxArrangement] =
     useState<NailsInBoxArrangement>("vertical");
   /** 文本草稿：可删光再输入，提交时再解析成数字 */
@@ -724,6 +727,9 @@ export default function Home() {
     try {
       const body = new FormData();
       body.set("mode", mode);
+      if (imageModelChoice.trim()) {
+        body.set("imageModel", imageModelChoice.trim());
+      }
       if (tenMode) {
         for (let i = 0; i < 10; i++) {
           const f = tenSlots[i]!.file;
@@ -808,6 +814,7 @@ export default function Home() {
     file,
     secondFile,
     mode,
+    imageModelChoice,
     tenMode,
     tenSlots,
     userExtraNotes,
@@ -885,7 +892,7 @@ export default function Home() {
 
   const resultHeading =
     mode === "multi_angle"
-      ? "产出（多角度上手 · 固定2张 · 真实棚拍感）"
+      ? "产出（多角度上手 · 固定4张 · 真实棚拍感）"
       : mode === "packaging_mockup"
         ? "产出（包装 + 手握 · 1张）"
         : mode === "flat_to_3d_packaging"
@@ -961,7 +968,7 @@ export default function Home() {
     mode === "extract_ten_grid"
       ? "托盘、卡纸、实拍平铺等；只抠图中已出现的甲片，不补全款式"
       : mode === "complete_single_grid"
-        ? "先整图转 180°；模型生成一枚高清单甲，再由服务端按尺码规则拼成 10 枚"
+        ? "请上传甲尖朝下、甲根朝上的单枚（或含一枚主款）；仅做 EXIF 转正后由模型抠出一枚高清单甲，再由服务端按五列相对宽度复制成 10 格"
         : "支持常见图片格式";
 
   return (
@@ -1049,6 +1056,61 @@ export default function Home() {
               </option>
             ))}
           </select>
+        </div>
+
+        <div className="flex flex-col gap-2 rounded-xl border border-zinc-200 bg-white p-5 shadow-sm">
+          <label
+            htmlFor="imageModel"
+            className="text-sm font-semibold text-zinc-700"
+          >
+            图像模型
+          </label>
+          <select
+            id="imageModel"
+            value={imageModelChoice}
+            onChange={(e) => {
+              setImageModelChoice(e.target.value);
+              clearResults();
+            }}
+            className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2.5 text-sm text-zinc-900 outline-none ring-rose-500 focus:border-rose-500 focus:ring-2"
+          >
+            {IMAGE_MODEL_PRESET_OPTIONS.map((opt) => (
+              <option key={opt.value || "default"} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+          <p className="text-xs leading-relaxed text-zinc-500">
+            选「默认」时由环境变量{" "}
+            <code className="rounded bg-zinc-100 px-1 py-0.5 text-[11px]">
+              OPENAI_IMAGE_MODEL
+            </code>{" "}
+            指定模型；未配置则使用{" "}
+            <code className="rounded bg-zinc-100 px-1 py-0.5 text-[11px]">
+              gpt-image-2
+            </code>
+            。请求发往{" "}
+            <code className="rounded bg-zinc-100 px-1 py-0.5 text-[11px]">
+              OPENAI_BASE_URL
+            </code>
+            {" / "}
+            <code className="rounded bg-zinc-100 px-1 py-0.5 text-[11px]">
+              LLM_GATEWAY_BASE_URL
+            </code>{" "}
+            的 OpenAI 兼容{" "}
+            <code className="rounded bg-zinc-100 px-1 py-0.5 text-[11px]">
+              images/edits
+            </code>
+            。若部署为{" "}
+            <code className="rounded bg-zinc-100 px-1 py-0.5 text-[11px]">
+              IMAGE_PROVIDER=replicate
+            </code>
+            ，此项不会传给 Replicate（仍用{" "}
+            <code className="rounded bg-zinc-100 px-1 py-0.5 text-[11px]">
+              REPLICATE_IMAGE_MODEL
+            </code>
+            ）。
+          </p>
         </div>
 
         <section className="grid gap-8 rounded-2xl border border-zinc-200 bg-white p-8 shadow-sm lg:grid-cols-2">
@@ -1312,7 +1374,9 @@ export default function Home() {
                       五列相对宽度对应上排左→右拇→小（下排同列再重复一遍）。
                       {mode === "extract_ten_grid"
                         ? "本模式由模型按下列数值排版；数值含义与十枚单甲/单甲补齐的服务端拼图一致。"
-                        : "提交时服务端会按最大列归一；缝过大时可能自动缩小甲片以适配画布。"}
+                        : mode === "complete_single_grid"
+                          ? "单甲补齐：下列数值仅用于服务端把「一枚抠图甲片」按列宽复制成 10 格（体现拇→小尺码差），**不会**再次发给模型改甲型。"
+                          : "提交时服务端会按最大列归一；缝过大时可能自动缩小甲片以适配画布。"}
                     </p>
                     <p className="text-xs leading-relaxed text-rose-900/90">
                       <span className="font-medium">关于「缝」：</span>
@@ -1697,7 +1761,7 @@ export default function Home() {
           >
             {loading
               ? mode === "multi_angle"
-                ? "正在依次生成 2 张真实感多角度上手图…"
+                ? "正在依次生成 4 张真实感多角度上手图…"
                 : mode === "packaging_mockup"
                   ? "正在生成包装手握图…"
                   : mode === "flat_to_3d_packaging"

@@ -26,6 +26,7 @@ import {
   appendUserRefinementToPrompt,
   parseUserExtraNotes,
 } from "@/lib/extra-user-notes";
+import { parseGatewayEditFieldsFromForm } from "@/lib/image-gateway-fields";
 import {
   getReplicateApiToken,
   imageProviderIsReplicate,
@@ -53,7 +54,7 @@ function getBaseURL(): string {
 }
 
 function getImageModel(): string {
-  return process.env.OPENAI_IMAGE_MODEL?.trim() || "gpt-image-1.5";
+  return process.env.OPENAI_IMAGE_MODEL?.trim() || "gpt-image-2";
 }
 
 type ImageCtx =
@@ -156,17 +157,83 @@ async function toClientDisplayableImageUrl(
   }
 }
 
+type ParallelImageJobsResult =
+  | { ok: true; imageUrls: string[]; labels: string[] }
+  | { ok: false; error: string; imageUrls: string[]; labels: string[] };
+
+/**
+ * 同一批 `images.edit` 任务并行发起，结果按 `jobs` 下标顺序组装。
+ * 与原先串行一致：按索引从小到大，遇首张失败即返回，且 `imageUrls`/`labels` 仅含已成功的前缀。
+ */
+async function runParallelImageEditJobs(args: {
+  jobs: { prompt: string; label: string }[];
+  replicateDownloadAuth?: string;
+  edit: (
+    job: { prompt: string; label: string },
+    index: number,
+  ) => Promise<string | null>;
+}): Promise<ParallelImageJobsResult> {
+  const { jobs, replicateDownloadAuth, edit } = args;
+  const rows = await Promise.all(
+    jobs.map(async (job, index) => {
+      try {
+        const url = await edit(job, index);
+        return {
+          index,
+          label: job.label,
+          url: url ?? null,
+          throwMessage: null as string | null,
+        };
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return {
+          index,
+          label: job.label,
+          url: null as string | null,
+          throwMessage: msg,
+        };
+      }
+    }),
+  );
+  rows.sort((a, b) => a.index - b.index);
+  const rawOk: string[] = [];
+  const labelsOk: string[] = [];
+  for (const row of rows) {
+    if (!row.url) {
+      const err =
+        row.throwMessage ??
+        `模型未返回第 ${row.index + 1} 张图片（既无 url 也无 b64_json）。`;
+      const imageUrls = await Promise.all(
+        rawOk.map((u) =>
+          toClientDisplayableImageUrl(u, replicateDownloadAuth).then(
+            (d) => d ?? u,
+          ),
+        ),
+      );
+      return { ok: false, error: err, imageUrls, labels: labelsOk };
+    }
+    rawOk.push(row.url);
+    labelsOk.push(row.label);
+  }
+  const imageUrls = await Promise.all(
+    rawOk.map((u) =>
+      toClientDisplayableImageUrl(u, replicateDownloadAuth).then((d) => d ?? u),
+    ),
+  );
+  return { ok: true, imageUrls, labels: labelsOk };
+}
+
 async function editOnce(
   openai: OpenAI,
   buffer: Buffer,
   ext: string,
   mime: string,
   prompt: string,
+  imageModel: string,
 ): Promise<string | null> {
   const uploadable = await toFile(buffer, `input.${ext}`, { type: mime });
-  const model = getImageModel();
   const res = await openai.images.edit({
-    model,
+    model: imageModel,
     image: uploadable,
     prompt,
     n: 1,
@@ -186,6 +253,7 @@ async function editOnceRoute(
   ext: string,
   mime: string,
   prompt: string,
+  imageModel: string,
 ): Promise<string | null> {
   if (ctx.provider === "replicate") {
     return runReplicateGptImage2({
@@ -194,7 +262,7 @@ async function editOnceRoute(
       images: [{ buffer, mime, filename: `input.${ext}` }],
     });
   }
-  return editOnce(ctx.openai, buffer, ext, mime, prompt);
+  return editOnce(ctx.openai, buffer, ext, mime, prompt, imageModel);
 }
 
 /** 第一张：场景（模特或饰品陈列），第二张：美甲产品 */
@@ -205,6 +273,7 @@ async function editDualSceneNails(
   nailsBuffer: Buffer,
   nailsMime: string,
   prompt: string,
+  imageModel: string,
 ): Promise<string | null> {
   const sceneExt = extFromMime(sceneMime);
   const nailsExt = extFromMime(nailsMime);
@@ -214,7 +283,6 @@ async function editDualSceneNails(
   const nailsFile = await toFile(nailsBuffer, `nails.${nailsExt}`, {
     type: nailsMime,
   });
-  const imageModel = getImageModel();
   const res = await openai.images.edit({
     model: imageModel,
     image: [sceneFile, nailsFile],
@@ -237,6 +305,7 @@ async function editDualSceneNailsRoute(
   secondBuffer: Buffer,
   secondMime: string,
   prompt: string,
+  imageModel: string,
 ): Promise<string | null> {
   if (ctx.provider === "replicate") {
     const firstExt = extFromMime(firstMime);
@@ -257,6 +326,7 @@ async function editDualSceneNailsRoute(
     secondBuffer,
     secondMime,
     prompt,
+    imageModel,
   );
 }
 
@@ -323,6 +393,11 @@ export async function POST(request: Request) {
   const userExtraNotes = parseUserExtraNotes(formData.get("userExtraNotes"));
   const withNotes = (p: string) => appendUserRefinementToPrompt(p, userExtraNotes);
 
+  const { model: editImageModel } = parseGatewayEditFieldsFromForm(
+    formData,
+    getImageModel(),
+  );
+
   const replAuth = replicateDownloadAuth(imageCtx);
 
   if (mode === "ten_singles_grid") {
@@ -371,6 +446,7 @@ export async function POST(request: Request) {
         "png",
         "image/png",
         withNotes(TEN_SINGLES_COLLAGE_REF_PROMPT),
+        editImageModel,
       );
       if (!url) {
         return Response.json(
@@ -430,6 +506,7 @@ export async function POST(request: Request) {
         nailsRes.buffer,
         nailsRes.mime,
         prompt,
+        editImageModel,
       );
       if (!url) {
         return Response.json(
@@ -480,6 +557,7 @@ export async function POST(request: Request) {
         boxRes.buffer,
         boxRes.mime,
         prompt,
+        editImageModel,
       );
       if (!url) {
         return Response.json(
@@ -517,44 +595,41 @@ export async function POST(request: Request) {
     }
 
     const jobs = promptsForMode(mode);
-    const imageUrls: string[] = [];
-    const labels: string[] = [];
 
     try {
-      for (const { prompt, label } of jobs) {
-        const url = await editDualSceneNailsRoute(
-          imageCtx,
-          poseRes.buffer,
-          poseRes.mime,
-          nailsRes.buffer,
-          nailsRes.mime,
-          withNotes(prompt),
+      const outcome = await runParallelImageEditJobs({
+        jobs,
+        replicateDownloadAuth: replAuth,
+        edit: async ({ prompt }) =>
+          editDualSceneNailsRoute(
+            imageCtx,
+            poseRes.buffer,
+            poseRes.mime,
+            nailsRes.buffer,
+            nailsRes.mime,
+            withNotes(prompt),
+            editImageModel,
+          ),
+      });
+      if (!outcome.ok) {
+        return Response.json(
+          {
+            error: outcome.error,
+            imageUrls: outcome.imageUrls,
+            labels: outcome.labels,
+          },
+          { status: 502 },
         );
-        if (!url) {
-          return Response.json(
-            {
-              error: `模型未返回第 ${imageUrls.length + 1} 张图片（既无 url 也无 b64_json）。`,
-              imageUrls,
-              labels,
-            },
-            { status: 502 },
-          );
-        }
-        imageUrls.push((await toClientDisplayableImageUrl(url, replAuth)) ?? url);
-        labels.push(label);
       }
       return Response.json({
-        imageUrls,
-        labels,
-        imageUrl: imageUrls[0],
+        imageUrls: outcome.imageUrls,
+        labels: outcome.labels,
+        imageUrl: outcome.imageUrls[0],
         mode,
       });
     } catch (e) {
       const message = e instanceof Error ? e.message : "图像编辑接口调用失败";
-      return Response.json(
-        { error: message, imageUrls, labels },
-        { status: 502 },
-      );
+      return Response.json({ error: message, imageUrls: [], labels: [] }, { status: 502 });
     }
   }
 
@@ -575,45 +650,41 @@ export async function POST(request: Request) {
     }
 
     const jobs = promptsForMode(mode);
-    const imageUrls: string[] = [];
-    const labels: string[] = [];
 
     try {
-      for (const { prompt, label } of jobs) {
-        /** flat_to_3d：先传摄影参考、再传 2D 稿，与 `FLAT_TO_3D_*` 提示中 FIRST/SECOND 定义一致，减轻整图复刻参考。 */
-        const url = await editDualSceneNailsRoute(
-          imageCtx,
-          refRes.buffer,
-          refRes.mime,
-          flatRes.buffer,
-          flatRes.mime,
-          withNotes(prompt),
+      const outcome = await runParallelImageEditJobs({
+        jobs,
+        replicateDownloadAuth: replAuth,
+        edit: async ({ prompt }) =>
+          editDualSceneNailsRoute(
+            imageCtx,
+            refRes.buffer,
+            refRes.mime,
+            flatRes.buffer,
+            flatRes.mime,
+            withNotes(prompt),
+            editImageModel,
+          ),
+      });
+      if (!outcome.ok) {
+        return Response.json(
+          {
+            error: outcome.error,
+            imageUrls: outcome.imageUrls,
+            labels: outcome.labels,
+          },
+          { status: 502 },
         );
-        if (!url) {
-          return Response.json(
-            {
-              error: `模型未返回第 ${imageUrls.length + 1} 张图片（既无 url 也无 b64_json）。`,
-              imageUrls,
-              labels,
-            },
-            { status: 502 },
-          );
-        }
-        imageUrls.push((await toClientDisplayableImageUrl(url, replAuth)) ?? url);
-        labels.push(label);
       }
       return Response.json({
-        imageUrls,
-        labels,
-        imageUrl: imageUrls[0],
+        imageUrls: outcome.imageUrls,
+        labels: outcome.labels,
+        imageUrl: outcome.imageUrls[0],
         mode,
       });
     } catch (e) {
       const message = e instanceof Error ? e.message : "图像编辑接口调用失败";
-      return Response.json(
-        { error: message, imageUrls, labels },
-        { status: 502 },
-      );
+      return Response.json({ error: message, imageUrls: [], labels: [] }, { status: 502 });
     }
   }
 
@@ -624,11 +695,8 @@ export async function POST(request: Request) {
 
   let buffer = nailsOnly.buffer;
   let mime = nailsOnly.mime;
-  if (mode === "complete_single_grid") {
-    const pre = await exifRotate180TipDownToPng(buffer, mime);
-    buffer = pre.buffer;
-    mime = pre.mime;
-  } else if (mode === "extract_ten_grid") {
+  if (mode === "complete_single_grid" || mode === "extract_ten_grid") {
+    /** 单甲补齐：用户约定甲尖朝下，仅 EXIF 转正。抠多枚：仅 EXIF 转正，不整图 180°。 */
     const pre = await exifUprightToPng(buffer, mime);
     buffer = pre.buffer;
     mime = pre.mime;
@@ -649,6 +717,7 @@ export async function POST(request: Request) {
         ext,
         mime,
         withNotes(job.prompt),
+        editImageModel,
       );
       if (!singleNailUrl) {
         return Response.json(
@@ -680,8 +749,6 @@ export async function POST(request: Request) {
   }
 
   const jobs = promptsForMode(mode);
-  const imageUrls: string[] = [];
-  const labels: string[] = [];
   const extractGridAddendum =
     mode === "extract_ten_grid"
       ? buildWhiteGridLayoutPromptAddendum(
@@ -690,40 +757,42 @@ export async function POST(request: Request) {
       : "";
 
   try {
-    for (const { prompt, label } of jobs) {
-      const composed =
-        mode === "extract_ten_grid" ? `${prompt}${extractGridAddendum}` : prompt;
-      const url = await editOnceRoute(
-        imageCtx,
-        buffer,
-        ext,
-        mime,
-        withNotes(composed),
-      );
-      if (!url) {
-        return Response.json(
-          {
-            error: `模型未返回第 ${imageUrls.length + 1} 张图片（既无 url 也无 b64_json）。`,
-            imageUrls,
-            labels,
-          },
-          { status: 502 },
+    const outcome = await runParallelImageEditJobs({
+      jobs,
+      replicateDownloadAuth: replAuth,
+      edit: async ({ prompt }) => {
+        const composed =
+          mode === "extract_ten_grid" ? `${prompt}${extractGridAddendum}` : prompt;
+        return editOnceRoute(
+          imageCtx,
+          buffer,
+          ext,
+          mime,
+          withNotes(composed),
+          editImageModel,
         );
-      }
-      imageUrls.push((await toClientDisplayableImageUrl(url, replAuth)) ?? url);
-      labels.push(label);
+      },
+    });
+    if (!outcome.ok) {
+      return Response.json(
+        {
+          error: outcome.error,
+          imageUrls: outcome.imageUrls,
+          labels: outcome.labels,
+        },
+        { status: 502 },
+      );
     }
-
     return Response.json({
-      imageUrls,
-      labels,
-      imageUrl: imageUrls[0],
+      imageUrls: outcome.imageUrls,
+      labels: outcome.labels,
+      imageUrl: outcome.imageUrls[0],
       mode,
     });
   } catch (e) {
     const message = e instanceof Error ? e.message : "图像编辑接口调用失败";
     return Response.json(
-      { error: message, imageUrls, labels },
+      { error: message, imageUrls: [], labels: [] },
       { status: 502 },
     );
   }
