@@ -25,6 +25,7 @@ import {
   appendUserRefinementToPrompt,
   parseUserExtraNotes,
 } from "@/lib/extra-user-notes";
+import { parseSoloImageEditPrompt } from "@/lib/solo-image-edit-prompt";
 import { parseGatewayEditFieldsFromForm } from "@/lib/image-gateway-fields";
 import {
   getReplicateApiToken,
@@ -390,7 +391,13 @@ export async function POST(request: Request) {
 
   const mode: GenerationMode = parseGenerationMode(formData.get("mode"));
   const userExtraNotes = parseUserExtraNotes(formData.get("userExtraNotes"));
+  const soloImageEditPrompt = parseSoloImageEditPrompt(
+    formData.get("soloImageEditPrompt"),
+  );
   const withNotes = (p: string) => appendUserRefinementToPrompt(p, userExtraNotes);
+  /** 有「仅自定义」时：不拼系统 prompt、不拼补充说明、不拼栅格排版 addendum */
+  const imageEditPrompt = (systemPrompt: string) =>
+    soloImageEditPrompt ?? withNotes(systemPrompt);
 
   const { model: editImageModel } = parseGatewayEditFieldsFromForm(
     formData,
@@ -444,7 +451,7 @@ export async function POST(request: Request) {
         collageBuffer,
         "png",
         "image/png",
-        withNotes(TEN_SINGLES_COLLAGE_REF_PROMPT),
+        imageEditPrompt(TEN_SINGLES_COLLAGE_REF_PROMPT),
         editImageModel,
       );
       if (!url) {
@@ -491,7 +498,7 @@ export async function POST(request: Request) {
       return Response.json({ error: sceneRes.error }, { status: 400 });
     }
 
-    const prompt = withNotes(
+    const prompt = imageEditPrompt(
       mode === "model_tryon" ? MODEL_TRYON_PROMPT : ACCESSORY_TRYON_PROMPT,
     );
     const label =
@@ -545,7 +552,7 @@ export async function POST(request: Request) {
     const arrangement = parseNailsInBoxArrangement(
       formData.get("nailArrangement"),
     );
-    const prompt = withNotes(buildNailsInBoxPackagingPrompt(arrangement));
+    const prompt = imageEditPrompt(buildNailsInBoxPackagingPrompt(arrangement));
     const label = "开窗盒装效果图";
 
     try {
@@ -606,7 +613,7 @@ export async function POST(request: Request) {
             poseRes.mime,
             nailsRes.buffer,
             nailsRes.mime,
-            withNotes(prompt),
+            imageEditPrompt(prompt),
             editImageModel,
           ),
       });
@@ -661,7 +668,7 @@ export async function POST(request: Request) {
             refRes.mime,
             flatRes.buffer,
             flatRes.mime,
-            withNotes(prompt),
+            imageEditPrompt(prompt),
             editImageModel,
           ),
       });
@@ -715,7 +722,7 @@ export async function POST(request: Request) {
         buffer,
         ext,
         mime,
-        withNotes(job.prompt),
+        imageEditPrompt(job.prompt),
         editImageModel,
       );
       if (!singleNailUrl) {
@@ -767,7 +774,7 @@ export async function POST(request: Request) {
           buffer,
           ext,
           mime,
-          withNotes(composed),
+          imageEditPrompt(composed),
           editImageModel,
         );
       },

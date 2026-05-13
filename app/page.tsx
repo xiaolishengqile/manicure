@@ -215,6 +215,8 @@ export default function Home() {
   const [tenSlots, setTenSlots] = useState<TenSlotCell[]>(() => emptyTenSlots());
 
   const [userExtraNotes, setUserExtraNotes] = useState("");
+  /** 非空时：出图只发本段 + 当前上传图，不发送系统默认提示词与「补充说明」 */
+  const [soloImageEditPrompt, setSoloImageEditPrompt] = useState("");
   const skipNextNotesPersist = useRef(true);
   const [promptPresets, setPromptPresets] =
     useState<PromptPresetItem[]>(defaultPresetItems);
@@ -780,6 +782,7 @@ export default function Home() {
         }
       }
       body.set("userExtraNotes", userExtraNotes);
+      body.set("soloImageEditPrompt", soloImageEditPrompt);
       const res = await fetch("/api/extract-nails", {
         method: "POST",
         body,
@@ -818,6 +821,7 @@ export default function Home() {
     tenMode,
     tenSlots,
     userExtraNotes,
+    soloImageEditPrompt,
     nailBoxArrangement,
     colWidthDrafts,
     marginPctDraft,
@@ -1080,38 +1084,41 @@ export default function Home() {
               </option>
             ))}
           </select>
-          <p className="text-xs leading-relaxed text-zinc-500">
-            选「默认」时由环境变量{" "}
-            <code className="rounded bg-zinc-100 px-1 py-0.5 text-[11px]">
-              OPENAI_IMAGE_MODEL
-            </code>{" "}
-            指定模型；未配置则使用{" "}
-            <code className="rounded bg-zinc-100 px-1 py-0.5 text-[11px]">
-              gpt-image-2
-            </code>
-            。请求发往{" "}
-            <code className="rounded bg-zinc-100 px-1 py-0.5 text-[11px]">
-              OPENAI_BASE_URL
-            </code>
-            {" / "}
-            <code className="rounded bg-zinc-100 px-1 py-0.5 text-[11px]">
-              LLM_GATEWAY_BASE_URL
-            </code>{" "}
-            的 OpenAI 兼容{" "}
-            <code className="rounded bg-zinc-100 px-1 py-0.5 text-[11px]">
-              images/edits
-            </code>
-            。若部署为{" "}
-            <code className="rounded bg-zinc-100 px-1 py-0.5 text-[11px]">
-              IMAGE_PROVIDER=replicate
-            </code>
-            ，此项不会传给 Replicate（仍用{" "}
-            <code className="rounded bg-zinc-100 px-1 py-0.5 text-[11px]">
-              REPLICATE_IMAGE_MODEL
-            </code>
-            ）。
-          </p>
         </div>
+
+        <button
+          type="button"
+          disabled={!canSubmit}
+          onClick={onExtract}
+          className="inline-flex h-14 w-full items-center justify-center rounded-xl bg-rose-600 text-base font-semibold text-white shadow-md transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:bg-zinc-300 disabled:text-zinc-500"
+        >
+          {loading
+            ? mode === "multi_angle"
+              ? "正在依次生成 4 张真实感多角度上手图…"
+              : mode === "packaging_mockup"
+                ? "正在生成包装手握图…"
+                : mode === "flat_to_3d_packaging"
+                  ? "正在生成 3D 开窗盒装主视图…"
+                  : mode === "nails_in_box"
+                    ? "正在生成开窗盒装效果图…"
+                    : mode === "model_tryon"
+                      ? "正在生成试戴图…"
+                      : mode === "accessory_tryon"
+                        ? "正在生成手模试戴广告图…"
+                        : mode === "ten_singles_grid"
+                          ? "正在合成十甲白底合集…"
+                          : mode === "complete_single_grid"
+                            ? "正在生成单甲并拼成 10 枚…"
+                            : mode === "extract_ten_grid"
+                              ? "正在抠图排版…"
+                              : "正在生成…"
+            : "开始生成"}
+        </button>
+        {error ? (
+          <p className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+            {error}
+          </p>
+        ) : null}
 
         <section className="grid gap-8 rounded-2xl border border-zinc-200 bg-white p-8 shadow-sm lg:grid-cols-2">
           <div className="flex flex-col gap-4">
@@ -1360,248 +1367,42 @@ export default function Home() {
               )}
             </div>
           </div>
-          {mode === "ten_singles_grid" ||
-          mode === "complete_single_grid" ||
-          mode === "extract_ten_grid" ? (
-            <div className="min-w-0 lg:col-span-2">
-              <fieldset className="w-full rounded-lg border border-rose-100 bg-rose-50/40 px-3 py-3 lg:px-5">
-                <legend className="px-1 text-xs font-semibold text-rose-800">
-                  白底栅格排版（可选）
-                </legend>
-                <div className="flex w-full min-w-0 flex-col gap-3">
-                  <div className="space-y-2.5">
-                    <p className="text-xs leading-relaxed text-zinc-600">
-                      五列相对宽度对应上排左→右拇→小（下排同列再重复一遍）。
-                      {mode === "extract_ten_grid"
-                        ? "本模式由模型按下列数值排版；数值含义与十枚单甲/单甲补齐的服务端拼图一致。"
-                        : mode === "complete_single_grid"
-                          ? "单甲补齐：下列数值仅用于服务端把「一枚抠图甲片」按列宽复制成 10 格（体现拇→小尺码差），**不会**再次发给模型改甲型。"
-                          : "提交时服务端会按最大列归一；缝过大时可能自动缩小甲片以适配画布。"}
-                    </p>
-                    <p className="text-xs leading-relaxed text-rose-900/90">
-                      <span className="font-medium">关于「缝」：</span>
-                      <strong>同一行相邻美甲</strong>的左右留白用下方滑条控制：<strong>四条竖缝合计占「内区宽度」的百分之几</strong>（内区 = 去掉外留白后的中间区域）；下方会显示<strong>每条竖缝约占内宽的几%</strong>（合计÷4）。
-                      行与行之间的上下留白仍用「行间缝」百分比（占内高，<span className="font-mono">0</span>～<span className="font-mono">12</span>，失焦夹紧）。
-                      外留白失焦后会在 <span className="font-mono">0.5</span>～<span className="font-mono">8</span> 之间。
-                      <span className="mt-1.5 block text-zinc-700">
-                        若横向已贴紧仍觉得整图偏「宽」，多半是<strong>四边外留白</strong>偏大，可把<strong>外留白（占边长 %）</strong>适当<strong>调小</strong>。
-                      </span>
-                    </p>
-                  </div>
-                  <div className="min-w-0 space-y-3 border-t border-rose-100/80 pt-3">
-                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-5 sm:gap-x-3 sm:gap-y-2">
-                      {(["拇", "食", "中", "无", "小"] as const).map((lab, i) => (
-                        <label
-                          key={lab}
-                          className="flex flex-col gap-1 text-xs text-zinc-700"
-                        >
-                          <span className="font-medium text-zinc-800">{lab}指列宽</span>
-                          <input
-                            type="text"
-                            inputMode="decimal"
-                            autoComplete="off"
-                            spellCheck={false}
-                            value={colWidthDrafts[i] ?? ""}
-                            onChange={(e) => {
-                              const t = e.target.value;
-                              setColWidthDrafts((prev) => {
-                                const next = [...prev];
-                                next[i] = t;
-                                return next;
-                              });
-                            }}
-                            onBlur={() => {
-                              setColWidthDrafts((prev) => {
-                                const next = [...prev];
-                                next[i] = colWidthDraftAfterBlur(prev[i] ?? "", i);
-                                return next;
-                              });
-                            }}
-                            className="w-full rounded border border-zinc-300 bg-white px-2 py-1.5 text-sm tabular-nums outline-none ring-rose-500 focus:border-rose-500 focus:ring-1"
-                          />
-                        </label>
-                      ))}
-                    </div>
-                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 sm:gap-3">
-                      <label className="flex flex-col gap-1 text-xs text-zinc-700">
-                        <span className="font-medium leading-snug text-zinc-800">
-                          外留白（占边长 %）
-                        </span>
-                        <input
-                          type="text"
-                          inputMode="decimal"
-                          autoComplete="off"
-                          spellCheck={false}
-                          value={marginPctDraft}
-                          onChange={(e) => setMarginPctDraft(e.target.value)}
-                          onBlur={() =>
-                            setMarginPctDraft((v) =>
-                              pctDraftAfterBlur(v, 0.5, 8, 1.8),
-                            )
-                          }
-                          className="w-full rounded border border-zinc-300 bg-white px-2 py-1.5 text-sm tabular-nums outline-none ring-rose-500 focus:border-rose-500 focus:ring-1"
-                        />
-                      </label>
-                      <label className="flex min-w-0 flex-col gap-2 text-xs text-zinc-700">
-                        <span className="font-medium leading-snug text-zinc-800">
-                          同一行相邻美甲间距
-                        </span>
-                        <span className="text-[11px] leading-snug text-zinc-500">
-                          拖动滑条：四条竖缝合计占「内区宽度」0～
-                          {COL_GUTTER_SUM_INNER_WIDTH_PCT_MAX}%（步进 0.5）
-                        </span>
-                        <div className="flex min-w-0 items-center gap-3">
-                          <input
-                            type="range"
-                            min={0}
-                            max={COL_GUTTER_SUM_INNER_WIDTH_PCT_MAX}
-                            step={0.5}
-                            value={colGutterSumPct}
-                            onChange={(e) =>
-                              setColGutterSumPct(
-                                clampColGutterSumPct(
-                                  parseFloat(e.target.value),
-                                ),
-                              )
-                            }
-                            className="h-2 min-w-0 flex-1 cursor-pointer accent-rose-600"
-                            aria-valuemin={0}
-                            aria-valuemax={COL_GUTTER_SUM_INNER_WIDTH_PCT_MAX}
-                            aria-valuenow={colGutterSumPct}
-                            aria-label="同一行四条竖缝合计占内区宽度百分比"
-                          />
-                          <span className="w-12 shrink-0 text-right text-sm font-semibold tabular-nums text-zinc-900">
-                            {colGutterSumPct.toFixed(1)}%
-                          </span>
-                        </div>
-                        <p className="text-[11px] leading-snug text-zinc-600">
-                          合计约 {colGutterSumPct.toFixed(1)}% 内宽 · 每条约{" "}
-                          {(colGutterSumPct / 4).toFixed(1)}% 内宽
-                        </p>
-                        <div className="flex flex-wrap gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => setColGutterSumPct(0)}
-                            className="rounded border border-zinc-200 bg-white px-2 py-0.5 text-[11px] font-medium text-zinc-700 hover:border-rose-300 hover:bg-rose-50"
-                          >
-                            无
-                          </button>
-                          {COL_GUTTER_SUM_QUICK_PRESET_PCTS.map((pct) => (
-                            <button
-                              key={pct}
-                              type="button"
-                              onClick={() => setColGutterSumPct(pct)}
-                              className="rounded border border-zinc-200 bg-white px-2 py-0.5 text-[11px] font-medium text-zinc-700 hover:border-rose-300 hover:bg-rose-50"
-                            >
-                              {pct}%
-                            </button>
-                          ))}
-                        </div>
-                      </label>
-                      <label className="flex flex-col gap-1 text-xs text-zinc-700">
-                        <span className="font-medium leading-snug text-zinc-800">
-                          行间缝（占内高 %）
-                        </span>
-                        <input
-                          type="text"
-                          inputMode="decimal"
-                          autoComplete="off"
-                          spellCheck={false}
-                          value={rowGutterPctDraft}
-                          onChange={(e) => setRowGutterPctDraft(e.target.value)}
-                          onBlur={() =>
-                            setRowGutterPctDraft((v) =>
-                              pctDraftAfterBlur(v, 0, 12, 0),
-                            )
-                          }
-                          className="w-full rounded border border-zinc-300 bg-white px-2 py-1.5 text-sm tabular-nums outline-none ring-rose-500 focus:border-rose-500 focus:ring-1"
-                        />
-                      </label>
-                    </div>
-                    <div className="flex flex-col gap-2 border-t border-rose-100/80 pt-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-3 sm:gap-y-2">
-                      <div className="flex min-w-0 max-w-full flex-nowrap items-center gap-1.5 overflow-x-auto py-0.5 sm:gap-2">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setColWidthDrafts([...DEFAULT_COL_WIDTH_DRAFTS]);
-                            setMarginPctDraft("1.8");
-                            setColGutterSumPct(0);
-                            setRowGutterPctDraft("0");
-                            setGridPresetNotice(null);
-                          }}
-                          className="shrink-0 text-xs font-medium whitespace-nowrap text-rose-700 underline decoration-rose-300 underline-offset-2 hover:text-rose-900"
-                        >
-                          恢复默认排版
-                        </button>
-                        {gridPresets.length > 0 ? (
-                          <span className="hidden shrink-0 text-zinc-300 sm:inline" aria-hidden>
-                            |
-                          </span>
-                        ) : null}
-                        <div
-                          ref={gridPresetChipsRowRef}
-                          className="flex shrink-0 flex-nowrap items-center gap-1.5 sm:gap-2"
-                        >
-                          {gridPresets.map((p, i) => (
-                            <div
-                              key={p.id}
-                              className="relative inline-flex h-8 min-w-[2rem] shrink-0 items-stretch sm:h-9 sm:min-w-[2.25rem]"
-                            >
-                              <button
-                                type="button"
-                                onClick={() => applyGridPresetAt(i)}
-                                title={`载入第 ${i + 1} 套；已选中时再点此可取消选中`}
-                                className={`rounded-md border px-2 pr-5 text-[11px] font-semibold tabular-nums transition sm:rounded-lg sm:px-2.5 sm:pr-5 sm:text-xs ${
-                                  gridPresetSelectedIndex === i
-                                    ? "border-rose-500 bg-rose-100 text-rose-950 ring-1 ring-rose-400"
-                                    : "border-zinc-300 bg-white text-zinc-800 hover:border-rose-300 hover:bg-rose-50/80"
-                                }`}
-                              >
-                                {i + 1}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.preventDefault();
-                                  e.stopPropagation();
-                                  deleteGridPresetAt(i);
-                                }}
-                                className="absolute -right-1 -top-1 flex h-5 min-h-[1.25rem] min-w-[1.25rem] items-center justify-center rounded-full border border-zinc-300 bg-white text-[11px] font-bold leading-none text-zinc-600 shadow-sm hover:border-rose-400 hover:bg-rose-50 hover:text-rose-800"
-                                aria-label={`删除排版预设 ${i + 1}`}
-                              >
-                                ×
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                        <button
-                          ref={gridLayoutSavePresetButtonRef}
-                          type="button"
-                          onClick={() => saveGridLayoutPreset()}
-                          title="保存当前栅格参数到预设"
-                          className="shrink-0 whitespace-nowrap rounded-md border border-rose-400 bg-rose-600 px-2 py-1 text-[11px] font-semibold leading-none text-white shadow-sm transition hover:bg-rose-700 sm:rounded-lg sm:px-2.5 sm:py-1.5 sm:text-xs"
-                        >
-                          保存配置
-                        </button>
-                      </div>
-                      {gridPresetNotice ? (
-                        <p className="min-w-0 flex-1 text-xs text-rose-800 sm:pt-0.5">
-                          {gridPresetNotice}
-                        </p>
-                      ) : (
-                        <p className="min-w-0 flex-1 text-xs text-zinc-500 sm:pt-0.5">
-                          预设保存在本机浏览器；未选中数字时保存会新增一套（最多 5 套）。再次点击已高亮的数字，或点击数字区域以外（「保存配置」除外）可取消选中。
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </fieldset>
+          <div className="min-w-0 flex flex-col gap-4 lg:col-span-2">
+            <div className="rounded-xl border border-amber-200/80 bg-amber-50/40 p-4 shadow-sm">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <label
+                  htmlFor="solo-image-edit-prompt"
+                  className="text-sm font-semibold text-amber-950"
+                >
+                  仅自定义图像提示（可选）
+                </label>
+                <span className="max-w-md text-xs text-amber-900/80">
+                  填写后：本次出图<strong>只</strong>发送框内文字 + 当前模式下的上传图，不发送系统默认提示词，也不附带下方「补充说明」。
+                  若模式会一次出多张（如多角度），每张都会用同一段本框文字分别请求。
+                </span>
+              </div>
+              <textarea
+                id="solo-image-edit-prompt"
+                value={soloImageEditPrompt}
+                onChange={(e) => setSoloImageEditPrompt(e.target.value)}
+                maxLength={4000}
+                rows={3}
+                placeholder="例如：把背景统一成纯白 #FFFFFF；轻微校正色温；去掉边缘杂色…"
+                className="mt-2 w-full resize-y rounded-lg border border-amber-300/80 bg-white px-3 py-2 text-sm text-zinc-900 outline-none ring-amber-500/40 focus:border-amber-500 focus:ring-2"
+              />
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSoloImageEditPrompt("")}
+                  className="inline-flex h-9 items-center justify-center rounded-lg border border-amber-300 bg-white px-3 text-sm font-medium text-amber-950 shadow-sm transition hover:border-amber-500 hover:bg-amber-50"
+                >
+                  清空本框
+                </button>
+                <span className="text-xs text-amber-900/60">
+                  {soloImageEditPrompt.length}/4000
+                </span>
+              </div>
             </div>
-          ) : null}
-        </section>
-
-        <div className="flex flex-col items-stretch gap-4">
           <div className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <label
@@ -1752,41 +1553,248 @@ export default function Home() {
               </div>
             ) : null}
           </div>
+          </div>
+        </section>
 
-          <button
-            type="button"
-            disabled={!canSubmit}
-            onClick={onExtract}
-            className="inline-flex h-14 items-center justify-center rounded-xl bg-rose-600 text-base font-semibold text-white shadow-md transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:bg-zinc-300 disabled:text-zinc-500"
-          >
-            {loading
-              ? mode === "multi_angle"
-                ? "正在依次生成 4 张真实感多角度上手图…"
-                : mode === "packaging_mockup"
-                  ? "正在生成包装手握图…"
-                  : mode === "flat_to_3d_packaging"
-                    ? "正在生成 3D 开窗盒装主视图…"
-                    : mode === "nails_in_box"
-                      ? "正在生成开窗盒装效果图…"
-                      : mode === "model_tryon"
-                      ? "正在生成试戴图…"
-                      : mode === "accessory_tryon"
-                        ? "正在生成手模试戴广告图…"
-                        : mode === "ten_singles_grid"
-                          ? "正在合成十甲白底合集…"
-                          : mode === "complete_single_grid"
-                            ? "正在生成单甲并拼成 10 枚…"
-                            : mode === "extract_ten_grid"
-                              ? "正在抠图排版…"
-                              : "正在生成…"
-              : "开始生成"}
-          </button>
-          {error ? (
-            <p className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
-              {error}
-            </p>
-          ) : null}
-        </div>
+        {mode === "ten_singles_grid" ||
+        mode === "complete_single_grid" ||
+        mode === "extract_ten_grid" ? (
+          <div className="mt-4 min-w-0 rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+            <fieldset className="w-full rounded-lg border border-rose-100 bg-rose-50/40 px-3 py-3 lg:px-5">
+              <legend className="px-1 text-xs font-semibold text-rose-800">
+                白底栅格排版（可选）
+              </legend>
+              <div className="flex w-full min-w-0 flex-col gap-3">
+                <div className="space-y-2.5">
+                  <p className="text-xs leading-relaxed text-zinc-600">
+                    五列相对宽度对应上排左→右拇→小（下排同列再重复一遍）。
+                    {mode === "extract_ten_grid"
+                      ? "本模式由模型按下列数值排版；数值含义与十枚单甲/单甲补齐的服务端拼图一致。"
+                      : mode === "complete_single_grid"
+                        ? "单甲补齐：下列数值仅用于服务端把「一枚抠图甲片」按列宽复制成 10 格（体现拇→小尺码差），**不会**再次发给模型改甲型。"
+                        : "提交时服务端会按最大列归一；缝过大时可能自动缩小甲片以适配画布。"}
+                  </p>
+                  <p className="text-xs leading-relaxed text-rose-900/90">
+                    <span className="font-medium">关于「缝」：</span>
+                    <strong>同一行相邻美甲</strong>的左右留白用下方滑条控制：<strong>四条竖缝合计占「内区宽度」的百分之几</strong>（内区 = 去掉外留白后的中间区域）；下方会显示<strong>每条竖缝约占内宽的几%</strong>（合计÷4）。
+                    行与行之间的上下留白仍用「行间缝」百分比（占内高，<span className="font-mono">0</span>～<span className="font-mono">12</span>，失焦夹紧）。
+                    外留白失焦后会在 <span className="font-mono">0.5</span>～<span className="font-mono">8</span> 之间。
+                    <span className="mt-1.5 block text-zinc-700">
+                      若横向已贴紧仍觉得整图偏「宽」，多半是<strong>四边外留白</strong>偏大，可把<strong>外留白（占边长 %）</strong>适当<strong>调小</strong>。
+                    </span>
+                  </p>
+                </div>
+                <div className="min-w-0 space-y-3 border-t border-rose-100/80 pt-3">
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-5 sm:gap-x-3 sm:gap-y-2">
+                    {(["拇", "食", "中", "无", "小"] as const).map((lab, i) => (
+                      <label
+                        key={lab}
+                        className="flex flex-col gap-1 text-xs text-zinc-700"
+                      >
+                        <span className="font-medium text-zinc-800">{lab}指列宽</span>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          autoComplete="off"
+                          spellCheck={false}
+                          value={colWidthDrafts[i] ?? ""}
+                          onChange={(e) => {
+                            const t = e.target.value;
+                            setColWidthDrafts((prev) => {
+                              const next = [...prev];
+                              next[i] = t;
+                              return next;
+                            });
+                          }}
+                          onBlur={() => {
+                            setColWidthDrafts((prev) => {
+                              const next = [...prev];
+                              next[i] = colWidthDraftAfterBlur(prev[i] ?? "", i);
+                              return next;
+                            });
+                          }}
+                          className="w-full rounded border border-zinc-300 bg-white px-2 py-1.5 text-sm tabular-nums outline-none ring-rose-500 focus:border-rose-500 focus:ring-1"
+                        />
+                      </label>
+                    ))}
+                  </div>
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 sm:gap-3">
+                    <label className="flex flex-col gap-1 text-xs text-zinc-700">
+                      <span className="font-medium leading-snug text-zinc-800">
+                        外留白（占边长 %）
+                      </span>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        autoComplete="off"
+                        spellCheck={false}
+                        value={marginPctDraft}
+                        onChange={(e) => setMarginPctDraft(e.target.value)}
+                        onBlur={() =>
+                          setMarginPctDraft((v) =>
+                            pctDraftAfterBlur(v, 0.5, 8, 1.8),
+                          )
+                        }
+                        className="w-full rounded border border-zinc-300 bg-white px-2 py-1.5 text-sm tabular-nums outline-none ring-rose-500 focus:border-rose-500 focus:ring-1"
+                      />
+                    </label>
+                    <label className="flex min-w-0 flex-col gap-2 text-xs text-zinc-700">
+                      <span className="font-medium leading-snug text-zinc-800">
+                        同一行相邻美甲间距
+                      </span>
+                      <span className="text-[11px] leading-snug text-zinc-500">
+                        拖动滑条：四条竖缝合计占「内区宽度」0～
+                        {COL_GUTTER_SUM_INNER_WIDTH_PCT_MAX}%（步进 0.5）
+                      </span>
+                      <div className="flex min-w-0 items-center gap-3">
+                        <input
+                          type="range"
+                          min={0}
+                          max={COL_GUTTER_SUM_INNER_WIDTH_PCT_MAX}
+                          step={0.5}
+                          value={colGutterSumPct}
+                          onChange={(e) =>
+                            setColGutterSumPct(
+                              clampColGutterSumPct(
+                                parseFloat(e.target.value),
+                              ),
+                            )
+                          }
+                          className="h-2 min-w-0 flex-1 cursor-pointer accent-rose-600"
+                          aria-valuemin={0}
+                          aria-valuemax={COL_GUTTER_SUM_INNER_WIDTH_PCT_MAX}
+                          aria-valuenow={colGutterSumPct}
+                          aria-label="同一行四条竖缝合计占内区宽度百分比"
+                        />
+                        <span className="w-12 shrink-0 text-right text-sm font-semibold tabular-nums text-zinc-900">
+                          {colGutterSumPct.toFixed(1)}%
+                        </span>
+                      </div>
+                      <p className="text-[11px] leading-snug text-zinc-600">
+                        合计约 {colGutterSumPct.toFixed(1)}% 内宽 · 每条约{" "}
+                        {(colGutterSumPct / 4).toFixed(1)}% 内宽
+                      </p>
+                      <div className="flex flex-wrap gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setColGutterSumPct(0)}
+                          className="rounded border border-zinc-200 bg-white px-2 py-0.5 text-[11px] font-medium text-zinc-700 hover:border-rose-300 hover:bg-rose-50"
+                        >
+                          无
+                        </button>
+                        {COL_GUTTER_SUM_QUICK_PRESET_PCTS.map((pct) => (
+                          <button
+                            key={pct}
+                            type="button"
+                            onClick={() => setColGutterSumPct(pct)}
+                            className="rounded border border-zinc-200 bg-white px-2 py-0.5 text-[11px] font-medium text-zinc-700 hover:border-rose-300 hover:bg-rose-50"
+                          >
+                            {pct}%
+                          </button>
+                        ))}
+                      </div>
+                    </label>
+                    <label className="flex flex-col gap-1 text-xs text-zinc-700">
+                      <span className="font-medium leading-snug text-zinc-800">
+                        行间缝（占内高 %）
+                      </span>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        autoComplete="off"
+                        spellCheck={false}
+                        value={rowGutterPctDraft}
+                        onChange={(e) => setRowGutterPctDraft(e.target.value)}
+                        onBlur={() =>
+                          setRowGutterPctDraft((v) =>
+                            pctDraftAfterBlur(v, 0, 12, 0),
+                          )
+                        }
+                        className="w-full rounded border border-zinc-300 bg-white px-2 py-1.5 text-sm tabular-nums outline-none ring-rose-500 focus:border-rose-500 focus:ring-1"
+                      />
+                    </label>
+                  </div>
+                  <div className="flex flex-col gap-2 border-t border-rose-100/80 pt-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-3 sm:gap-y-2">
+                    <div className="flex min-w-0 max-w-full flex-nowrap items-center gap-1.5 overflow-x-auto py-0.5 sm:gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setColWidthDrafts([...DEFAULT_COL_WIDTH_DRAFTS]);
+                          setMarginPctDraft("1.8");
+                          setColGutterSumPct(0);
+                          setRowGutterPctDraft("0");
+                          setGridPresetNotice(null);
+                        }}
+                        className="shrink-0 text-xs font-medium whitespace-nowrap text-rose-700 underline decoration-rose-300 underline-offset-2 hover:text-rose-900"
+                      >
+                        恢复默认排版
+                      </button>
+                      {gridPresets.length > 0 ? (
+                        <span className="hidden shrink-0 text-zinc-300 sm:inline" aria-hidden>
+                          |
+                        </span>
+                      ) : null}
+                      <div
+                        ref={gridPresetChipsRowRef}
+                        className="flex shrink-0 flex-nowrap items-center gap-1.5 sm:gap-2"
+                      >
+                        {gridPresets.map((p, i) => (
+                          <div
+                            key={p.id}
+                            className="relative inline-flex h-8 min-w-[2rem] shrink-0 items-stretch sm:h-9 sm:min-w-[2.25rem]"
+                          >
+                            <button
+                              type="button"
+                              onClick={() => applyGridPresetAt(i)}
+                              title={`载入第 ${i + 1} 套；已选中时再点此可取消选中`}
+                              className={`rounded-md border px-2 pr-5 text-[11px] font-semibold tabular-nums transition sm:rounded-lg sm:px-2.5 sm:pr-5 sm:text-xs ${
+                                gridPresetSelectedIndex === i
+                                  ? "border-rose-500 bg-rose-100 text-rose-950 ring-1 ring-rose-400"
+                                  : "border-zinc-300 bg-white text-zinc-800 hover:border-rose-300 hover:bg-rose-50/80"
+                              }`}
+                            >
+                              {i + 1}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                deleteGridPresetAt(i);
+                              }}
+                              className="absolute -right-1 -top-1 flex h-5 min-h-[1.25rem] min-w-[1.25rem] items-center justify-center rounded-full border border-zinc-300 bg-white text-[11px] font-bold leading-none text-zinc-600 shadow-sm hover:border-rose-400 hover:bg-rose-50 hover:text-rose-800"
+                              aria-label={`删除排版预设 ${i + 1}`}
+                            >
+                              ×
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                      <button
+                        ref={gridLayoutSavePresetButtonRef}
+                        type="button"
+                        onClick={() => saveGridLayoutPreset()}
+                        title="保存当前栅格参数到预设"
+                        className="shrink-0 whitespace-nowrap rounded-md border border-rose-400 bg-rose-600 px-2 py-1 text-[11px] font-semibold leading-none text-white shadow-sm transition hover:bg-rose-700 sm:rounded-lg sm:px-2.5 sm:py-1.5 sm:text-xs"
+                      >
+                        保存配置
+                      </button>
+                    </div>
+                    {gridPresetNotice ? (
+                      <p className="min-w-0 flex-1 text-xs text-rose-800 sm:pt-0.5">
+                        {gridPresetNotice}
+                      </p>
+                    ) : (
+                      <p className="min-w-0 flex-1 text-xs text-zinc-500 sm:pt-0.5">
+                        预设保存在本机浏览器；未选中数字时保存会新增一套（最多 5 套）。再次点击已高亮的数字，或点击数字区域以外（「保存配置」除外）可取消选中。
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </fieldset>
+          </div>
+        ) : null}
       </main>
     </div>
   );
