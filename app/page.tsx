@@ -215,7 +215,7 @@ export default function Home() {
   const [tenSlots, setTenSlots] = useState<TenSlotCell[]>(() => emptyTenSlots());
 
   const [userExtraNotes, setUserExtraNotes] = useState("");
-  /** 非空时：出图只发本段 + 当前上传图，不发送系统默认提示词与「补充说明」 */
+  /** 非空时：服务端在框内文前加两句白底底线后发图；不拼长系统提示与「补充说明」 */
   const [soloImageEditPrompt, setSoloImageEditPrompt] = useState("");
   const skipNextNotesPersist = useRef(true);
   const [promptPresets, setPromptPresets] =
@@ -1377,8 +1377,8 @@ export default function Home() {
                   仅自定义图像提示（可选）
                 </label>
                 <span className="max-w-md text-xs text-amber-900/80">
-                  填写后：本次出图<strong>只</strong>发送框内文字 + 当前模式下的上传图，不发送系统默认提示词，也不附带下方「补充说明」。
-                  若模式会一次出多张（如多角度），每张都会用同一段本框文字分别请求。
+                  填写后：在框内文字前<strong>自动加两句</strong>（纯白 #FFFFFF 白底 + 电商 packshot 气质）；再发当前模式下的上传图，不拼长系统提示与下方「补充说明」。
+                  若模式会一次出多张（如多角度），每张都会用同一段合成提示分别请求。
                 </span>
               </div>
               <textarea

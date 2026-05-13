@@ -25,7 +25,10 @@ import {
   appendUserRefinementToPrompt,
   parseUserExtraNotes,
 } from "@/lib/extra-user-notes";
-import { parseSoloImageEditPrompt } from "@/lib/solo-image-edit-prompt";
+import {
+  buildFullSoloImageEditPrompt,
+  parseSoloImageEditPrompt,
+} from "@/lib/solo-image-edit-prompt";
 import { parseGatewayEditFieldsFromForm } from "@/lib/image-gateway-fields";
 import {
   getReplicateApiToken,
@@ -395,9 +398,11 @@ export async function POST(request: Request) {
     formData.get("soloImageEditPrompt"),
   );
   const withNotes = (p: string) => appendUserRefinementToPrompt(p, userExtraNotes);
-  /** 有「仅自定义」时：不拼系统 prompt、不拼补充说明、不拼栅格排版 addendum */
+  /** 有「仅自定义」时：只拼两句白底底线 + 框内文 + 图；不拼长系统 prompt、补充说明、栅格 addendum */
   const imageEditPrompt = (systemPrompt: string) =>
-    soloImageEditPrompt ?? withNotes(systemPrompt);
+    soloImageEditPrompt
+      ? buildFullSoloImageEditPrompt(soloImageEditPrompt)
+      : withNotes(systemPrompt);
 
   const { model: editImageModel } = parseGatewayEditFieldsFromForm(
     formData,
