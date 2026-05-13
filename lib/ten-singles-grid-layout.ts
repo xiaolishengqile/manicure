@@ -214,6 +214,104 @@ export function parseTenSinglesGridLayoutFromFormData(
   };
 }
 
+/** 与 `buildTenSinglesCollageReference` 中每格画布区域一致（像素矩形，用于从成品 2×5 图裁回单格）。 */
+export type WhiteGridCellRectPx = {
+  readonly x: number;
+  readonly y: number;
+  readonly w: number;
+  readonly h: number;
+};
+
+function marginFracFromUiDraft(draft: string): number {
+  const t = draft.trim().replace(/,/g, ".");
+  const v = t === "" ? 1.8 : parseFloat(t);
+  const n = Number.isNaN(v) ? 1.8 : v;
+  return clamp(n / 100, 0.005, 0.08);
+}
+
+function rowGutterFracFromUiDraft(draft: string): number {
+  const t = draft.trim().replace(/,/g, ".");
+  const v = t === "" ? 0 : parseFloat(t);
+  const n = Number.isNaN(v) ? 0 : v;
+  return clamp(n / 100, 0, 0.12);
+}
+
+function colFracTupleFromUiDrafts(
+  drafts: string[],
+): TenSinglesGridLayout["colWidthFrac"] {
+  const nums = drafts.map((s, i) => {
+    const t = s.trim().replace(/,/g, ".");
+    if (t === "") return DEFAULT_COL_WIDTH_FRAC[i] ?? 1;
+    const v = parseFloat(t);
+    if (Number.isNaN(v)) return DEFAULT_COL_WIDTH_FRAC[i] ?? 1;
+    return Math.min(1, Math.max(0.55, v));
+  });
+  return normalizeColFracs(nums);
+}
+
+/**
+ * 与页面「白底栅格排版」滑条/输入框解析结果一致，便于客户端裁切与提交共用同一套数。
+ */
+export function buildTenSinglesGridLayoutFromUiDrafts(params: {
+  readonly colWidthDrafts: readonly string[];
+  readonly marginPctDraft: string;
+  readonly colGutterSumPct: number;
+  readonly rowGutterPctDraft: string;
+}): TenSinglesGridLayout {
+  const drafts = [...params.colWidthDrafts];
+  while (drafts.length < 5) drafts.push("");
+  return {
+    colWidthFrac: colFracTupleFromUiDrafts(drafts.slice(0, 5)),
+    marginFrac: marginFracFromUiDraft(params.marginPctDraft),
+    colGutterSumFrac: clamp(
+      params.colGutterSumPct / 100,
+      0,
+      COL_GUTTER_SUM_INNER_WIDTH_PCT_MAX / 100,
+    ),
+    rowGutterSumFrac: rowGutterFracFromUiDraft(params.rowGutterPctDraft),
+    interNailColGapMode: null,
+  };
+}
+
+/**
+ * 按当前白底栅格参数计算 2×5 共 10 个单元格在整图中的像素框（顺序：上排 1–5 左→右，下排 6–10）。
+ * 几何与 {@link buildTenSinglesCollageReference} / {@link buildScaledSingleNailGrid} 中 `left/top` 与 `cw/ch` 一致。
+ */
+export function whiteGrid2x5CellRects(
+  width: number,
+  height: number,
+  layout: TenSinglesGridLayout,
+): WhiteGridCellRectPx[] {
+  const W = Math.max(1, Math.floor(width));
+  const H = Math.max(1, Math.floor(height));
+  const margin = Math.round(W * layout.marginFrac);
+  const cols = 5;
+  const rows = 2;
+  const innerW = W - 2 * margin;
+  const innerH = H - 2 * margin;
+  const gutter =
+    cols > 1
+      ? Math.round((innerW * layout.colGutterSumFrac) / (cols - 1))
+      : 0;
+  const rowGutter =
+    rows > 1
+      ? Math.round((innerH * layout.rowGutterSumFrac) / (rows - 1))
+      : 0;
+  const cellW = (innerW - (cols - 1) * gutter) / cols;
+  const cellH = (innerH - (rows - 1) * rowGutter) / rows;
+  const cw = Math.round(cellW);
+  const ch = Math.round(cellH);
+  const rects: WhiteGridCellRectPx[] = [];
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const x = Math.round(margin + c * (cellW + gutter));
+      const y = Math.round(margin + r * (cellH + rowGutter));
+      rects.push({ x, y, w: cw, h: ch });
+    }
+  }
+  return rects;
+}
+
 /**
  * 供「白底栅格 · 仅抠出已有甲片」等纯模型排版场景：把与 Sharp 拼图一致的数值写进提示词。
  */

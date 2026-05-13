@@ -18,7 +18,6 @@ import {
   parseTenSinglesGridLayoutFromFormData,
 } from "@/lib/ten-singles-grid-layout";
 import {
-  exifRotate180TipDownToPng,
   exifUprightToPng,
   normalizeTenSingleNailForCollageCell,
 } from "@/lib/ten-singles-nail-preprocess";

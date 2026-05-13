@@ -30,7 +30,7 @@ export const GENERATION_MODE_OPTIONS: {
     value: "ten_singles_grid",
     label: "十枚单甲 → 一张白底合集",
     description:
-      "每枚先转 180° 甲尖朝下再拼成一张 2×5 参考图送模型出白底栅格。**可选**：「白底栅格排版」调节五列宽、外留白、列缝/行缝；服务端会归一列宽并甲根对齐，缝过大时整行自动缩小以适配画布。",
+      "每枚仅 **EXIF 转正**（不整图 180°）后拼成一张 2×5 参考图送模型出白底栅格；朝向与上传一致。**可选**：「白底栅格排版」调节五列宽、外留白、列缝/行缝；服务端会归一列宽并甲根对齐，缝过大时整行自动缩小以适配画布。",
   },
   {
     value: "multi_angle",
@@ -347,7 +347,7 @@ ${WHITE_BG_NAIL_GRID_TOP_BASELINE}
 ${PACKSHOT_TIP_STAGGER_ROW_EN}
 
 INPUT ORIENTATION — ten singles pipeline:
-- Each cell image was **server-rotated** (EXIF + **180°**) so **tip points down, cuticle up** before collage. Keep **tips down** in the final packshot — never flip cells tips-up.
+- Each cell image was **EXIF-upright only** on the server (**no** automatic per-cell **180°**). Preserve each slot’s **tip vs cuticle** orientation as in the collage reference; do **not** globally flip cells **180°** vs the reference unless fixing a clearly wrong wear.
 
 LAYOUT + LOOK:
 - Flat **#FFFFFF** or very light **#F7F7F7** background; strict modular **2×5**; **thin, even gutters** between adjacent nails and between the two rows (same neutral as the backdrop) — visually consistent spacing, **no** wide white bands; maximize nail area in the frame.
