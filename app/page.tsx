@@ -73,11 +73,15 @@ function serializeColWidthDrafts(drafts: string[]): string {
   });
   return nums.join(",");
 }
-import { DEFAULT_USER_PROMPT_PRESETS } from "@/lib/prompt-presets-defaults";
+import {
+  DEFAULT_SOLO_IMAGE_PROMPT_PRESETS,
+  DEFAULT_USER_PROMPT_PRESETS,
+} from "@/lib/prompt-presets-defaults";
 import { SiteAccessLogout } from "@/components/site-access-logout";
 
 const LS_LAST_USER_NOTES = "manicure_last_user_extra_notes";
 const LS_PROMPT_PRESETS = "manicure_user_prompt_presets";
+const LS_SOLO_PROMPT_PRESETS = "manicure_solo_image_prompt_presets";
 const MAX_PRESETS = 40;
 const MAX_PRESET_LINE_CHARS = 200;
 
@@ -93,6 +97,13 @@ function newPresetId(): string {
 function defaultPresetItems(): PromptPresetItem[] {
   return DEFAULT_USER_PROMPT_PRESETS.map((text, i) => ({
     id: `builtin-${i}`,
+    text,
+  }));
+}
+
+function defaultSoloPresetItems(): PromptPresetItem[] {
+  return DEFAULT_SOLO_IMAGE_PROMPT_PRESETS.map((text, i) => ({
+    id: `solo-builtin-${i}`,
     text,
   }));
 }
@@ -229,6 +240,17 @@ export default function Home() {
   const [dragOverPresetIndex, setDragOverPresetIndex] = useState<number | null>(
     null,
   );
+  const [soloPromptPresets, setSoloPromptPresets] =
+    useState<PromptPresetItem[]>(defaultSoloPresetItems);
+  const skipFirstSoloPresetPersist = useRef(true);
+  const [soloPresetPanelOpen, setSoloPresetPanelOpen] = useState(false);
+  const [newSoloPresetDraft, setNewSoloPresetDraft] = useState("");
+  const [draggingSoloPresetIndex, setDraggingSoloPresetIndex] = useState<
+    number | null
+  >(null);
+  const [dragOverSoloPresetIndex, setDragOverSoloPresetIndex] = useState<
+    number | null
+  >(null);
 
   useEffect(() => {
     try {
@@ -323,6 +345,32 @@ export default function Home() {
       /* ignore */
     }
   }, [promptPresets]);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(LS_SOLO_PROMPT_PRESETS);
+      if (!raw) return;
+      const next = parseStoredPresets(raw);
+      if (next?.length) setSoloPromptPresets(next);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  useEffect(() => {
+    if (skipFirstSoloPresetPersist.current) {
+      skipFirstSoloPresetPersist.current = false;
+      return;
+    }
+    try {
+      localStorage.setItem(
+        LS_SOLO_PROMPT_PRESETS,
+        JSON.stringify(soloPromptPresets),
+      );
+    } catch {
+      /* ignore */
+    }
+  }, [soloPromptPresets]);
 
   const dualKind = getDualUploadKind(mode);
   const tenMode = requiresTenSingleNails(mode);
@@ -894,6 +942,65 @@ export default function Home() {
     setDragOverPresetIndex(null);
   }, []);
 
+  const appendSoloPresetToField = useCallback((line: string) => {
+    const t = line.trim().slice(0, MAX_PRESET_LINE_CHARS);
+    if (!t) return;
+    setSoloImageEditPrompt((prev) => {
+      const next = prev.trim() ? `${prev.trim()}\n${t}` : t;
+      return next.slice(0, 4000);
+    });
+  }, []);
+
+  const addSoloPresetFromDraft = useCallback(() => {
+    const t = newSoloPresetDraft.trim().slice(0, MAX_PRESET_LINE_CHARS);
+    if (!t) return;
+    setSoloPromptPresets((prev) => {
+      if (prev.some((p) => p.text === t)) return prev;
+      if (prev.length >= MAX_PRESETS) return prev;
+      return [{ id: newPresetId(), text: t }, ...prev];
+    });
+    setNewSoloPresetDraft("");
+  }, [newSoloPresetDraft]);
+
+  const removeSoloPresetById = useCallback((id: string) => {
+    setSoloPromptPresets((prev) => prev.filter((p) => p.id !== id));
+  }, []);
+
+  const moveSoloPreset = useCallback((index: number, delta: -1 | 1) => {
+    setSoloPromptPresets((prev) => {
+      const j = index + delta;
+      if (j < 0 || j >= prev.length) return prev;
+      const next = [...prev];
+      const tmp = next[index]!;
+      next[index] = next[j]!;
+      next[j] = tmp;
+      return next;
+    });
+  }, []);
+
+  const reorderSoloPresetByDrag = useCallback((from: number, to: number) => {
+    if (from === to) return;
+    setSoloPromptPresets((prev) => {
+      if (
+        from < 0 ||
+        to < 0 ||
+        from >= prev.length ||
+        to >= prev.length
+      ) {
+        return prev;
+      }
+      const next = [...prev];
+      const [el] = next.splice(from, 1);
+      next.splice(to, 0, el!);
+      return next;
+    });
+  }, []);
+
+  const clearSoloPresetDragUi = useCallback(() => {
+    setDraggingSoloPresetIndex(null);
+    setDragOverSoloPresetIndex(null);
+  }, []);
+
   const resultHeading =
     mode === "multi_angle"
       ? "产出（多角度上手 · 固定4张 · 真实棚拍感）"
@@ -1398,10 +1505,134 @@ export default function Home() {
                 >
                   清空本框
                 </button>
+                <button
+                  type="button"
+                  onClick={() => setSoloPresetPanelOpen((o) => !o)}
+                  className="inline-flex h-9 items-center justify-center rounded-lg border border-amber-300 bg-white px-3 text-sm font-medium text-amber-950 shadow-sm transition hover:border-amber-500 hover:bg-amber-50"
+                >
+                  {soloPresetPanelOpen ? "收起常用提示词" : "常用提示词"}
+                </button>
                 <span className="text-xs text-amber-900/60">
                   {soloImageEditPrompt.length}/4000
                 </span>
               </div>
+              {soloPresetPanelOpen ? (
+                <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50/90 p-3">
+                  <p className="mb-2 text-xs font-medium text-amber-900/90">
+                    新添加的词条会出现在**第一行**。可**拖动左侧手柄**排序，或用「上移 / 下移」微调；顺序会保存（与本框下方的「补充说明」常用词分存）。
+                  </p>
+                  <ul className="max-h-52 space-y-2 overflow-y-auto">
+                    {soloPromptPresets.map((item, i) => (
+                      <li
+                        key={item.id}
+                        onDragOver={(e) => {
+                          e.preventDefault();
+                          e.dataTransfer.dropEffect = "move";
+                          setDragOverSoloPresetIndex(i);
+                        }}
+                        onDrop={(e) => {
+                          e.preventDefault();
+                          const raw = e.dataTransfer.getData(
+                            "text/x-solo-preset-index",
+                          );
+                          const from = Number.parseInt(raw, 10);
+                          if (Number.isNaN(from)) {
+                            clearSoloPresetDragUi();
+                            return;
+                          }
+                          reorderSoloPresetByDrag(from, i);
+                          clearSoloPresetDragUi();
+                        }}
+                        className={`flex flex-wrap items-start gap-2 rounded-md border bg-white px-2 py-2 text-sm text-zinc-800 ${
+                          dragOverSoloPresetIndex === i
+                            ? "border-amber-500 ring-2 ring-amber-200"
+                            : "border-amber-200/80"
+                        } ${draggingSoloPresetIndex === i ? "opacity-60" : ""}`}
+                      >
+                        <span
+                          draggable
+                          onDragStart={(e) => {
+                            e.dataTransfer.setData(
+                              "text/x-solo-preset-index",
+                              String(i),
+                            );
+                            e.dataTransfer.effectAllowed = "move";
+                            setDraggingSoloPresetIndex(i);
+                          }}
+                          onDragEnd={clearSoloPresetDragUi}
+                          className="flex h-7 w-7 shrink-0 cursor-grab select-none items-center justify-center rounded border border-dashed border-amber-300 bg-amber-50/80 text-xs text-amber-800/70 active:cursor-grabbing"
+                          title="拖动排序"
+                          aria-label="拖动排序"
+                        >
+                          ⋮⋮
+                        </span>
+                        <span
+                          className="flex h-7 w-7 shrink-0 items-center justify-center rounded bg-amber-100 text-xs font-semibold text-amber-900/70"
+                          title="顺序"
+                        >
+                          {i + 1}
+                        </span>
+                        <span className="min-w-0 flex-1 break-words">
+                          {item.text}
+                        </span>
+                        <div className="flex shrink-0 flex-wrap gap-1">
+                          <button
+                            type="button"
+                            disabled={i === 0}
+                            onClick={() => moveSoloPreset(i, -1)}
+                            className="rounded border border-amber-200 px-2 py-0.5 text-xs text-amber-950 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            上移
+                          </button>
+                          <button
+                            type="button"
+                            disabled={i >= soloPromptPresets.length - 1}
+                            onClick={() => moveSoloPreset(i, 1)}
+                            className="rounded border border-amber-200 px-2 py-0.5 text-xs text-amber-950 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            下移
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => appendSoloPresetToField(item.text)}
+                            className="rounded border border-amber-400 bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-950 hover:bg-amber-200"
+                          >
+                            使用
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => removeSoloPresetById(item.id)}
+                            className="rounded border border-amber-200 px-2 py-0.5 text-xs text-amber-900/80 hover:border-red-200 hover:bg-red-50 hover:text-red-800"
+                          >
+                            删除
+                          </button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                  <div className="mt-3 flex flex-wrap items-stretch gap-2">
+                    <input
+                      type="text"
+                      value={newSoloPresetDraft}
+                      onChange={(e) => setNewSoloPresetDraft(e.target.value)}
+                      maxLength={MAX_PRESET_LINE_CHARS}
+                      placeholder="新增强提示词…"
+                      className="min-w-[12rem] flex-1 rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm outline-none ring-amber-500 focus:border-amber-500 focus:ring-2"
+                    />
+                    <button
+                      type="button"
+                      onClick={addSoloPresetFromDraft}
+                      disabled={
+                        !newSoloPresetDraft.trim() ||
+                        soloPromptPresets.length >= MAX_PRESETS
+                      }
+                      className="inline-flex h-10 shrink-0 items-center justify-center rounded-lg bg-amber-900 px-4 text-sm font-medium text-amber-50 transition hover:bg-amber-950 disabled:cursor-not-allowed disabled:bg-amber-300"
+                    >
+                      添加
+                    </button>
+                  </div>
+                </div>
+              ) : null}
             </div>
           <div className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm">
             <div className="flex flex-wrap items-center justify-between gap-2">
