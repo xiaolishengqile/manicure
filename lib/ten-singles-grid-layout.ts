@@ -314,10 +314,13 @@ export function whiteGrid2x5CellRects(
 
 /**
  * 供「白底栅格 · 仅抠出已有甲片」等纯模型排版场景：把与 Sharp 拼图一致的数值写进提示词。
+ * @param variant `spacing_only`：仅外留白、列缝、行间缝（用于几何矫正，**不要求**按列宽缩放甲片）。
  */
 export function buildWhiteGridLayoutPromptAddendum(
   layout: TenSinglesGridLayout,
+  opts?: { variant?: "full" | "spacing_only" },
 ): string {
+  const variant = opts?.variant ?? "full";
   const [c0, c1, c2, c3, c4] = layout.colWidthFrac;
   const marginPct = (layout.marginFrac * 100).toFixed(2);
   const colGutterPct = (layout.colGutterSumFrac * 100).toFixed(1);
@@ -325,6 +328,23 @@ export function buildWhiteGridLayoutPromptAddendum(
   const rowGutterPct = (layout.rowGutterSumFrac * 100).toFixed(2);
   const gapRuleEn = `- **Horizontal spacing between adjacent nail columns:** the **combined width of the four vertical white gaps** between the five columns = **${colGutterPct}%** of the **inner width** (after outer margins), split evenly — each gap ≈ **${colGutterEachPct}%** of inner width. If 0%, columns abut horizontally except natural cell fit.`;
   const gapRuleZh = `**相邻列留白**：四条竖缝**合计**占「内区宽度」约 **${colGutterPct}%**，**每条竖缝**约 **${colGutterEachPct}%**（内区 = 去掉外留白后的中间区域）；`;
+
+  if (variant === "spacing_only") {
+    return `
+
+USER-SUPPLIED GRID SPACING (mandatory — **white space only**, do **not** use these numbers to resize or resculpt nail plates):
+- **Per-slot size lock:** spacing math must **never** change any nail’s **height, width, or outline** vs its **input** slot — gutters are **only** backdrop white + translation.
+- **Outer margin / quiet border:** **${marginPct}%** of the **canvas side length** on all four sides (uniform white band).
+- **Inner area** = canvas minus that margin. Within the inner rectangle, keep **2 rows × 5 columns** (columns 1→5 = thumb → index → middle → ring → pinky, left to right). **Do not** treat column-width weights as a reason to **scale** individual nails — spacing is controlled by **margins and gutters** below.
+${gapRuleEn}
+- **Visual check — column gutters:** after layout, the **four** vertical white strips between the five nail columns must look **the same width** (within a few percent) — **no** “two nails almost touching” beside a **wide** gutter. **Ignore** the input’s old uneven gaps; match this appendix.
+- **Stair-step tips (mandatory):** when a row has five occupied nails, **do not** vertically **re-pack** so all **free edges** share one horizontal line — preserve the input’s **different tip Y** (thumb→pinky length ladder) while only fixing **yaw** and gutters.
+- **Column centerline lock:** for each **k = 1…5**, the **horizontal midpoint** of the nail in **column k top row** must match the **horizontal midpoint** of the nail in **column k bottom row** (same vertical axis through the sheet; slots **k** and **k+5** aligned).
+- **Single horizontal gutter between the two rows** = **${rowGutterPct}%** of the **inner height**. If 0, the two rows abut vertically within the inner area.
+
+（几何矫正专用：**外留白**约 ${marginPct}% 边长；${gapRuleZh}**行间缝**占内高约 ${rowGutterPct}%。**仅**用留白与整甲平移控距；**禁止**为对齐而缩放或弯曲甲片；列缝须**肉眼均匀**且**勿照搬**输入图里不均的列距；**上下同一列**甲片水平中心须在同一条竖轴上；**勿**为整齐而把一排五枚**甲尖拉成一条直线**，须保留输入的**指尖阶梯**。）`;
+  }
+
   return `
 
 USER-SUPPLIED GRID LAYOUT (mandatory proportions — match this modular sheet math on the square canvas):

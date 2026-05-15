@@ -29,8 +29,8 @@ export const IMAGE_MODEL_PRESET_OPTIONS: { value: string; label: string }[] = [
     label: "默认（OPENAI_IMAGE_MODEL，未设置时为 gpt-image-2）",
   },
   {
-    value: "gemini-3-pro-image-preview",
-    label: "gemini-3-pro-image-preview（Gemini 出图）",
+    value: "gemini-3.1-flash-image-preview",
+    label: "gemini-3.1-flash-image-preview（Gemini 出图）",
   },
 ];
 

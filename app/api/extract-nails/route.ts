@@ -3,9 +3,11 @@ import {
   ACCESSORY_TRYON_PROMPT,
   MODEL_TRYON_PROMPT,
   TEN_SINGLES_COLLAGE_REF_PROMPT,
+  WHITE_GRID_RECTIFY_API_PREFIX,
   buildNailsInBoxPackagingPrompt,
   parseGenerationMode,
   parseNailsInBoxArrangement,
+  modeAllowsPartialDualVariants,
   promptsForMode,
   type GenerationMode,
 } from "@/lib/generation-modes";
@@ -164,27 +166,78 @@ type ParallelImageJobsResult =
   | { ok: true; imageUrls: string[]; labels: string[] }
   | { ok: false; error: string; imageUrls: string[]; labels: string[] };
 
+type ParallelJobRow = {
+  index: number;
+  label: string;
+  imageUrl: string | null;
+  throwMessage: string | null;
+};
+
+function aggregateParallelJobRows(
+  rows: ParallelJobRow[],
+  minSuccessful: number,
+): ParallelImageJobsResult {
+  rows.sort((a, b) => a.index - b.index);
+  const imageUrls: string[] = [];
+  const labels: string[] = [];
+  const failures: string[] = [];
+  for (const row of rows) {
+    if (!row.imageUrl) {
+      const err =
+        row.throwMessage ??
+        `模型未返回第 ${row.index + 1} 张图片（既无 url 也无 b64_json）。`;
+      failures.push(`${row.label}: ${err}`);
+      continue;
+    }
+    imageUrls.push(row.imageUrl);
+    labels.push(row.label);
+  }
+  if (imageUrls.length >= minSuccessful) {
+    return { ok: true, imageUrls, labels };
+  }
+  const err =
+    failures.length > 0 ? failures.join("；") : "模型未返回任何图片。";
+  return { ok: false, error: err, imageUrls, labels };
+}
+
 /**
- * 同一批 `images.edit` 任务并行发起，结果按 `jobs` 下标顺序组装。
- * 与原先串行一致：按索引从小到大，遇首张失败即返回，且 `imageUrls`/`labels` 仅含已成功的前缀。
+ * 同一批 `images.edit` 任务并行发起；每路在拿到模型 URL 后**立即**拉取并转成可展示的 data URL，
+ * 不再「等全部编辑完成再批量下载」，以缩短首张可见时间与总墙钟（两路耗时错位时更明显）。
  */
-async function runParallelImageEditJobs(args: {
+async function runParallelImageJobRows(args: {
   jobs: { prompt: string; label: string }[];
   replicateDownloadAuth?: string;
   edit: (
     job: { prompt: string; label: string },
     index: number,
   ) => Promise<string | null>;
-}): Promise<ParallelImageJobsResult> {
-  const { jobs, replicateDownloadAuth, edit } = args;
-  const rows = await Promise.all(
+  onJobImageReady?: (payload: {
+    index: number;
+    label: string;
+    imageUrl: string;
+  }) => void;
+}): Promise<ParallelJobRow[]> {
+  const { jobs, replicateDownloadAuth, edit, onJobImageReady } = args;
+  return Promise.all(
     jobs.map(async (job, index) => {
       try {
         const url = await edit(job, index);
+        if (!url) {
+          return {
+            index,
+            label: job.label,
+            imageUrl: null,
+            throwMessage: null as string | null,
+          };
+        }
+        const imageUrl =
+          (await toClientDisplayableImageUrl(url, replicateDownloadAuth)) ??
+          url;
+        onJobImageReady?.({ index, label: job.label, imageUrl });
         return {
           index,
           label: job.label,
-          url: url ?? null,
+          imageUrl,
           throwMessage: null as string | null,
         };
       } catch (e) {
@@ -192,38 +245,94 @@ async function runParallelImageEditJobs(args: {
         return {
           index,
           label: job.label,
-          url: null as string | null,
+          imageUrl: null,
           throwMessage: msg,
         };
       }
     }),
   );
-  rows.sort((a, b) => a.index - b.index);
-  const rawOk: string[] = [];
-  const labelsOk: string[] = [];
-  for (const row of rows) {
-    if (!row.url) {
-      const err =
-        row.throwMessage ??
-        `模型未返回第 ${row.index + 1} 张图片（既无 url 也无 b64_json）。`;
-      const imageUrls = await Promise.all(
-        rawOk.map((u) =>
-          toClientDisplayableImageUrl(u, replicateDownloadAuth).then(
-            (d) => d ?? u,
-          ),
-        ),
-      );
-      return { ok: false, error: err, imageUrls, labels: labelsOk };
-    }
-    rawOk.push(row.url);
-    labelsOk.push(row.label);
-  }
-  const imageUrls = await Promise.all(
-    rawOk.map((u) =>
-      toClientDisplayableImageUrl(u, replicateDownloadAuth).then((d) => d ?? u),
-    ),
-  );
-  return { ok: true, imageUrls, labels: labelsOk };
+}
+
+async function runParallelImageEditJobs(args: {
+  jobs: { prompt: string; label: string }[];
+  replicateDownloadAuth?: string;
+  /** 至少成功几张才算 ok；默认须全部成功 */
+  minSuccessful?: number;
+  edit: (
+    job: { prompt: string; label: string },
+    index: number,
+  ) => Promise<string | null>;
+}): Promise<ParallelImageJobsResult> {
+  const minSuccessful = args.minSuccessful ?? args.jobs.length;
+  const rows = await runParallelImageJobRows({
+    jobs: args.jobs,
+    replicateDownloadAuth: args.replicateDownloadAuth,
+    edit: args.edit,
+  });
+  return aggregateParallelJobRows(rows, minSuccessful);
+}
+
+/** 多路并行时可选：NDJSON 流，每行一条 JSON，便于「先完成的先展示」。 */
+function ndjsonStreamParallelImageJobsResponse(args: {
+  jobs: { prompt: string; label: string }[];
+  replicateDownloadAuth?: string;
+  minSuccessful?: number;
+  mode: GenerationMode;
+  edit: (
+    job: { prompt: string; label: string },
+    index: number,
+  ) => Promise<string | null>;
+}): Response {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const send = (obj: unknown) => {
+        controller.enqueue(encoder.encode(`${JSON.stringify(obj)}\n`));
+      };
+      try {
+        send({
+          type: "meta",
+          jobCount: args.jobs.length,
+          mode: args.mode,
+        });
+        const minSuccessful = args.minSuccessful ?? args.jobs.length;
+        const rows = await runParallelImageJobRows({
+          jobs: args.jobs,
+          replicateDownloadAuth: args.replicateDownloadAuth,
+          edit: args.edit,
+          onJobImageReady: ({ index, label, imageUrl }) => {
+            send({ type: "image", index, label, imageUrl });
+          },
+        });
+        const outcome = aggregateParallelJobRows(rows, minSuccessful);
+        send({
+          type: "done",
+          ok: outcome.ok,
+          error: outcome.ok ? undefined : outcome.error,
+          imageUrls: outcome.imageUrls,
+          labels: outcome.labels,
+          mode: args.mode,
+        });
+      } catch (e) {
+        send({
+          type: "done",
+          ok: false,
+          error: e instanceof Error ? e.message : "图像编辑接口调用失败",
+          imageUrls: [] as string[],
+          labels: [] as string[],
+          mode: args.mode,
+        });
+      } finally {
+        controller.close();
+      }
+    },
+  });
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "application/x-ndjson; charset=utf-8",
+      "Cache-Control": "no-store",
+    },
+  });
 }
 
 async function editOnce(
@@ -393,6 +502,8 @@ export async function POST(request: Request) {
   }
 
   const mode: GenerationMode = parseGenerationMode(formData.get("mode"));
+  /** 多路并行生图时：以 NDJSON 流推送，先完成的先下发，便于前端渐进展示 */
+  const streamResults = formData.get("streamResults") === "1";
   const userExtraNotes = parseUserExtraNotes(formData.get("userExtraNotes"));
   const soloImageEditPrompt = parseSoloImageEditPrompt(
     formData.get("soloImageEditPrompt"),
@@ -557,35 +668,75 @@ export async function POST(request: Request) {
     const arrangement = parseNailsInBoxArrangement(
       formData.get("nailArrangement"),
     );
-    const prompt = imageEditPrompt(buildNailsInBoxPackagingPrompt(arrangement));
-    const label = "开窗盒装效果图";
+    const basePrompt = buildNailsInBoxPackagingPrompt(arrangement);
+    const jobs = [
+      {
+        prompt: imageEditPrompt(basePrompt),
+        label: "开窗盒装效果图 · 方案 A",
+      },
+      {
+        prompt: imageEditPrompt(basePrompt),
+        label: "开窗盒装效果图 · 方案 B",
+      },
+    ];
 
     try {
-      const url = await editDualSceneNailsRoute(
-        imageCtx,
-        nailsRes.buffer,
-        nailsRes.mime,
-        boxRes.buffer,
-        boxRes.mime,
-        prompt,
-        editImageModel,
-      );
-      if (!url) {
+      if (streamResults && jobs.length > 1) {
+        return ndjsonStreamParallelImageJobsResponse({
+          jobs,
+          replicateDownloadAuth: replAuth,
+          minSuccessful: 1,
+          mode,
+          edit: async ({ prompt }) =>
+            editDualSceneNailsRoute(
+              imageCtx,
+              nailsRes.buffer,
+              nailsRes.mime,
+              boxRes.buffer,
+              boxRes.mime,
+              prompt,
+              editImageModel,
+            ),
+        });
+      }
+      const outcome = await runParallelImageEditJobs({
+        jobs,
+        replicateDownloadAuth: replAuth,
+        /** 两路独立采样：任一路成功即返回（两路皆成则 2 张备选） */
+        minSuccessful: 1,
+        edit: async ({ prompt }) =>
+          editDualSceneNailsRoute(
+            imageCtx,
+            nailsRes.buffer,
+            nailsRes.mime,
+            boxRes.buffer,
+            boxRes.mime,
+            prompt,
+            editImageModel,
+          ),
+      });
+      if (!outcome.ok) {
         return Response.json(
-          { error: "模型未返回图片（既无 url 也无 b64_json）。" },
+          {
+            error: outcome.error,
+            imageUrls: outcome.imageUrls,
+            labels: outcome.labels,
+          },
           { status: 502 },
         );
       }
-      const displayUrl = await toClientDisplayableImageUrl(url, replAuth);
       return Response.json({
-        imageUrls: [displayUrl],
-        labels: [label],
-        imageUrl: displayUrl,
+        imageUrls: outcome.imageUrls,
+        labels: outcome.labels,
+        imageUrl: outcome.imageUrls[0],
         mode,
       });
     } catch (e) {
       const message = e instanceof Error ? e.message : "图像编辑接口调用失败";
-      return Response.json({ error: message }, { status: 502 });
+      return Response.json(
+        { error: message, imageUrls: [], labels: [] },
+        { status: 502 },
+      );
     }
   }
 
@@ -706,7 +857,7 @@ export async function POST(request: Request) {
 
   let buffer = nailsOnly.buffer;
   let mime = nailsOnly.mime;
-  if (mode === "complete_single_grid" || mode === "extract_ten_grid") {
+  if (mode === "complete_single_grid" || mode === "extract_ten_grid" || mode === "white_grid_rectify") {
     /** 单甲补齐：用户约定甲尖朝下，仅 EXIF 转正。抠多枚：仅 EXIF 转正，不整图 180°。 */
     const pre = await exifUprightToPng(buffer, mime);
     buffer = pre.buffer;
@@ -760,20 +911,52 @@ export async function POST(request: Request) {
   }
 
   const jobs = promptsForMode(mode);
+  const gridLayoutParsed = parseTenSinglesGridLayoutFromFormData(formData);
   const extractGridAddendum =
     mode === "extract_ten_grid"
-      ? buildWhiteGridLayoutPromptAddendum(
-          parseTenSinglesGridLayoutFromFormData(formData),
-        )
-      : "";
+      ? buildWhiteGridLayoutPromptAddendum(gridLayoutParsed)
+      : mode === "white_grid_rectify"
+        ? buildWhiteGridLayoutPromptAddendum(gridLayoutParsed, {
+            variant: "spacing_only",
+          })
+        : "";
 
   try {
+    if (streamResults && jobs.length > 1) {
+      return ndjsonStreamParallelImageJobsResponse({
+        jobs,
+        replicateDownloadAuth: replAuth,
+        minSuccessful: modeAllowsPartialDualVariants(mode) ? 1 : jobs.length,
+        mode,
+        edit: async ({ prompt }) => {
+          const composed =
+            mode === "extract_ten_grid"
+              ? `${prompt}${extractGridAddendum}`
+              : mode === "white_grid_rectify"
+                ? `${WHITE_GRID_RECTIFY_API_PREFIX}${prompt}${extractGridAddendum}`
+                : prompt;
+          return editOnceRoute(
+            imageCtx,
+            buffer,
+            ext,
+            mime,
+            imageEditPrompt(composed),
+            editImageModel,
+          );
+        },
+      });
+    }
     const outcome = await runParallelImageEditJobs({
       jobs,
       replicateDownloadAuth: replAuth,
+      minSuccessful: modeAllowsPartialDualVariants(mode) ? 1 : jobs.length,
       edit: async ({ prompt }) => {
         const composed =
-          mode === "extract_ten_grid" ? `${prompt}${extractGridAddendum}` : prompt;
+          mode === "extract_ten_grid"
+            ? `${prompt}${extractGridAddendum}`
+            : mode === "white_grid_rectify"
+              ? `${WHITE_GRID_RECTIFY_API_PREFIX}${prompt}${extractGridAddendum}`
+              : prompt;
         return editOnceRoute(
           imageCtx,
           buffer,

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   GENERATION_MODE_OPTIONS,
@@ -92,6 +92,21 @@ function newPresetId(): string {
     return crypto.randomUUID();
   }
   return `p-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+}
+
+/** 与 `/api/extract-nails` 并行流式分支一致：多路时先完成的先下发 */
+type StreamResultSlot = { url: string; label: string } | null;
+
+function parallelStreamJobCount(m: GenerationMode): number {
+  if (m === "multi_angle") return 4;
+  if (
+    m === "extract_ten_grid" ||
+    m === "white_grid_rectify" ||
+    m === "nails_in_box"
+  ) {
+    return 2;
+  }
+  return 0;
 }
 
 function defaultPresetItems(): PromptPresetItem[] {
@@ -214,6 +229,10 @@ export default function Home() {
   const gridLayoutSavePresetButtonRef = useRef<HTMLButtonElement>(null);
   const [resultUrls, setResultUrls] = useState<string[]>([]);
   const [resultLabels, setResultLabels] = useState<string[]>([]);
+  /** 非空表示 NDJSON 渐进填格；完成后会清空并写入 resultUrls */
+  const [streamSlots, setStreamSlots] = useState<StreamResultSlot[] | null>(
+    null,
+  );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [downloadBusyIndex, setDownloadBusyIndex] = useState<number | null>(
@@ -461,6 +480,7 @@ export default function Home() {
   const clearResults = useCallback(() => {
     setResultUrls([]);
     setResultLabels([]);
+    setStreamSlots(null);
   }, []);
 
   const downloadResult = useCallback(async (url: string, index: number) => {
@@ -815,7 +835,8 @@ export default function Home() {
         }
         if (
           mode === "complete_single_grid" ||
-          mode === "extract_ten_grid"
+          mode === "extract_ten_grid" ||
+          mode === "white_grid_rectify"
         ) {
           body.set("nailGridColWidths", serializeColWidthDrafts(colWidthDrafts));
           body.set(
@@ -831,31 +852,117 @@ export default function Home() {
       }
       body.set("userExtraNotes", userExtraNotes);
       body.set("soloImageEditPrompt", soloImageEditPrompt);
+      const jobStreamN = parallelStreamJobCount(mode);
+      if (jobStreamN > 0) {
+        body.set("streamResults", "1");
+        setStreamSlots(Array.from({ length: jobStreamN }, () => null));
+      }
       const res = await fetch("/api/extract-nails", {
         method: "POST",
         body,
       });
-      const data = (await res.json()) as {
-        imageUrls?: string[];
-        labels?: string[];
-        imageUrl?: string;
-        error?: string;
-      };
-      if (!res.ok) {
-        throw new Error(data.error || `请求失败（${res.status}）`);
+      const ct = res.headers.get("content-type") ?? "";
+      if (ct.includes("ndjson")) {
+        if (!res.body) {
+          throw new Error("响应体为空。");
+        }
+        const reader = res.body.getReader();
+        const textDec = new TextDecoder();
+        let carry = "";
+        let finalUrls: string[] = [];
+        let finalLabels: string[] = [];
+        const flushLine = (line: string) => {
+          const t = line.trim();
+          if (!t) return;
+          let msg: {
+            type: string;
+            jobCount?: number;
+            index?: number;
+            label?: string;
+            imageUrl?: string;
+            ok?: boolean;
+            error?: string;
+            imageUrls?: string[];
+            labels?: string[];
+          };
+          try {
+            msg = JSON.parse(t) as typeof msg;
+          } catch {
+            return;
+          }
+          if (msg.type === "meta" && typeof msg.jobCount === "number") {
+            setStreamSlots(() =>
+              Array.from({ length: msg.jobCount! }, () => null),
+            );
+          } else if (
+            msg.type === "image" &&
+            typeof msg.index === "number" &&
+            msg.imageUrl
+          ) {
+            setStreamSlots((prev) => {
+              const idx = msg.index!;
+              const n = Math.max(prev?.length ?? 0, idx + 1);
+              const next: StreamResultSlot[] = Array.from(
+                { length: n },
+                (_, i) => (prev && i < prev.length ? prev[i]! : null),
+              );
+              next[idx] = {
+                url: msg.imageUrl!,
+                label: msg.label ?? `图 ${idx + 1}`,
+              };
+              return next;
+            });
+          } else if (msg.type === "done") {
+            if (!msg.ok) {
+              throw new Error(msg.error || "处理失败");
+            }
+            finalUrls = msg.imageUrls ?? [];
+            finalLabels = msg.labels ?? [];
+          }
+        };
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          carry += textDec.decode(value, { stream: true });
+          const parts = carry.split("\n");
+          carry = parts.pop() ?? "";
+          for (const line of parts) flushLine(line);
+        }
+        if (carry.trim()) flushLine(carry);
+        if (finalUrls.length === 0) {
+          throw new Error("未收到结果图片（流可能中断）。");
+        }
+        setResultUrls(finalUrls);
+        setResultLabels(
+          finalLabels.length
+            ? finalLabels
+            : finalUrls.map((_, i) => `图 ${i + 1}`),
+        );
+        setStreamSlots(null);
+      } else {
+        const data = (await res.json()) as {
+          imageUrls?: string[];
+          labels?: string[];
+          imageUrl?: string;
+          error?: string;
+        };
+        if (!res.ok) {
+          throw new Error(data.error || `请求失败（${res.status}）`);
+        }
+        const urls = data.imageUrls?.length
+          ? data.imageUrls
+          : data.imageUrl
+            ? [data.imageUrl]
+            : [];
+        if (!urls.length) {
+          throw new Error("未收到结果图片。");
+        }
+        setResultUrls(urls);
+        setResultLabels(data.labels ?? urls.map((_, i) => `图 ${i + 1}`));
       }
-      const urls = data.imageUrls?.length
-        ? data.imageUrls
-        : data.imageUrl
-          ? [data.imageUrl]
-          : [];
-      if (!urls.length) {
-        throw new Error("未收到结果图片。");
-      }
-      setResultUrls(urls);
-      setResultLabels(data.labels ?? urls.map((_, i) => `图 ${i + 1}`));
     } catch (err) {
       setError(err instanceof Error ? err.message : "处理失败");
+      setStreamSlots(null);
     } finally {
       setLoading(false);
     }
@@ -1001,6 +1108,18 @@ export default function Home() {
     setDragOverSoloPresetIndex(null);
   }, []);
 
+  const displayResultSlots = useMemo((): StreamResultSlot[] | null => {
+    if (streamSlots) return streamSlots;
+    if (resultUrls.length === 0) return null;
+    return resultUrls.map((url, i) => ({
+      url,
+      label: resultLabels[i] ?? `图 ${i + 1}`,
+    }));
+  }, [streamSlots, resultUrls, resultLabels]);
+
+  const filledResultSlotCount =
+    displayResultSlots?.filter((s) => s !== null).length ?? 0;
+
   const resultHeading =
     mode === "multi_angle"
       ? "产出（多角度上手 · 固定4张 · 真实棚拍感）"
@@ -1009,7 +1128,7 @@ export default function Home() {
         : mode === "flat_to_3d_packaging"
           ? "产出（2D→3D 开窗盒装 · 1张）"
           : mode === "nails_in_box"
-            ? "产出（开窗盒装 · 甲片入盒）"
+            ? "产出（开窗盒装 · 甲片入盒 · 并行 2 路）"
             : mode === "model_tryon"
             ? "产出（试戴效果图）"
             : mode === "accessory_tryon"
@@ -1017,13 +1136,17 @@ export default function Home() {
               : mode === "ten_singles_grid"
                 ? "产出（十枚单甲 · 一张合集）"
                 : mode === "extract_ten_grid"
-                  ? "产出（白底栅格 · 仅抠图）"
-                  : mode === "complete_single_grid"
-                    ? "产出（白底栅格 · 单甲补齐10支）"
-                    : "产出";
+                  ? "产出（白底栅格 · 仅抠图 · 2张择优）"
+                  : mode === "white_grid_rectify"
+                    ? "产出（白底栅格 · 几何矫正 · 2张择优）"
+                    : mode === "complete_single_grid"
+                      ? "产出（白底栅格 · 单甲补齐10支）"
+                      : "产出";
 
   const gridClass =
-    mode === "multi_angle"
+    mode === "multi_angle" ||
+    mode === "extract_ten_grid" ||
+    mode === "white_grid_rectify"
       ? "grid grid-cols-1 gap-6 md:grid-cols-2"
       : mode === "packaging_mockup"
         ? "grid grid-cols-1"
@@ -1055,7 +1178,7 @@ export default function Home() {
         : dualKind === "packaging_3d_ref"
           ? "实拍盒型、竞品主图、电商光影与白底投影等；若参考为「开窗见甲片」更佳。盒面印刷与配色仍以左侧 2D 稿为准"
           : dualKind === "nails_box"
-            ? "盒型、开窗比例、背板质感与印刷风格；甲片款式以左侧图为准"
+            ? "盒型、开窗比例、背板质感与**盒面 Logo/文字**尽量与参考一致（勿改比例、勿杜撰印刷）；窗内**两排甲片之间不要留空带**；甲片款式与甲型以左侧图为准"
             : "需清晰露出指甲区域";
 
   const firstDualProductHint =
@@ -1066,21 +1189,25 @@ export default function Home() {
         : dualKind === "model" || dualKind === "accessory"
           ? "美甲产品图约定：甲尖朝下；每行从左到右大拇指→小指；试戴成图按格严格还原款式"
           : dualKind === "nails_box"
-            ? "款式图：托盘/背卡/白底栅格均可；将按所选排列映射到盒内开窗"
+            ? "款式图：托盘/背卡/白底栅格均可；横向时**上下两排甲片紧挨无横缝**；左右与图案甲型逐枚保真"
             : "平铺、卡纸、白底商品图均可";
 
   const singleUploadTitle =
     mode === "extract_ten_grid"
       ? "点击选择含多枚甲片的照片"
-      : mode === "complete_single_grid"
-        ? "点击选择单枚甲片照片"
-        : "点击选择美甲照片";
+      : mode === "white_grid_rectify"
+        ? "点击选择已生成的 2×5 白底栅格图"
+        : mode === "complete_single_grid"
+          ? "点击选择单枚甲片照片"
+          : "点击选择美甲照片";
   const singleUploadHint =
     mode === "extract_ten_grid"
-      ? "托盘、卡纸、实拍平铺等；只抠图中已出现的甲片，不补全款式"
-      : mode === "complete_single_grid"
-        ? "请上传甲尖朝下、甲根朝上的单枚（或含一枚主款）；仅做 EXIF 转正后由模型抠出一枚高清单甲，再由服务端按五列相对宽度复制成 10 格"
-        : "支持常见图片格式";
+      ? "托盘、卡纸、实拍平铺等；只抠图中已出现的甲片，不补全款式；每次并行生成 **2 张**供择优"
+      : mode === "white_grid_rectify"
+        ? "请上传 2×5 白底成品图。**不改甲型与长短**，仅刚性旋转摆正歪斜，用外留白/列缝/行间缝控距；每次并行生成 **2 张**供择优"
+        : mode === "complete_single_grid"
+          ? "请上传甲尖朝下、甲根朝上的单枚（或含一枚主款）；仅做 EXIF 转正后由模型抠出一枚高清单甲，再由服务端按五列相对宽度复制成 10 格"
+          : "支持常见图片格式";
 
   return (
     <div className="min-h-full bg-zinc-50 text-zinc-900">
@@ -1207,7 +1334,7 @@ export default function Home() {
                 : mode === "flat_to_3d_packaging"
                   ? "正在生成 3D 开窗盒装主视图…"
                   : mode === "nails_in_box"
-                    ? "正在生成开窗盒装效果图…"
+                    ? "正在并行生成开窗盒装效果图（2 路）…"
                     : mode === "model_tryon"
                       ? "正在生成试戴图…"
                       : mode === "accessory_tryon"
@@ -1217,8 +1344,10 @@ export default function Home() {
                           : mode === "complete_single_grid"
                             ? "正在生成单甲并拼成 10 枚…"
                             : mode === "extract_ten_grid"
-                              ? "正在抠图排版…"
-                              : "正在生成…"
+                              ? "正在并行抠图排版（2张）…"
+                              : mode === "white_grid_rectify"
+                                ? "正在并行几何矫正（2张）…"
+                                : "正在生成…"
             : "开始生成"}
         </button>
         {error ? (
@@ -1416,45 +1545,72 @@ export default function Home() {
 
           <div className="flex flex-col gap-4">
             <h2 className="text-sm font-semibold text-zinc-500">{resultHeading}</h2>
+            {parallelStreamJobCount(mode) > 0 ? (
+              <p className="text-xs leading-relaxed text-zinc-500">
+                多路会同时打模型；若网关排队或限流，总耗时不一定比单路短（有时接近「两路各自变慢」）。先完成的图会先显示，不必等全部结束。
+              </p>
+            ) : null}
+            {(mode === "extract_ten_grid" || mode === "white_grid_rectify") &&
+            filledResultSlotCount > 0 ? (
+              <p className="text-xs leading-relaxed text-zinc-600">
+                已并行生成 {filledResultSlotCount} 张，请对比
+                {mode === "extract_ten_grid"
+                  ? "抠图保真度与排版"
+                  : "甲型保真度与竖直/间距"}
+                ，选用更合适的一张；可点「转为投喂图片」继续处理。
+              </p>
+            ) : null}
             <div className="min-h-[200px] rounded-xl border border-zinc-200 bg-zinc-50/50 p-4">
-              {resultUrls.length ? (
+              {displayResultSlots?.length ? (
                 <div className={gridClass}>
-                  {resultUrls.map((url, i) => (
+                  {displayResultSlots.map((slot, i) => (
                     <figure
-                      key={`${url.slice(0, 48)}-${i}`}
+                      key={`result-slot-${i}`}
                       className="flex flex-col gap-2"
                     >
                       <figcaption className="text-center text-xs font-medium text-zinc-500">
-                        {resultLabels[i] ?? `图 ${i + 1}`}
+                        {slot?.label ?? `图 ${i + 1}`}
                       </figcaption>
                       <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white p-2 shadow-sm">
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={url}
-                          alt={resultLabels[i] ?? `结果 ${i + 1}`}
-                          className="mx-auto max-h-[min(70vh,520px)] w-full object-contain"
-                        />
+                        {slot ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={slot.url}
+                            alt={slot.label}
+                            className="mx-auto max-h-[min(70vh,520px)] w-full object-contain"
+                          />
+                        ) : (
+                          <div className="flex min-h-[200px] flex-col items-center justify-center gap-2 px-4 py-10 text-center text-sm text-zinc-400">
+                            <span
+                              className="inline-block size-8 animate-spin rounded-full border-2 border-zinc-200 border-t-rose-400"
+                              aria-hidden
+                            />
+                            <span>生成中…</span>
+                          </div>
+                        )}
                       </div>
                       <div className="flex flex-wrap items-center justify-center gap-2">
                         <button
                           type="button"
-                          disabled={downloadBusyIndex === i}
+                          disabled={!slot || downloadBusyIndex === i}
                           onClick={() => {
-                            void downloadResult(url, i);
+                            if (!slot) return;
+                            void downloadResult(slot.url, i);
                           }}
-                          className="inline-flex h-9 min-w-[5.5rem] items-center justify-center rounded-lg border border-zinc-300 bg-white px-3 text-sm font-medium text-zinc-800 shadow-sm transition hover:border-rose-400 hover:bg-rose-50 hover:text-rose-900 disabled:cursor-wait disabled:opacity-60"
+                          className="inline-flex h-9 min-w-[5.5rem] items-center justify-center rounded-lg border border-zinc-300 bg-white px-3 text-sm font-medium text-zinc-800 shadow-sm transition hover:border-rose-400 hover:bg-rose-50 hover:text-rose-900 disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           {downloadBusyIndex === i ? "下载中…" : "下载"}
                         </button>
                         {!tenMode ? (
                           <button
                             type="button"
-                            disabled={feedFromResultBusyIndex === i}
+                            disabled={!slot || feedFromResultBusyIndex === i}
                             onClick={() => {
-                              void convertResultToFeedImage(url, i);
+                              if (!slot) return;
+                              void convertResultToFeedImage(slot.url, i);
                             }}
                             title="用该图替换左侧「投喂图片」中的主图，便于继续处理"
-                            className="inline-flex h-9 min-w-[6.5rem] items-center justify-center rounded-lg border border-rose-200 bg-rose-50 px-3 text-sm font-medium text-rose-900 shadow-sm transition hover:border-rose-400 hover:bg-rose-100 disabled:cursor-wait disabled:opacity-60"
+                            className="inline-flex h-9 min-w-[6.5rem] items-center justify-center rounded-lg border border-rose-200 bg-rose-50 px-3 text-sm font-medium text-rose-900 shadow-sm transition hover:border-rose-400 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50"
                           >
                             {feedFromResultBusyIndex === i
                               ? "处理中…"
@@ -1789,7 +1945,8 @@ export default function Home() {
 
         {mode === "ten_singles_grid" ||
         mode === "complete_single_grid" ||
-        mode === "extract_ten_grid" ? (
+        mode === "extract_ten_grid" ||
+        mode === "white_grid_rectify" ? (
           <div className="mt-4 min-w-0 rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
             <fieldset className="w-full rounded-lg border border-rose-100 bg-rose-50/40 px-3 py-3 lg:px-5">
               <legend className="px-1 text-xs font-semibold text-rose-800">
@@ -1800,7 +1957,9 @@ export default function Home() {
                   <p className="text-xs leading-relaxed text-zinc-600">
                     五列相对宽度对应上排左→右拇→小（下排同列再重复一遍）。
                     {mode === "extract_ten_grid"
-                      ? "本模式由模型按下列数值排版；数值含义与十枚单甲/单甲补齐的服务端拼图一致。"
+                      ? "本模式由模型按下列数值排版；每次并行出 **2 张**（方案 A/B）供择优；数值含义与十枚单甲/单甲补齐的服务端拼图一致。"
+                      : mode === "white_grid_rectify"
+                        ? "几何矫正：**逐格锁定**输入图每枚甲的轮廓与长短（仅刚性旋转+平移）；每次并行出 **2 张**（方案 A/B）供择优。附录：外留白/列缝/行间缝；「五列宽」无效。"
                       : mode === "complete_single_grid"
                         ? "单甲补齐：下列数值仅用于服务端把「一枚抠图甲片」按列宽复制成 10 格（体现拇→小尺码差），**不会**再次发给模型改甲型。"
                         : "提交时服务端会按最大列归一；缝过大时可能自动缩小甲片以适配画布。"}

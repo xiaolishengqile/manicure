@@ -1,5 +1,6 @@
 export type GenerationMode =
   | "extract_ten_grid"
+  | "white_grid_rectify"
   | "complete_single_grid"
   | "multi_angle"
   | "packaging_mockup"
@@ -18,7 +19,13 @@ export const GENERATION_MODE_OPTIONS: {
     value: "extract_ten_grid",
     label: "白底栅格 · 仅抠出已有甲片",
     description:
-      "从一张图里识别并抠出已出现的甲片，摆成 2×5 白底；不发明新款式。不足 10 枚则空位留白。仅 EXIF 转正，不整图强制 180°。可选「白底栅格排版」调节五列宽、外留白、列/行缝（写入提示词，由模型按数值排版）。提示词与补全/十枚合集共用白底栅格约束：拇最大、中指第二大、食名约等大、小指最小；每行甲根顶线水平。",
+      "从实拍/背卡识别并抠出已出现的甲片，摆成 2×5 白底；不补款。优先**保持每枚甲片的甲型与长短大小**与源图一致，仅做竖直摆正（yaw=0°）与栅格留白；可选完整「白底栅格排版」（含五列相对宽）写入提示词。每次并行生成 **2 张**供择优。仅 EXIF 转正，不整图强制 180°。",
+  },
+  {
+    value: "white_grid_rectify",
+    label: "白底栅格 · 几何矫正（二次）",
+    description:
+      "专用于已生成的 **2×5 白底图**：**不改变**各格甲片的甲型与长短大小，只对歪斜做**刚性旋转**摆正，并用**外留白、列缝、行间缝**控制间距（提示词附录不含列宽缩放）。每次并行生成 **2 张**供择优；可与「转为投喂图片」衔接。",
   },
   {
     value: "complete_single_grid",
@@ -30,7 +37,7 @@ export const GENERATION_MODE_OPTIONS: {
     value: "ten_singles_grid",
     label: "十枚单甲 → 一张白底合集",
     description:
-      "每枚仅 **EXIF 转正**（不整图 180°）后拼成一张 2×5 参考图送模型出白底栅格；朝向与上传一致。**可选**：「白底栅格排版」调节五列宽、外留白、列缝/行缝；服务端会归一列宽并甲根对齐，缝过大时整行自动缩小以适配画布。",
+      "每枚仅 **EXIF 转正**（不整图 180°）后拼成一张 2×5 参考图送模型出白底栅格；朝向与上传一致。**可选**：「白底栅格排版」调节五列宽、外留白、列缝/行缝；服务端会归一列宽并甲根对齐，缝过大时整行自动缩小以适配画布。提示词强调**保持各格甲型与长短**，竖直摆正与留白为主。",
   },
   {
     value: "multi_angle",
@@ -54,7 +61,7 @@ export const GENERATION_MODE_OPTIONS: {
     value: "nails_in_box",
     label: "开窗盒装 · 甲片入盒效果图",
     description:
-      "双图：① 美甲款式/甲片产品图（窗内**只**用这一套）；② 包装盒样式参考（学盒型/开窗/印刷；若参考图开窗里已有别的甲片，**成品会整窗替换为①的款式**）。生成甲片陈列在开窗内的主图。可选**竖向双列**或**横向 2×5**。",
+      "双图：① 美甲款式/甲片产品图（窗内**只**用这一套；**甲型与图案逐枚保真**）；② 包装盒参考（**盒比例、Logo 与盒面文字须与②一致**，勿改样式）。窗内**同一行左右紧挨**、**上下两排之间也无空隙**（勿把参考里两排之间的字标当成留白）；若参考开窗里已是别的甲片，**成品整窗替换为①**。可选**竖向双列**或**横向 2×5**。**每次提交并行 2 路**（方案 A/B）；两路皆成则 **2 张**备选，仅一路成则返回 **1 张**。",
   },
   {
     value: "model_tryon",
@@ -75,6 +82,7 @@ export function parseGenerationMode(raw: FormDataEntryValue | null): GenerationM
   if (s === "complete_grid") return "complete_single_grid";
   if (
     s === "extract_ten_grid" ||
+    s === "white_grid_rectify" ||
     s === "complete_single_grid" ||
     s === "multi_angle" ||
     s === "packaging_mockup" ||
@@ -206,11 +214,25 @@ const NAILS_IN_BOX_VERTICAL_LAYOUT_EN = `**ARRANGEMENT — VERTICAL two-column w
 
 const NAILS_IN_BOX_HORIZONTAL_LAYOUT_EN = `**ARRANGEMENT — HORIZONTAL 2×5 grid inside window (user-selected; mandatory):**
 - Inside the window show **two horizontal rows × five columns** (classic press-on sheet). **Top row:** left→right = thumb→pinky; **bottom row:** left→right = same column semantics for the second row of the FIRST reference. **Never** mirror the row or shuffle columns.
+- **Row-to-row (critical):** the **bottom** of the **top row’s nail plates** and the **top** of the **bottom row’s nail plates** form **one contiguous vertical stack** — **zero** wide horizontal **backing strip**, **zero** “logo / wordmark ribbon”, and **zero** empty **row gutter** **between** the two rows inside the aperture. If the SECOND reference shows a brand line **between** the two nail rows, **relocate** it to **above** the top row, **below** the bottom row, or onto the **opaque frame / sleeve outside** the nail cluster — **do not** preserve it as a spacer lane that separates the rows.
 - On the backing card inside the window, nails follow **tips generally toward the bottom** of each cell; **cuticle/root tops** share a **straight horizontal baseline per row**.
 ${WHITE_BG_NAIL_GRID_FINGER_LADDER}
 
 ${WHITE_BG_NAIL_GRID_TOP_BASELINE}
 - **Column alignment:** slots line up vertically through both rows; **pixel-faithful** art from the FIRST image per cell.`;
+
+/** 开窗盒装·甲片入盒：盒体比例与盒面印刷（含 Logo/字）锁定参考图；窗内甲片紧排且款式保真 */
+const NAILS_IN_BOX_BOX_GEOMETRY_AND_PRINT_LOCK_EN = `**BOX GEOMETRY + OUTER PRINT — LOCK TO SECOND (mandatory; failure if violated):**
+- **Proportions & shell:** match the **SECOND** reference’s **overall carton aspect ratio**, **panel / lid / base proportions**, **edge breaks**, and **clear window shape + size + placement** on the face — only believable **3D perspective + lighting** vs the photo. **Forbidden:** fattening/squashing the whole box vs the reference, swapping a tall sleeve for a short cube, or noticeably rescaling the window relative to the printed face beyond mild lens correction.
+- **Print fidelity:** carry over **every** visible exterior graphic from the **SECOND** image **verbatim** — **logos, logotype geometry, wordmarks, legal/micro copy, barcodes, icons, color bands** — same spelling and lockup; **forbidden** re-typesetting, inventing substitute slogans, replacing real marks with generic filler, or “cleaning up” the reference layout. **Forbidden:** stealing **unrelated** third-party trademarks from outside the user’s SECOND image.
+（中文：**盒子长宽比与轮廓、开窗形状与位置**须与第二张一致，**不得改比例**；**盒面 Logo 与所有文字**须原样保留，禁止改写或换成占位内容。）`;
+
+const NAILS_IN_BOX_WINDOW_TIGHT_AND_NAIL_FIDELITY_EN = `**WINDOW INTERIOR — NO GAPS BETWEEN NAILS (within rows AND between rows) + SKU FIDELITY (mandatory):**
+- **Horizontal 2×5 — within each row:** the five plates **abut left-to-right** — **no** intentional **white/pink card gutters**, thick spacer strips, or empty bands **between** adjacent nails in that row (micro shadows / anti-alias only).
+- **Horizontal 2×5 — between the two rows:** treat the **10 nails as one tight sheet**: **no** vertical **empty lane** between the upper and lower row — **forbidden** a centered logo block, slogan band, or pale backing **gap** that visually splits the two rows (even when the SECOND reference did this). **Priority:** rows **touch or nearly touch** as a single retail sheet; relocate any inner-window branding so it does **not** act as row spacing.
+- **Vertical two-column:** in **each** column, the five stacked nails **abut top-to-bottom** — **no** stacked spacer blocks between neighbors; keep the two columns **tight** to the reference tray unless the **SECOND** image clearly shows a wide median strip.
+- **Art + silhouette from FIRST only:** for every mapped slot, keep the **same nail outline** (length class, tip family, sidewalls, C-curve read) and **same surface art** as that slot in the **FIRST** image. **Forbidden:** non-uniform stretch/squash/shear, trimming tips to “fit,” beauty-filter redraw, or swapping motifs between slots. **Allowed:** **uniform** per-nail scale plus **small rigid** rotation/translation for natural perspective on the tray — never warp that changes pattern or shape identity.
+（中文：**同一行**左右甲片紧挨；**上下两排之间也不得留空带**（不要把参考图里两排之间的 Logo 带当成留白分隔）；**美甲图案与甲型**与第一张**逐枚一致**。）`;
 
 /**
  * 双图「款式图 + 盒样式」→ 甲片陈列于开窗盒内（竖向双列或横向 2×5）。与 API 传入顺序一致：FIRST=美甲款式，SECOND=包装盒参考。
@@ -225,21 +247,26 @@ export function buildNailsInBoxPackagingPrompt(
 
   return `You receive TWO input images in this fixed editor order:
 1) **FIRST — NAIL ART / PRODUCT SOURCE OF TRUTH:** press-on nails on a card, tray, flat-lay, or white grid — the **exact** artwork (colors, patterns, 3D chrome drips, charms, French edges, silhouettes) that must appear on every nail **visible inside the carton window**. **Zero** creative reinterpretation per nail.
-2) **SECOND — PACKAGING / BOX STYLE REFERENCE:** retail box, sleeve, mockup, or photo of a windowed carton — use for **box proportions**, **window shape and position**, **frame color**, **typography bands** (top strap / bottom title stack), **inner backing** (e.g. pearlescent / iridescent sheet), and **overall print style**. **Forbidden:** stealing unrelated category branding; use **generic placeholder copy** (e.g. × HANDMADE PRESS-ON NAILS ×, stacked “YOUR COLLECTION” style title) unless the user’s SECOND image is clearly their own final brand art to preserve verbatim.
+2) **SECOND — PACKAGING / BOX STYLE REFERENCE:** retail box, sleeve, mockup, or photo of a windowed carton — authoritative for **box proportions**, **window geometry**, **outer print** (logos, typography, color blocks), **inner backing** texture, and **overall style**. Re-light in 3D as needed, but **do not** change the reference’s intended proportions or replace its printed copy (see lock block below).
 
 **CRITICAL — WINDOW NAILS vs BOX SHELL (failure if violated):**
 - The **SECOND** image may already show **different** press-on art inside its window (demo stock, cartoon nails, another SKU). That nail art is **NOT** the user’s target. **You must completely REPLACE** every nail **visible through the window** with the **FIRST** image’s nail designs only — mapped per the arrangement rules below. **Forbidden:** keeping, retouching, color-matching, or “merging” the nail graphics that were inside the SECOND image’s window; **forbidden:** outputting the SECOND reference’s nails as the hero product.
 - Treat the **SECOND** image as supplying **cardboard / plastic window / outer print / backdrop texture / optional hand pose** only; the **interior nail pixels** are **always** sourced from the **FIRST** image.
 （中文：**盒型、开窗、外盒印刷、背板质感**学第二张；**开窗里每一枚甲片的款式**必须**全部换成第一张图**里的对应甲片，禁止沿用第二张开窗里原有的美甲图案。）
 
+${NAILS_IN_BOX_BOX_GEOMETRY_AND_PRINT_LOCK_EN}
+
+${NAILS_IN_BOX_WINDOW_TIGHT_AND_NAIL_FIDELITY_EN}
+
 ${arrangementBlock}
 
 TASK — one photorealistic **windowed press-on retail pack** hero (finished “nails in box” like a polished e-commerce main image):
 - Output **one** new **3D-correct** slim rectangular carton whose **design language matches the SECOND reference** (re-light and re-render; do not simply flatten-image paste unless the reference is already a perfect neutral mockup).
 - **Window interior:** every nail must **match the FIRST reference** for its mapped slot — same motifs, micro-detail, gloss. **Perspective** and soft shadows on curved nails are allowed; **2D motif layout** must stay recognizable per slot.
+- For **horizontal 2×5**, the **two rows inside the window** must read as **one gapless sheet** — **no** horizontal **empty band or logo strip between rows** that separates them.
 - **Scene:** seamless **#FFFFFF** or very light neutral studio; soft commercial lighting; crisp edges; believable cardboard thickness; optional faint ground shadow.
 - **No human hands** unless the SECOND reference explicitly demands a holding crop — default **product-only**.
-- If the FIRST image has **fewer than 10** distinct nails, show only those with clean spacing; **never** invent missing nail art.
+- If the FIRST image has **fewer than 10** distinct nails, show only those in a **compact tight layout** without invented nails — **still** no fake filler plates and **no** wide decorative gaps between the real ones.
 
 Return **one** square high-resolution photograph only.`;
 }
@@ -362,21 +389,33 @@ FINAL CHECK:
 - No digit badges or label boxes remain in the output.
 - Slot 1 art is still top-left; slot 10 still bottom-right.
 - **Every occupied slot: nail perfectly vertical (yaw = 0°)** — re-read CANVAS-VERTICAL; **forbidden** any visible tilt in any row or column pair.
-- **Each full row of five:** FREE-EDGE STAGGER satisfied (staggered tips, **not** flat tabletop); stagger with **vertical translation** only, **yaw = 0°** preserved.
+- **Each full row of five:** FREE-EDGE STAGGER where it matches **source** nail lengths (staggered tips, **not** flat tabletop); use **vertical translation** only, **yaw = 0°** preserved — **never** shorten or lengthen a nail to force a template.
 - Finger ladder + per-row top baseline satisfied with **subtle** size steps (one SKU family); do not collapse index/ring to one tiny and one huge; **do not** exaggerate thumb vs pinky beyond the reference’s gentle spread.
 
 Return **ONE** square high-resolution product-ready image.`;
+
+/** 抠图专用：先钉死「不拉长、不改比例」，再展开长段保真说明，减轻被后面「阶梯指尖」等词带偏 */
+const EXTRACT_TEN_GRID_PRIORITY_LEDE_EN = `EXECUTION ORDER (read first — wins over any later “retail / stagger / ladder” wording):
+1) **Cut out** each visible press-on as a **rigid layer** — **same** length, width, and **2D silhouette** as that nail in the photo (CAD-like), **same aspect ratio** within a few percent — **forbidden:** vertical-only stretch, “slenderizing,” or redrawing a longer almond/stiletto to “fit” the cell.
+2) **Rigid in-plane rotation** to **yaw = 0°** (tips down / roots up), then **rigid translation** into the **2×5** cells and gutters — **no** warp, shear, liquify, or non-uniform scale for layout.
+3) Only then apply the **neutral cleanup** rules in the long **DESIGN & SHAPE FIDELITY** block below — cleanup must **never** change outlines or nail length class.
+
+`;
 
 /** 从实拍/产品图只抠已出现的甲片，不补全、不发明 */
 const EXTRACT_TEN_GRID_PROMPT = `You act as a **professional e-commerce product retoucher**.
 
 TASK — **extraction and layout normalization only** (not creative nail design, not a new SKU). Do **not** redesign, re-style, or reinterpret the visible set.
 
+${EXTRACT_TEN_GRID_PRIORITY_LEDE_EN}
 ${PACKSHOT_FIDELITY_CLEANUP_BG_EN}
 
 Edit the provided reference photo of press-on / stick-on nails (display card, tray, flat-lay, hand-held set, noisy background, etc.).
 
 GOAL — **Extraction only:** cut out every **clearly visible** artificial nail from the source and place them on a clean **2×5** white grid. This is **NOT** a “fill to 10 with invented nails” task and **NOT** a design refresh.
+
+FIDELITY FIRST (hard — overrides decorative layout goals):
+- Each placed nail must keep the **same** **silhouette, length, width, and nail-art** as that nail in the source — **no** shortening, lengthening, or reshaping to “fit” the grid. **Aspect-ratio lock:** the placed nail’s **height:width** in the cell must match the **source** cutout within a few percent — **forbidden:** stretching taller to look “e-commerce long.” **Allowed:** **rigid in-plane rotation** to **yaw = 0°** and **rigid translation** for gutters / row alignment; **forbidden:** stretch, squish, uniform or non-uniform rescale, or liquify that changes the sold SKU.
 
 IMAGE EDITING TASK:
 1) Identify every **individual** nail tip that is **unambiguously** visible. Ignore skin, fingers, printed text, logos, packaging, and environment.
@@ -401,11 +440,12 @@ ${PACKSHOT_GRID_VERTICAL_QA_EN}
 UNIFORM MODULAR GRID + COLUMN ALIGNMENT:
 - **2 rows × 5 columns**; columns align across rows; **minimal** gutters and slim outer margins (tight SKU look).
 
-CELL PLACEMENT — **mandatory retail stagger (hard QA gate; failure if violated):**
-- **Co-equal with verticality:** **yaw = 0°** for every occupied nail (see CANVAS-VERTICAL) **and** the FREE-EDGE STAGGER rules **both** apply — stagger is achieved by **vertical translation** of each upright nail, **not** by rotation or by flattening tips.
+CELL PLACEMENT — **verticality + gutters + natural tips:**
+- **yaw = 0°** for every occupied nail (see CANVAS-VERTICAL). Prefer **FREE-EDGE STAGGER** via **vertical translation** only when it **does not** require changing any nail’s **length or silhouette** vs the source; if a stagger template would conflict with fidelity, **preserve** the source nail and **white spacing** from the appended grid block carries the layout.
 
 ${PACKSHOT_TIP_STAGGER_ROW_EN}
-- **Do NOT** vertically **center** whole nails in cells if that would break the shared root baseline or **erase** the required tip stagger.
+- **Do NOT** vertically **re-pack** nails in a way that **changes** their **visible length** vs the input just to align roots or tips; use **translation** and **backdrop gutters** first.
+
 - **Horizontal:** center each nail in its column slot unless the source clearly used a deliberate offset; keep **gutter widths visually even** across columns — **forbidden** one column gap obviously wider than its neighbours.
 - **Empty cells:** solid flat backdrop **only**, matching the canvas colour (**#FFFFFF** or **#F7F7F7** — same as the chosen background above).
 
@@ -420,11 +460,48 @@ LIGHTING — packshot finish:
 - Soft even **e-commerce studio** light on the nail pieces; preserve sparkle/chrome fidelity from the originals; **no** heavy contrast pushes or global colour re-grade beyond neutral cleanup above.
 
 FINAL QA SWEEP (internal — before output):
-- Every **occupied** slot: **yaw = 0°** (CANVAS-VERTICAL). Each **full row of five** occupied nails: **FREE-EDGE STAGGER** present (tips **not** collinear on one line). **Defringe** on white: no obvious light halos along cutout edges.
+- Every **occupied** slot: **yaw = 0°** (CANVAS-VERTICAL); **aspect ratio** vs source cutout within a few percent — **no** vertical elongation. Each **full row of five** occupied nails: tips **not** all on one flat line when source lengths differ; **never** sacrifice source **length or silhouette** for stagger. **Defringe** on white: no obvious light halos along cutout edges.
 
 ${PACKSHOT_OUTPUT_COMPLIANCE_EN}
 
 Return a single square product-ready image.`;
+
+/** 几何矫正专用输出：勿用「commercially accurate」等诱发整图重绘的措辞 */
+const WHITE_GRID_RECTIFY_OUTPUT_EN = `OUTPUT:
+- **Exactly one** square image; **no** text, watermarks, or UI.
+- Must read as the **same photographed sheet** as the input — **only** rigidly moved/rotated nails on white, **not** a newly generated catalogue render.`;
+
+/** 发往 API 时拼在几何矫正 prompt 最前（提高首尾权重） */
+export const WHITE_GRID_RECTIFY_API_PREFIX = `INPUT-FIDELITY LOCK: Each nail slot = **copy** that slot from the input image; **only** rigid rotate + translate. **Do not** regenerate shapes or equalize lengths.\n\n`;
+
+/** 二次：仅平行（竖直）+ 白底间距；逐格锁死甲型/长短与指尖阶梯 */
+const WHITE_GRID_RECTIFY_PROMPT = `PER-SLOT STAMP — **#1 HARD RULE** (any violation = failure):
+For **each occupied slot N (1–10)**, output slot **N** must be the **same physical nail** as input slot **N** — **same** outer contour, **same** plate **height** and **width** (within **~3%**), **same** tip shape and taper, **same** art pixels and photo texture. **Forbidden:** redrawing, “beautifying,” copying another slot’s silhouette, or making **all ten** nails **one** ideal length/shape.
+
+**NOT regeneration** — **only** rigid **rotate + translate** per nail layer + white backdrop. If layout conflicts with silhouette, **keep silhouette**; adjust **only** rotation, translation, or **more white**.
+
+INPUT: square **2×5** on **flat white**. Slots **1–5** top L→R, **6–10** bottom.
+
+DO (only these two):
+1) **PARALLEL:** rigid rotation → **yaw = 0°** (tips down, cuticle up). Row **0°** parity; pairs **1↔6 … 5↔10** share **0°** when both filled.
+2) **SPACING:** rigid translation + white per appended **USER-SUPPLIED GRID SPACING** (margins, **equal** column gutters, row gutter). Slot **k** and **k+5** share one **vertical centerline**. **Never** resize plates to fit gutters.
+
+STEPPED BOTTOM (mandatory — match input):
+- Each full row of five: **keep input’s stair-step** — **different** free-edge **Y** (middle longer, sides shorter, etc.). **≥2** clearly different tip heights per row.
+- **Forbidden:** flat tabletop (all tips on one horizontal line); equalizing every nail to **same** length/width to look “neat.”
+
+COMMON FAILURES — **forbidden** (what users reject):
+- Ten nails **same length** / **same width** when input had thumb vs pinky differences.
+- Tips **wider / rounder** than input (squoval drift); **longer / sharper** than input (stiletto drift).
+- Wax-plastic CGI polish; lost sparkle/grain from the photo.
+
+FORBIDDEN besides the two moves: rescale, stretch, squish, liquify, warp, recolour, relight, sharpen, redraw, homogenize, swap slots.
+
+SELF-CHECK: (1) every slot **yaw=0°** (2) gutters per appendix (3) **stepped tips** like input (4) slot **N** still **same H×W** outline as input **N**.
+
+${WHITE_GRID_RECTIFY_OUTPUT_EN}
+
+Return **one** square image.`;
 
 /** 单枚高清化：仅 EXIF 转正；用户约定甲尖朝下；模型只出一枚抠图单甲，2×5 由服务端复制列缩放拼接。 */
 const COMPLETE_SINGLE_GRID_PROMPT = `You act as a **professional e-commerce product retoucher**.
@@ -708,15 +785,38 @@ const FLAT_TO_3D_PACKAGING_PROMPTS: { prompt: string; label: string }[] = [
   },
 ];
 
+/** 白底栅格「仅抠图 / 几何矫正」并行出图张数（同 prompt 多次，供用户择优） */
+export const WHITE_GRID_DUAL_VARIANT_COUNT = 2;
+
+function buildWhiteGridDualVariantJobs(
+  baseLabel: string,
+  prompt: string,
+): { prompt: string; label: string }[] {
+  return Array.from({ length: WHITE_GRID_DUAL_VARIANT_COUNT }, (_, i) => ({
+    prompt,
+    label: `${baseLabel} · 方案 ${String.fromCharCode(65 + i)}`,
+  }));
+}
+
+/** 并行多方案、至少成功 1 张即可返回的模式 */
+export function modeAllowsPartialDualVariants(mode: GenerationMode): boolean {
+  return mode === "extract_ten_grid" || mode === "white_grid_rectify";
+}
+
 export function promptsForMode(mode: GenerationMode): { prompt: string; label: string }[] {
   switch (mode) {
-    case "extract_ten_grid":
-      return [
-        {
-          prompt: EXTRACT_TEN_GRID_PROMPT,
-          label: GENERATION_MODE_OPTIONS.find((o) => o.value === "extract_ten_grid")!.label,
-        },
-      ];
+    case "extract_ten_grid": {
+      const baseLabel = GENERATION_MODE_OPTIONS.find(
+        (o) => o.value === "extract_ten_grid",
+      )!.label;
+      return buildWhiteGridDualVariantJobs(baseLabel, EXTRACT_TEN_GRID_PROMPT);
+    }
+    case "white_grid_rectify": {
+      const baseLabel = GENERATION_MODE_OPTIONS.find(
+        (o) => o.value === "white_grid_rectify",
+      )!.label;
+      return buildWhiteGridDualVariantJobs(baseLabel, WHITE_GRID_RECTIFY_PROMPT);
+    }
     case "complete_single_grid":
       return [
         {
