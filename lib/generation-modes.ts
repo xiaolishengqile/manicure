@@ -1,5 +1,6 @@
 export type GenerationMode =
   | "extract_ten_grid"
+  | "extract_angle_scattered"
   | "white_grid_rectify"
   | "complete_single_grid"
   | "multi_angle"
@@ -10,78 +11,186 @@ export type GenerationMode =
   | "accessory_tryon"
   | "ten_singles_grid";
 
+export type GenerationModeGroupId = "white_grid" | "tryon" | "packaging";
+
 export const GENERATION_MODE_OPTIONS: {
   value: GenerationMode;
   label: string;
+  /** 卡片 / 列表主标题（短） */
+  shortLabel: string;
   description: string;
+  /** 一句话：适合什么图 */
+  whenToUse: string;
 }[] = [
   {
     value: "extract_ten_grid",
     label: "白底栅格 · 仅抠出已有甲片",
+    shortLabel: "规整实拍 · 抠图排版",
+    whenToUse: "背卡、托盘、较正的 2×5 或平铺，甲片大致对齐",
     description:
       "从实拍/背卡识别并抠出已出现的甲片，摆成 2×5 白底；不补款。优先**保持每枚甲片的甲型与长短大小**与源图一致，仅做竖直摆正（yaw=0°）与栅格留白；可选完整「白底栅格排版」（含五列相对宽）写入提示词。每次并行生成 **2 张**供择优。仅 EXIF 转正，不整图强制 180°。",
   },
   {
+    value: "extract_angle_scattered",
+    label: "白底栅格 · 斜拍散落抠图",
+    shortLabel: "斜拍 / 散落 · 抠图排版",
+    whenToUse: "对角两排、多枚散落、各枚倾斜角度不一的实拍",
+    description:
+      "专为 **angle shot / loose shot**：对角排布或多枚散落、各枚平面内倾斜不一。逐枚拆层抠出 → 刚性旋转至竖直 → 排成 2×5 白底；**不补款**、不改甲型。弱化整图扶正，避免漏枚与列错位。每次并行 **2 张**择优。",
+  },
+  {
     value: "white_grid_rectify",
     label: "白底栅格 · 几何矫正（二次）",
+    shortLabel: "已有 2×5 · 二次矫正",
+    whenToUse: "已是白底 2×5，只需摆正、调缝，不再从实拍抠",
     description:
       "专用于已生成的 **2×5 白底图**：把 10 格当作**独立图层拆掉整版重排**（非整图扶正），**不改变**各格甲型与长短，仅**刚性旋转至竖直（yaw=0°）**+ 平移，并用**外留白、列缝、行间缝**控距（附录不含列宽缩放）。每次并行 **2 张**择优；可与「转为投喂图片」衔接。",
   },
   {
     value: "complete_single_grid",
     label: "白底栅格 · 单甲补齐10支",
+    shortLabel: "单枚款式 · 复制 10 格",
+    whenToUse: "一张图里 mainly 一枚代表款，要补满 10 格同款",
     description:
       "约定上传**甲尖朝下**的单枚（或含一枚主款）照片；服务端仅 **EXIF 转正**（不整图 180°）后送模型高清抠出一枚，再由服务端按五列**相对宽度**复制成 2×5 白底栅格以体现拇→小的尺码差。**可选**：「白底栅格排版」调节五列宽、外留白与列/行缝。",
   },
   {
     value: "ten_singles_grid",
     label: "十枚单甲 → 一张白底合集",
+    shortLabel: "10 个文件 · 拼合集",
+    whenToUse: "已备好 10 张单枚文件，每格一枚",
     description:
       "每枚仅 **EXIF 转正**（不整图 180°）后拼成一张 2×5 参考图送模型出白底栅格；朝向与上传一致。**可选**：「白底栅格排版」调节五列宽、外留白、列缝/行缝；服务端会归一列宽并甲根对齐，缝过大时整行自动缩小以适配画布。提示词强调**保持各格甲型与长短**，竖直摆正与留白为主。",
   },
   {
     value: "multi_angle",
     label: "多角度上手图（固定4张）",
+    shortLabel: "上手图 · 固定 4 张",
+    whenToUse: "已有款式图，要生成 4 种棚拍上手角度",
     description:
       "固定 **4 张**、同一只手、同一棚拍。① **整手正视主图**（甲面可读）。② **指尖朝镜 cup-forward 特写**（指尖与立体厚度）。③ **侧沿指列 traverse macro**（沿尺侧或桡侧扫过指列，看 C-curve 与叠压透视）。④ **斜俯视半侧上手**（高机位约 ¾，强调指节弧与纵深，禁止与①同轴微调）。白底、光影、肤色、款式一致；小花等点缀严格按背卡列位。禁止双掌、反关节、蜡皮假肤。",
   },
   {
     value: "packaging_mockup",
     label: "包装盒 + 手握实拍",
+    shortLabel: "手握包装盒",
+    whenToUse: "产品图 + 握姿参考，生成手握盒装图",
     description:
       "需双图：① 产品图；② 握姿参考。开窗内背卡可与参考一致（含甲尖朝下排版）。**仅手上穿戴**：每枚须在立体上与**解剖游离缘**对齐（法式/豹纹在真指尖），勿把背卡像素的上下直接贴到皮肤；拇指仅用第1列款。",
   },
   {
     value: "flat_to_3d_packaging",
     label: "2D 文稿 → 3D 开窗盒装主视图",
+    shortLabel: "2D 稿 → 3D 盒装",
+    whenToUse: "平面稿 + 摄影参考，出立体开窗盒主图",
     description:
       "双图：① 2D 包装平面稿（盒面印刷、色值、Logo、窗内甲片示意**均以稿为准**）；② 摄影/3D **氛围参考**（取景、光影、白底投影）。**只输出 1 张**立体开窗盒；窗内甲片与外盒图文须来自①，勿照搬②上的竞品品牌与甲片款式（服务端将②先于①送模型以抑制「抄成参考图」）。",
   },
   {
     value: "nails_in_box",
     label: "开窗盒装 · 甲片入盒效果图",
+    shortLabel: "款式 + 盒型 · 入盒",
+    whenToUse: "款式图 + 包装盒参考，窗内替换为你的甲片",
     description:
       "双图：① 美甲款式/甲片产品图（窗内**只**用这一套；**甲型与图案逐枚保真**）；② 包装盒参考（**盒比例、Logo 与盒面文字须与②一致**，勿改样式）。窗内**同一行左右紧挨**、**上下两排之间也无空隙**（勿把参考里两排之间的字标当成留白）；若参考开窗里已是别的甲片，**成品整窗替换为①**。可选**竖向双列**或**横向 2×5**。**每次提交并行 2 路**（方案 A/B）；两路皆成则 **2 张**备选，仅一路成则返回 **1 张**。",
   },
   {
     value: "model_tryon",
     label: "指甲 × 模特 · 精准试戴",
+    shortLabel: "模特试戴",
+    whenToUse: "产品图 + 模特图，换指甲款式",
     description:
       "需同时上传「美甲产品图」与「模特图」。**美甲产品图约定：**每枚甲片**甲尖朝下**、每行**从左到右 = 大拇指 → 小指**；合成到模特手上时须**逐格还原**款式（色、纹、法式线、饰品与甲型），勿左右对调或整片戴反。尽量保持模特姿态、肤色、光线与背景不变。",
   },
   {
     value: "accessory_tryon",
     label: "指甲 × 饰品 · 手模试戴广告图",
+    shortLabel: "饰品 + 手模广告",
+    whenToUse: "产品图 + 戒指等饰品参考",
     description:
       "上传美甲产品图与饰品参考图（如戒指）。**美甲产品图约定：**甲尖朝下、每行从左到右大拇指至小指；成片手模上的指甲须与产品图**严格一致**（花色、渐变、法式、立体装饰逐指对齐），甲根朝指根、指尖朝游离缘。生成广告级手模+饰品+甲片主图，适合社媒/电商。",
   },
 ];
+
+export const GENERATION_MODE_GROUPS: {
+  id: GenerationModeGroupId;
+  title: string;
+  subtitle: string;
+  modes: GenerationMode[];
+}[] = [
+  {
+    id: "white_grid",
+    title: "白底商品图",
+    subtitle: "抠图、排版、十枚合集",
+    modes: [
+      "extract_ten_grid",
+      "extract_angle_scattered",
+      "white_grid_rectify",
+      "complete_single_grid",
+      "ten_singles_grid",
+    ],
+  },
+  {
+    id: "tryon",
+    title: "上手 / 试戴",
+    subtitle: "模特、饰品、多角度棚拍",
+    modes: ["multi_angle", "model_tryon", "accessory_tryon"],
+  },
+  {
+    id: "packaging",
+    title: "包装 / 盒装",
+    subtitle: "手握、2D 转 3D、开窗入盒",
+    modes: ["packaging_mockup", "flat_to_3d_packaging", "nails_in_box"],
+  },
+];
+
+export function generationModeOption(value: GenerationMode) {
+  const opt = GENERATION_MODE_OPTIONS.find((o) => o.value === value);
+  if (!opt) throw new Error(`Unknown generation mode: ${value}`);
+  return opt;
+}
+
+/** 提交时可带白底栅格列宽 / 留白 / 列缝参数 */
+export function modeUsesWhiteGridFormFields(mode: GenerationMode): boolean {
+  return (
+    mode === "complete_single_grid" ||
+    mode === "extract_ten_grid" ||
+    mode === "extract_angle_scattered" ||
+    mode === "white_grid_rectify"
+  );
+}
+
+/** 页面展示「白底栅格排版」面板 */
+export function modeShowsWhiteGridLayoutPanel(mode: GenerationMode): boolean {
+  return (
+    mode === "ten_singles_grid" ||
+    mode === "complete_single_grid" ||
+    mode === "extract_ten_grid" ||
+    mode === "extract_angle_scattered" ||
+    mode === "white_grid_rectify"
+  );
+}
+
+/** 并行 2 路抠图 / 矫正，结果区 2 列展示 */
+export function modeUsesParallelDualVariants(mode: GenerationMode): boolean {
+  return (
+    mode === "extract_ten_grid" ||
+    mode === "extract_angle_scattered" ||
+    mode === "white_grid_rectify"
+  );
+}
+
+/** 从一张实拍抠多枚并排 2×5 */
+export function modeIsPhotoExtractToGrid(mode: GenerationMode): boolean {
+  return mode === "extract_ten_grid" || mode === "extract_angle_scattered";
+}
 
 export function parseGenerationMode(raw: FormDataEntryValue | null): GenerationMode {
   const s = typeof raw === "string" ? raw.trim() : "";
   if (s === "complete_grid") return "complete_single_grid";
   if (
     s === "extract_ten_grid" ||
+    s === "extract_angle_scattered" ||
     s === "white_grid_rectify" ||
     s === "complete_single_grid" ||
     s === "multi_angle" ||
@@ -477,6 +586,71 @@ ${PACKSHOT_OUTPUT_COMPLIANCE_EN}
 
 Return a single square product-ready image.`;
 
+/** 斜拍 / 散落实拍：强调逐枚拆层，禁止整图扶正 */
+const EXTRACT_ANGLE_SCATTERED_SCENE_EN = `ANGLE / SCATTERED / DIAGONAL-ROW SOURCE (this mode — read before generic grid rules):
+- Typical inputs: nails on white at **different in-plane rotations**; **two diagonal rows**; or **loose scatter** with gaps — **not** a clean straight 2×5 card photo.
+- **Camera perspective** may foreshorten nails (look shorter/wider). That is **not** permission to **stretch, squash, or shear** — only **per-nail rigid rotation + translation** after cutout.
+- **Soft contact shadows** under each nail: remove with the nail layer; **do not** leave gray blobs as separate objects.
+- **3D charms / flowers / beads:** include them as part of that nail’s cutout silhouette; **do not** drop or redraw them.
+
+DECOMPOSE FIRST — **never** “fix” the group as one photo:
+- **Forbidden:** rotating, deskewing, or perspective-correcting the **entire canvas** because the **group** is diagonal.
+- **Mandatory:** find **each individual** press-on → separate layer → **its own** rotation to **yaw = 0°** → place on fresh 2×5.
+
+SLOT ORDER when layout is messy:
+1) If two **diagonal rows** are obvious: map **upper row** slots **1–5** left→right, then **lower row** **6–10** left→right (columns = thumb→pinky).
+2) If **scattered**: sort by **visual center Y** (higher on image = earlier row), then **X** left→right within a row band; assign slots **1→10** without swapping art between nails.
+3) If **ambiguous**, prefer **reading order** that preserves **distinct designs** — **never** duplicate one nail to fill empty cells.
+
+`;
+
+/** 斜拍 / 散落实拍 → 2×5 白底（专用 prompt） */
+const EXTRACT_ANGLE_SCATTERED_PROMPT = `You act as a **professional e-commerce product retoucher** specializing in **messy flat-lay and angle-shot** press-on photography.
+
+TASK — **extraction and layout normalization only** from **tilted / scattered** sources. **Not** creative redesign. **Not** filling missing SKUs.
+
+${EXTRACT_ANGLE_SCATTERED_SCENE_EN}
+${EXTRACT_TEN_GRID_PRIORITY_LEDE_EN}
+${PACKSHOT_FIDELITY_CLEANUP_BG_EN}
+
+GOAL — cut out **every clearly visible** artificial nail and composite onto **2×5** white. **No invention.**
+
+FIDELITY FIRST (hard):
+- Each nail keeps **same silhouette, length, width, nail-art** as in the source cutout — **aspect-ratio lock** within a few percent.
+- **Allowed:** rigid in-plane rotation → **yaw = 0°** + translation.
+- **Forbidden:** stretch, squish, liquify, or non-uniform scale to “correct” perspective or fit gutters.
+
+IMAGE EDITING STEPS:
+1) Segment **each** nail (including 3D decor) from white / pale backdrop; ignore gaps between nails.
+2) **Crisp edges** — no halos, no leftover shadow patches **between** nails.
+3) Place on **#FFFFFF** / **#F7F7F7** in **2×5** per SLOT ORDER rules above.
+
+NO INVENTION:
+- Fewer than 10 visible → **empty cells = flat backdrop only**.
+- More than 10 → output **exactly 10** from the dominant set in reading / sort order; drop extras.
+
+${PACKSHOT_GRID_DECOMPOSE_RELAYOUT_EN}
+${PACKSHOT_GRID_VERTICAL_QA_EN}
+
+UNIFORM MODULAR GRID:
+- **2 rows × 5 columns**; column alignment across rows; minimal gutters.
+
+${PACKSHOT_TIP_STAGGER_ROW_EN}
+
+WHITE-GRID PRODUCT RULES:
+${WHITE_BG_NAIL_GRID_FINGER_LADDER}
+${WHITE_BG_NAIL_GRID_TOP_BASELINE}
+${PACKSHOT_FAILSAFE_GRID_EN}
+
+FINAL QA (angle/scatter):
+- **Every** occupied slot **yaw = 0°**; no nail still at source slant.
+- No **group-level** diagonal — only **per-nail** upright pieces.
+- Defringe on white; 3D decor still attached to the correct nail.
+
+${PACKSHOT_OUTPUT_COMPLIANCE_EN}
+
+Return a single square product-ready image.`;
+
 /** 几何矫正专用输出：勿用「commercially accurate」等诱发整图重绘的措辞 */
 const WHITE_GRID_RECTIFY_OUTPUT_EN = `OUTPUT:
 - **Exactly one** square image; **no** text, watermarks, or UI.
@@ -819,21 +993,24 @@ function buildWhiteGridDualVariantJobs(
 
 /** 并行多方案、至少成功 1 张即可返回的模式 */
 export function modeAllowsPartialDualVariants(mode: GenerationMode): boolean {
-  return mode === "extract_ten_grid" || mode === "white_grid_rectify";
+  return modeUsesParallelDualVariants(mode);
 }
 
 export function promptsForMode(mode: GenerationMode): { prompt: string; label: string }[] {
   switch (mode) {
     case "extract_ten_grid": {
-      const baseLabel = GENERATION_MODE_OPTIONS.find(
-        (o) => o.value === "extract_ten_grid",
-      )!.label;
+      const baseLabel = generationModeOption("extract_ten_grid").label;
       return buildWhiteGridDualVariantJobs(baseLabel, EXTRACT_TEN_GRID_PROMPT);
     }
+    case "extract_angle_scattered": {
+      const baseLabel = generationModeOption("extract_angle_scattered").label;
+      return buildWhiteGridDualVariantJobs(
+        baseLabel,
+        EXTRACT_ANGLE_SCATTERED_PROMPT,
+      );
+    }
     case "white_grid_rectify": {
-      const baseLabel = GENERATION_MODE_OPTIONS.find(
-        (o) => o.value === "white_grid_rectify",
-      )!.label;
+      const baseLabel = generationModeOption("white_grid_rectify").label;
       return buildWhiteGridDualVariantJobs(baseLabel, WHITE_GRID_RECTIFY_PROMPT);
     }
     case "complete_single_grid":

@@ -857,7 +857,12 @@ export async function POST(request: Request) {
 
   let buffer = nailsOnly.buffer;
   let mime = nailsOnly.mime;
-  if (mode === "complete_single_grid" || mode === "extract_ten_grid" || mode === "white_grid_rectify") {
+  if (
+    mode === "complete_single_grid" ||
+    mode === "extract_ten_grid" ||
+    mode === "extract_angle_scattered" ||
+    mode === "white_grid_rectify"
+  ) {
     /** 单甲补齐：用户约定甲尖朝下，仅 EXIF 转正。抠多枚：仅 EXIF 转正，不整图 180°。 */
     const pre = await exifUprightToPng(buffer, mime);
     buffer = pre.buffer;
@@ -913,7 +918,7 @@ export async function POST(request: Request) {
   const jobs = promptsForMode(mode);
   const gridLayoutParsed = parseTenSinglesGridLayoutFromFormData(formData);
   const extractGridAddendum =
-    mode === "extract_ten_grid"
+    mode === "extract_ten_grid" || mode === "extract_angle_scattered"
       ? buildWhiteGridLayoutPromptAddendum(gridLayoutParsed)
       : mode === "white_grid_rectify"
         ? buildWhiteGridLayoutPromptAddendum(gridLayoutParsed, {
@@ -930,7 +935,7 @@ export async function POST(request: Request) {
         mode,
         edit: async ({ prompt }) => {
           const composed =
-            mode === "extract_ten_grid"
+            mode === "extract_ten_grid" || mode === "extract_angle_scattered"
               ? `${prompt}${extractGridAddendum}`
               : mode === "white_grid_rectify"
                 ? `${WHITE_GRID_RECTIFY_API_PREFIX}${prompt}${extractGridAddendum}`
@@ -952,7 +957,7 @@ export async function POST(request: Request) {
       minSuccessful: modeAllowsPartialDualVariants(mode) ? 1 : jobs.length,
       edit: async ({ prompt }) => {
         const composed =
-          mode === "extract_ten_grid"
+          mode === "extract_ten_grid" || mode === "extract_angle_scattered"
             ? `${prompt}${extractGridAddendum}`
             : mode === "white_grid_rectify"
               ? `${WHITE_GRID_RECTIFY_API_PREFIX}${prompt}${extractGridAddendum}`

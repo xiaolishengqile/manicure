@@ -23,14 +23,20 @@ export const IMAGE_SIZE_K_OPTIONS = ["1K", "2K", "4K"] as const;
 export type ImageSizeKOption = (typeof IMAGE_SIZE_K_OPTIONS)[number];
 
 /** 前端下拉与 datalist 共用：默认走服务器 OPENAI_IMAGE_MODEL，未设置时回退 gpt-image-2 */
-export const IMAGE_MODEL_PRESET_OPTIONS: { value: string; label: string }[] = [
+export const IMAGE_MODEL_PRESET_OPTIONS: {
+  value: string;
+  label: string;
+  shortLabel: string;
+}[] = [
   {
     value: "",
     label: "默认（OPENAI_IMAGE_MODEL，未设置时为 gpt-image-2）",
+    shortLabel: "默认",
   },
   {
     value: "gemini-3.1-flash-image-preview",
     label: "gemini-3.1-flash-image-preview（Gemini 出图）",
+    shortLabel: "Gemini Flash",
   },
 ];
 

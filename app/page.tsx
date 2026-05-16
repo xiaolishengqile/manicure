@@ -2,9 +2,14 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { GenerationModePicker } from "@/components/generation-mode-picker";
+import { ImageModelSelect } from "@/components/image-model-select";
 import {
-  GENERATION_MODE_OPTIONS,
   getDualUploadKind,
+  modeIsPhotoExtractToGrid,
+  modeShowsWhiteGridLayoutPanel,
+  modeUsesParallelDualVariants,
+  modeUsesWhiteGridFormFields,
   requiresTenSingleNails,
   type GenerationMode,
   type NailsInBoxArrangement,
@@ -21,7 +26,6 @@ import {
   COL_GUTTER_SUM_QUICK_PRESET_PCTS,
   DEFAULT_TEN_SINGLES_GRID_LAYOUT,
 } from "@/lib/ten-singles-grid-layout";
-import { IMAGE_MODEL_PRESET_OPTIONS } from "@/lib/image-gateway-fields";
 
 function clampColGutterSumPct(n: number): number {
   return Math.min(COL_GUTTER_SUM_INNER_WIDTH_PCT_MAX, Math.max(0, n));
@@ -99,11 +103,7 @@ type StreamResultSlot = { url: string; label: string } | null;
 
 function parallelStreamJobCount(m: GenerationMode): number {
   if (m === "multi_angle") return 4;
-  if (
-    m === "extract_ten_grid" ||
-    m === "white_grid_rectify" ||
-    m === "nails_in_box"
-  ) {
+  if (modeUsesParallelDualVariants(m) || m === "nails_in_box") {
     return 2;
   }
   return 0;
@@ -779,7 +779,9 @@ export default function Home() {
             ? "2D 包装平面稿请选择图片文件。"
             : mode === "nails_in_box"
               ? "美甲款式图请选择图片文件。"
-              : "美甲产品图请选择图片文件。",
+              : mode === "extract_angle_scattered"
+                ? "斜拍 / 散落实拍请选择图片文件。"
+                : "美甲产品图请选择图片文件。",
         );
         setFile(null);
         setPreviewUrl((prev) => {
@@ -1019,11 +1021,7 @@ export default function Home() {
           body.set("packagingBoxImage", secondFile);
           body.set("nailArrangement", nailBoxArrangement);
         }
-        if (
-          mode === "complete_single_grid" ||
-          mode === "extract_ten_grid" ||
-          mode === "white_grid_rectify"
-        ) {
+        if (modeUsesWhiteGridFormFields(mode)) {
           body.set("nailGridColWidths", serializeColWidthDrafts(colWidthDrafts));
           body.set(
             "nailGridMarginPct",
@@ -1323,16 +1321,16 @@ export default function Home() {
                 ? "产出（十枚单甲 · 一张合集）"
                 : mode === "extract_ten_grid"
                   ? "产出（白底栅格 · 仅抠图 · 2张择优）"
-                  : mode === "white_grid_rectify"
+                  : mode === "extract_angle_scattered"
+                    ? "产出（白底栅格 · 斜拍散落 · 2张择优）"
+                    : mode === "white_grid_rectify"
                     ? "产出（白底栅格 · 几何矫正 · 2张择优）"
                     : mode === "complete_single_grid"
                       ? "产出（白底栅格 · 单甲补齐10支）"
                       : "产出";
 
   const gridClass =
-    mode === "multi_angle" ||
-    mode === "extract_ten_grid" ||
-    mode === "white_grid_rectify"
+    mode === "multi_angle" || modeUsesParallelDualVariants(mode)
       ? "grid grid-cols-1 gap-6 md:grid-cols-2"
       : mode === "packaging_mockup"
         ? "grid grid-cols-1"
@@ -1379,29 +1377,72 @@ export default function Home() {
             : "平铺、卡纸、白底商品图均可";
 
   const singleUploadTitle =
-    mode === "extract_ten_grid"
-      ? "点击选择含多枚甲片的照片"
-      : mode === "white_grid_rectify"
+    mode === "extract_angle_scattered"
+      ? "点击选择斜拍 / 散落实拍（多枚甲片）"
+      : mode === "extract_ten_grid"
+        ? "点击选择含多枚甲片的照片"
+        : mode === "white_grid_rectify"
         ? "点击选择已生成的 2×5 白底栅格图"
         : mode === "complete_single_grid"
           ? "点击选择单枚甲片照片"
           : "点击选择美甲照片";
   const singleUploadHint =
-    mode === "extract_ten_grid"
-      ? "托盘、卡纸、实拍平铺等；只抠图中已出现的甲片，不补全款式；每次并行生成 **2 张**供择优"
-      : mode === "white_grid_rectify"
-        ? "请上传 2×5 白底成品图。**不改甲型与长短**，仅刚性旋转摆正歪斜，用外留白/列缝/行间缝控距；每次并行生成 **2 张**供择优"
-        : mode === "complete_single_grid"
-          ? "请上传甲尖朝下、甲根朝上的单枚（或含一枚主款）；仅做 EXIF 转正后由模型抠出一枚高清单甲，再由服务端按五列相对宽度复制成 10 格"
-          : "支持常见图片格式";
+    mode === "extract_angle_scattered"
+      ? "对角两排、多枚散落、各枚倾斜角度不一均可；逐枚抠出后排 2×5，不补款；并行 **2 张**择优"
+      : mode === "extract_ten_grid"
+        ? "托盘、卡纸、实拍平铺等；只抠图中已出现的甲片，不补全款式；每次并行生成 **2 张**供择优"
+        : mode === "white_grid_rectify"
+          ? "请上传 2×5 白底成品图。**不改甲型与长短**，仅刚性旋转摆正歪斜，用外留白/列缝/行间缝控距；每次并行生成 **2 张**供择优"
+          : mode === "complete_single_grid"
+            ? "请上传甲尖朝下、甲根朝上的单枚（或含一枚主款）；仅做 EXIF 转正后由模型抠出一枚高清单甲，再由服务端按五列相对宽度复制成 10 格"
+            : "支持常见图片格式";
+
+  const onModeChange = useCallback((next: GenerationMode) => {
+    setMode(next);
+    if (next === "ten_singles_grid") {
+      setFile(null);
+      setPreviewUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev);
+        return null;
+      });
+      setSecondFile(null);
+      setSecondPreviewUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev);
+        return null;
+      });
+    } else {
+      setTenSlots((prev) => {
+        prev.forEach((c) => {
+          if (c.previewUrl) URL.revokeObjectURL(c.previewUrl);
+        });
+        return emptyTenSlots();
+      });
+      if (!getDualUploadKind(next)) {
+        setSecondFile(null);
+        setSecondPreviewUrl((prev) => {
+          if (prev) URL.revokeObjectURL(prev);
+          return null;
+        });
+      }
+    }
+  }, []);
 
   return (
     <div className="min-h-full bg-zinc-50 text-zinc-900">
       <main className="mx-auto flex max-w-5xl flex-col gap-10 px-6 py-14">
         <header className="flex flex-wrap items-start justify-between gap-3 space-y-2">
-          <h1 className="text-xl font-semibold tracking-wide text-rose-600 sm:text-2xl">
-            美甲商家专用
-          </h1>
+          <div className="flex min-w-0 flex-wrap items-end gap-3">
+            <h1 className="text-xl font-semibold tracking-wide text-rose-600 sm:text-2xl">
+              美甲商家专用
+            </h1>
+            <ImageModelSelect
+              value={imageModelChoice}
+              onChange={(v) => {
+                setImageModelChoice(v);
+                clearResults();
+              }}
+            />
+          </div>
           <SiteAccessLogout />
         </header>
 
@@ -1435,75 +1476,9 @@ export default function Home() {
           onChange={onTenSlotFileChange}
         />
 
-        <div className="flex flex-col gap-2 rounded-xl border border-zinc-200 bg-white p-5 shadow-sm">
-          <label htmlFor="mode" className="text-sm font-semibold text-zinc-700">
-            生成模式
-          </label>
-          <select
-            id="mode"
-            value={mode}
-            onChange={(e) => {
-              const next = e.target.value as GenerationMode;
-              setMode(next);
-              if (next === "ten_singles_grid") {
-                setFile(null);
-                setPreviewUrl((prev) => {
-                  if (prev) URL.revokeObjectURL(prev);
-                  return null;
-                });
-                setSecondFile(null);
-                setSecondPreviewUrl((prev) => {
-                  if (prev) URL.revokeObjectURL(prev);
-                  return null;
-                });
-              } else {
-                setTenSlots((prev) => {
-                  prev.forEach((c) => {
-                    if (c.previewUrl) URL.revokeObjectURL(c.previewUrl);
-                  });
-                  return emptyTenSlots();
-                });
-                if (!getDualUploadKind(next)) {
-                  setSecondFile(null);
-                  setSecondPreviewUrl((prev) => {
-                    if (prev) URL.revokeObjectURL(prev);
-                    return null;
-                  });
-                }
-              }
-            }}
-            className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2.5 text-sm text-zinc-900 outline-none ring-rose-500 focus:border-rose-500 focus:ring-2"
-          >
-            {GENERATION_MODE_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div className="flex flex-col gap-2 rounded-xl border border-zinc-200 bg-white p-5 shadow-sm">
-          <label
-            htmlFor="imageModel"
-            className="text-sm font-semibold text-zinc-700"
-          >
-            图像模型
-          </label>
-          <select
-            id="imageModel"
-            value={imageModelChoice}
-            onChange={(e) => {
-              setImageModelChoice(e.target.value);
-              clearResults();
-            }}
-            className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2.5 text-sm text-zinc-900 outline-none ring-rose-500 focus:border-rose-500 focus:ring-2"
-          >
-            {IMAGE_MODEL_PRESET_OPTIONS.map((opt) => (
-              <option key={opt.value || "default"} value={opt.value}>
-                {opt.label}
-              </option>
-            ))}
-          </select>
+        <div className="flex flex-col gap-2 rounded-xl border border-zinc-200 bg-white px-4 py-3 shadow-sm">
+          <p className="text-sm font-semibold text-zinc-700">生成模式</p>
+          <GenerationModePicker value={mode} onChange={onModeChange} />
         </div>
 
         <button
@@ -1531,7 +1506,9 @@ export default function Home() {
                             ? "正在生成单甲并拼成 10 枚…"
                             : mode === "extract_ten_grid"
                               ? "正在并行抠图排版（2张）…"
-                              : mode === "white_grid_rectify"
+                              : mode === "extract_angle_scattered"
+                                ? "正在处理斜拍散落抠图（2张）…"
+                                : mode === "white_grid_rectify"
                                 ? "正在并行几何矫正（2张）…"
                                 : "正在生成…"
             : "开始生成"}
@@ -1807,12 +1784,13 @@ export default function Home() {
                 多路会同时打模型；若网关排队或限流，总耗时不一定比单路短（有时接近「两路各自变慢」）。先完成的图会先显示，不必等全部结束。
               </p>
             ) : null}
-            {(mode === "extract_ten_grid" || mode === "white_grid_rectify") &&
-            filledResultSlotCount > 0 ? (
+            {modeUsesParallelDualVariants(mode) && filledResultSlotCount > 0 ? (
               <p className="text-xs leading-relaxed text-zinc-600">
                 已并行生成 {filledResultSlotCount} 张，请对比
-                {mode === "extract_ten_grid"
-                  ? "抠图保真度与排版"
+                {modeIsPhotoExtractToGrid(mode)
+                  ? mode === "extract_angle_scattered"
+                    ? "斜拍源图的抠全率、竖直度与槽位顺序"
+                    : "抠图保真度与排版"
                   : "甲型保真度与竖直/间距"}
                 ，选用更合适的一张；可点「转为投喂图片」继续处理。
               </p>
@@ -2225,10 +2203,7 @@ export default function Home() {
           </div>
         </section>
 
-        {mode === "ten_singles_grid" ||
-        mode === "complete_single_grid" ||
-        mode === "extract_ten_grid" ||
-        mode === "white_grid_rectify" ? (
+        {modeShowsWhiteGridLayoutPanel(mode) ? (
           <div className="mt-4 min-w-0 rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
             <fieldset className="w-full rounded-lg border border-rose-100 bg-rose-50/40 px-3 py-3 lg:px-5">
               <legend className="px-1 text-xs font-semibold text-rose-800">
@@ -2240,7 +2215,9 @@ export default function Home() {
                     五列相对宽度对应上排左→右拇→小（下排同列再重复一遍）。
                     {mode === "extract_ten_grid"
                       ? "本模式由模型按下列数值排版；每次并行出 **2 张**（方案 A/B）供择优；数值含义与十枚单甲/单甲补齐的服务端拼图一致。"
-                      : mode === "white_grid_rectify"
+                      : mode === "extract_angle_scattered"
+                        ? "斜拍/散落实拍专用抠图：模型按下列数值排 2×5；每次并行 **2 张**（A/B）择优；适合对角两排或多枚散落原图。"
+                        : mode === "white_grid_rectify"
                         ? "几何矫正：**十格拆层整版重排**（非整图扶正），逐格锁定甲型与长短，每枚 **刚性旋转至竖直** + 平移；并行 **2 张**（A/B）择优。附录：外留白/列缝/行间缝；「五列宽」无效。"
                       : mode === "complete_single_grid"
                         ? "单甲补齐：下列数值仅用于服务端把「一枚抠图甲片」按列宽复制成 10 格（体现拇→小尺码差），**不会**再次发给模型改甲型。"
