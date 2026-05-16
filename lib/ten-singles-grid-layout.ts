@@ -333,6 +333,7 @@ export function buildWhiteGridLayoutPromptAddendum(
     return `
 
 USER-SUPPLIED GRID SPACING (mandatory — **white space only**, do **not** use these numbers to resize or resculpt nail plates):
+- **Full re-layout first:** **decompose** all ten slots, **re-compose** on a fresh 2×5 with **every** occupied nail at **yaw = 0°** before applying the spacing numbers below — **do not** deskew the input as one bitmap.
 - **Per-slot size lock:** spacing math must **never** change any nail’s **height, width, or outline** vs its **input** slot — gutters are **only** backdrop white + translation.
 - **Outer margin / quiet border:** **${marginPct}%** of the **canvas side length** on all four sides (uniform white band).
 - **Inner area** = canvas minus that margin. Within the inner rectangle, keep **2 rows × 5 columns** (columns 1→5 = thumb → index → middle → ring → pinky, left to right). **Do not** treat column-width weights as a reason to **scale** individual nails — spacing is controlled by **margins and gutters** below.
@@ -342,7 +343,7 @@ ${gapRuleEn}
 - **Column centerline lock:** for each **k = 1…5**, the **horizontal midpoint** of the nail in **column k top row** must match the **horizontal midpoint** of the nail in **column k bottom row** (same vertical axis through the sheet; slots **k** and **k+5** aligned).
 - **Single horizontal gutter between the two rows** = **${rowGutterPct}%** of the **inner height**. If 0, the two rows abut vertically within the inner area.
 
-（几何矫正专用：**外留白**约 ${marginPct}% 边长；${gapRuleZh}**行间缝**占内高约 ${rowGutterPct}%。**仅**用留白与整甲平移控距；**禁止**为对齐而缩放或弯曲甲片；列缝须**肉眼均匀**且**勿照搬**输入图里不均的列距；**上下同一列**甲片水平中心须在同一条竖轴上；**勿**为整齐而把一排五枚**甲尖拉成一条直线**，须保留输入的**指尖阶梯**。）`;
+（几何矫正专用：先**十格拆层整版重排**、每枚**竖直 yaw=0°**；**外留白**约 ${marginPct}% 边长；${gapRuleZh}**行间缝**占内高约 ${rowGutterPct}%。**仅**留白+平移控距；**禁止**整图扶正或缩放弯曲甲片；列缝均匀；**上下同列**共竖轴；保留**指尖阶梯**。）`;
   }
 
   return `

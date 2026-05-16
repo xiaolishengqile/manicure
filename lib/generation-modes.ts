@@ -25,7 +25,7 @@ export const GENERATION_MODE_OPTIONS: {
     value: "white_grid_rectify",
     label: "白底栅格 · 几何矫正（二次）",
     description:
-      "专用于已生成的 **2×5 白底图**：**不改变**各格甲片的甲型与长短大小，只对歪斜做**刚性旋转**摆正，并用**外留白、列缝、行间缝**控制间距（提示词附录不含列宽缩放）。每次并行生成 **2 张**供择优；可与「转为投喂图片」衔接。",
+      "专用于已生成的 **2×5 白底图**：把 10 格当作**独立图层拆掉整版重排**（非整图扶正），**不改变**各格甲型与长短，仅**刚性旋转至竖直（yaw=0°）**+ 平移，并用**外留白、列缝、行间缝**控距（附录不含列宽缩放）。每次并行 **2 张**择优；可与「转为投喂图片」衔接。",
   },
   {
     value: "complete_single_grid",
@@ -189,6 +189,15 @@ const PACKSHOT_FAILSAFE_GRID_EN = `CONFLICT PRIORITY:
 const PACKSHOT_FAILSAFE_SINGLE_EN = `CONFLICT PRIORITY:
 - If cleanup would **erase micro-detail** or **change the silhouette** vs the chosen source nail, **preserve fidelity** over “prettier” reconstruction — output must remain the **same SKU nail**, not an invented variant.`;
 
+/** 2×5：拆成 10 层后整版重排（extract + rectify；禁止「整图扶正」式偷懒） */
+const PACKSHOT_GRID_DECOMPOSE_RELAYOUT_EN = `FULL 2×5 RE-LAYOUT — **decompose, then re-compose** (mandatory; not optional polish):
+- Treat the job as **ten independent nail layers** (slots **1–10**) on flat white — **not** one grouped product photo to nudge or globally deskew.
+- **Discard** the input sheet’s **collective tilt**, uneven column gaps, and per-nail **slant** for layout purposes. **Re-place every occupied slot** on a **fresh** modular **2 rows × 5 columns** grid using **only** per-nail **rigid rotation** (→ **yaw = 0°**) + **rigid translation** + backdrop white.
+- **Forbidden:** rotating, shearing, or perspective-correcting the **entire canvas** as one block; **forbidden** keeping any nail’s source **lean** because re-rotation would require more translation.
+- **Vertical ruler test (every occupied slot):** the nail plate’s **long axis** must be **parallel to the frame vertical** within **≤1°** visible lean — if you can draw a diagonal through the plate’s length, **fail** and rotate again. Side walls should read as **vertical** strips, not parallelograms.
+- **Column rails:** for each column **k = 1…5**, top slot **k** and bottom slot **k+5** (when both occupied) share one **vertical centerline** — both nails **0°** on that same axis.
+（中文：把输入当成 **10 枚独立甲片图层** 全部 **拆掉重摆** 到 2×5 白底；禁止整图旋转扶正；每枚必须 **真正竖直**（长轴与画框竖边平行，肉眼不可歪）。）`;
+
 /** 2×5 白底：每枚必须竖直（extract + ten_singles 共用；不可妥协） */
 const PACKSHOT_GRID_VERTICAL_QA_EN = `CANVAS-VERTICAL — **ABSOLUTE REQUIREMENT (zero exceptions for occupied cells):**
 - **Every occupied cell** without exception: the nail plate’s **long axis MUST be parallel to the image vertical** (**yaw = 0°** in the plane, tips-down / roots-up already satisfied). Treat **any visible tilt** (clockwise or counter-clockwise) as **QA failure** — **correct it** with rigid rotation before finishing. **There is no** “acceptable small lean.”
@@ -196,7 +205,7 @@ const PACKSHOT_GRID_VERTICAL_QA_EN = `CANVAS-VERTICAL — **ABSOLUTE REQUIREMENT
 - **Column pair parity:** for **2×5** pairs (**1↔6, 2↔7, 3↔8, 4↔9, 5↔10**), when both cells show product art, **top and bottom nails in that column share the same yaw** (both **0°**) — **forbidden:** vertical bottom + tilted top (or the reverse).
 - **Rigid rotation only:** remove **all** source sheet / camera slant using **only** rigid in-plane rotation; **never** preserve partial tilt to “match” the photo.
 - **Priority:** **yaw = 0° first** for every occupied nail. After rotation, you may apply **small rigid translations** (horizontal or vertical) to satisfy **shared root baseline** and **mandatory tip stagger** below — **never** keep non-zero yaw or source slant to “fit” those layout goals.
-- **Final self-check (mandatory):** before output, mentally verify **each of the 10 slots** — if occupied, its long axis is **indistinguishable from the frame vertical**; if any slot fails, **fix that slot**.
+- **Final self-check (mandatory):** before output, scan **slots 1→10 in order** — for **each** occupied slot, imagine a **vertical line** through the plate center: the left and right sidewalls must be **mirror-symmetric** about that line; **any** clockwise/counter-clockwise lean = **re-rotate that slot only**, then re-translate. **Do not** ship until **all ten** occupied nails pass.
 - **Does not cancel tip stagger:** verticality is **rotation-only**. The **mandatory free-edge stair-step** (see FREE-EDGE STAGGER block below) must **still** appear for each full row of five — achieve it by **translating each nail rigidly up/down** along the vertical (different tip Y), **never** by tilting nails or aligning all tips to one horizontal ruler line for a “clean” grid.`;
 
 /** 2×5 白底每行五枚：甲根一条线 + 指尖阶梯（与 extract / ten_singles 对齐） */
@@ -435,6 +444,8 @@ RECTIFY GEOMETRY — DO NOT COPY CASUAL TILT FROM THE SOURCE:
 - **Fingertips down** per nail in each cell.（须保证指尖朝下，甲根/后缘朝上。）
 - **No warp for layout:** do **not** scale, stretch, shear, or non-uniformly warp any individual nail to satisfy the grid; **in-plane rotation only** as needed for tips-down / straight upright.
 
+${PACKSHOT_GRID_DECOMPOSE_RELAYOUT_EN}
+
 ${PACKSHOT_GRID_VERTICAL_QA_EN}
 
 UNIFORM MODULAR GRID + COLUMN ALIGNMENT:
@@ -472,9 +483,9 @@ const WHITE_GRID_RECTIFY_OUTPUT_EN = `OUTPUT:
 - Must read as the **same photographed sheet** as the input — **only** rigidly moved/rotated nails on white, **not** a newly generated catalogue render.`;
 
 /** 发往 API 时拼在几何矫正 prompt 最前（提高首尾权重） */
-export const WHITE_GRID_RECTIFY_API_PREFIX = `INPUT-FIDELITY LOCK: Each nail slot = **copy** that slot from the input image; **only** rigid rotate + translate. **Do not** regenerate shapes or equalize lengths.\n\n`;
+export const WHITE_GRID_RECTIFY_API_PREFIX = `VERTICAL RE-LAYOUT LOCK: **Decompose all 10 slots** → **re-compose** a fresh 2×5; **every** occupied nail **yaw = 0°** (≤1° lean). Per slot **N**, copy **only** input slot **N** art/silhouette; **only** rigid rotate + translate. **Do not** deskew the whole image or regenerate equal-length nails.\n\n`;
 
-/** 二次：仅平行（竖直）+ 白底间距；逐格锁死甲型/长短与指尖阶梯 */
+/** 二次：整版拆层重排 + 强制竖直 + 白底间距；逐格锁死甲型/长短与指尖阶梯 */
 const WHITE_GRID_RECTIFY_PROMPT = `PER-SLOT STAMP — **#1 HARD RULE** (any violation = failure):
 For **each occupied slot N (1–10)**, output slot **N** must be the **same physical nail** as input slot **N** — **same** outer contour, **same** plate **height** and **width** (within **~3%**), **same** tip shape and taper, **same** art pixels and photo texture. **Forbidden:** redrawing, “beautifying,” copying another slot’s silhouette, or making **all ten** nails **one** ideal length/shape.
 
@@ -482,9 +493,12 @@ For **each occupied slot N (1–10)**, output slot **N** must be the **same phys
 
 INPUT: square **2×5** on **flat white**. Slots **1–5** top L→R, **6–10** bottom.
 
-DO (only these two):
-1) **PARALLEL:** rigid rotation → **yaw = 0°** (tips down, cuticle up). Row **0°** parity; pairs **1↔6 … 5↔10** share **0°** when both filled.
-2) **SPACING:** rigid translation + white per appended **USER-SUPPLIED GRID SPACING** (margins, **equal** column gutters, row gutter). Slot **k** and **k+5** share one **vertical centerline**. **Never** resize plates to fit gutters.
+${PACKSHOT_GRID_DECOMPOSE_RELAYOUT_EN}
+
+DO (mandatory three-step pipeline — **all ten slots**, occupied or empty backdrop only):
+0) **DECOMPOSE:** mentally isolate **each** occupied slot as its own layer; **ignore** how the input group is tilted or unevenly spaced.
+1) **PARALLEL:** per layer, rigid rotation → **yaw = 0°** (tips down, cuticle up). **≤1°** visible lean max. Row **0°** parity; pairs **1↔6 … 5↔10** share **0°** when both filled. **Never** ship a sheet where **any one** of ten nails still leans.
+2) **RE-LAYOUT + SPACING:** on a **fresh** 2×5, rigid translation + white per appended **USER-SUPPLIED GRID SPACING** (margins, **equal** column gutters, row gutter). Slot **k** and **k+5** share one **vertical centerline**. **Never** resize plates to fit gutters. **Do not** preserve input’s old slant or uneven gaps — **re-place** every nail.
 
 STEPPED BOTTOM (mandatory — match input):
 - Each full row of five: **keep input’s stair-step** — **different** free-edge **Y** (middle longer, sides shorter, etc.). **≥2** clearly different tip heights per row.
@@ -497,7 +511,12 @@ COMMON FAILURES — **forbidden** (what users reject):
 
 FORBIDDEN besides the two moves: rescale, stretch, squish, liquify, warp, recolour, relight, sharpen, redraw, homogenize, swap slots.
 
-SELF-CHECK: (1) every slot **yaw=0°** (2) gutters per appendix (3) **stepped tips** like input (4) slot **N** still **same H×W** outline as input **N**.
+${PACKSHOT_GRID_VERTICAL_QA_EN}
+
+SELF-CHECK (scan **1→10** in order before output):
+(1) **Vertical pass:** each occupied slot — long axis **parallel to frame vertical**, sidewalls vertical, **no** diagonal lean.
+(2) **Re-layout pass:** sheet reads as **newly composed** 2×5, not a slightly rotated copy of the input group.
+(3) gutters per appendix; (4) **stepped tips** like input; (5) slot **N** still **same H×W** outline as input **N**.
 
 ${WHITE_GRID_RECTIFY_OUTPUT_EN}
 

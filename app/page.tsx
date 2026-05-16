@@ -161,37 +161,113 @@ function emptyTenSlots(): TenSlotCell[] {
   return Array.from({ length: 10 }, () => ({ file: null, previewUrl: null }));
 }
 
+/** 从系统剪贴板取第一张图片文件（用于投喂区粘贴） */
+function firstImageFileFromDataTransfer(dt: DataTransfer | null): File | null {
+  if (!dt) return null;
+  if (dt.items?.length) {
+    for (let i = 0; i < dt.items.length; i++) {
+      const item = dt.items[i];
+      if (item?.kind !== "file") continue;
+      const t = item.type?.toLowerCase() ?? "";
+      if (!t.startsWith("image/")) continue;
+      const f = item.getAsFile();
+      if (f) return f;
+    }
+  }
+  const { files } = dt;
+  if (files?.length) {
+    for (let i = 0; i < files.length; i++) {
+      const f = files.item(i);
+      if (f?.type.startsWith("image/")) return f;
+    }
+  }
+  return null;
+}
+
+/** 投喂区专用：点击聚焦后在此粘贴剪贴板图片，不会打开系统文件夹 */
+function FeedPasteZone({
+  ariaLabel,
+  children,
+  onPasteImage,
+  className = "",
+}: {
+  ariaLabel: string;
+  children: React.ReactNode;
+  onPasteImage: (file: File) => void;
+  className?: string;
+}) {
+  const onPaste = (e: React.ClipboardEvent<HTMLDivElement>) => {
+    const f = firstImageFileFromDataTransfer(e.clipboardData);
+    if (!f) return;
+    e.preventDefault();
+    e.stopPropagation();
+    onPasteImage(f);
+  };
+
+  return (
+    <div
+      tabIndex={0}
+      role="region"
+      aria-label={ariaLabel}
+      onPaste={onPaste}
+      onClick={(e) => {
+        (e.currentTarget as HTMLDivElement).focus();
+      }}
+      className={`cursor-default rounded-lg border border-dashed border-zinc-300 bg-zinc-50/90 px-3 py-2.5 text-xs leading-relaxed text-zinc-600 outline-none transition hover:border-rose-200 hover:bg-rose-50/60 focus-visible:border-rose-400 focus-visible:ring-2 focus-visible:ring-rose-400/40 ${className}`}
+    >
+      {children}
+    </div>
+  );
+}
+
 function UploadTile({
   title,
   hint,
   previewUrl,
   onPick,
+  onClear,
 }: {
   title: string;
   hint: string;
   previewUrl: string | null;
   onPick: () => void;
+  onClear?: () => void;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onPick}
-      className="flex min-h-[180px] cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-zinc-300 bg-zinc-50 px-3 py-6 text-center text-sm text-zinc-600 transition hover:border-rose-300 hover:bg-rose-50/60"
-    >
-      {previewUrl ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={previewUrl}
-          alt={title}
-          className="max-h-40 w-full rounded-lg object-contain"
-        />
-      ) : (
-        <>
-          <span className="text-sm font-medium text-zinc-800">{title}</span>
-          <span className="text-xs text-zinc-500">{hint}</span>
-        </>
-      )}
-    </button>
+    <div className="relative rounded-xl border-2 border-dashed border-zinc-300 bg-zinc-50 transition hover:border-rose-300 hover:bg-rose-50/60">
+      {previewUrl && onClear ? (
+        <button
+          type="button"
+          aria-label="删除该投喂图"
+          onClick={(ev) => {
+            ev.stopPropagation();
+            onClear();
+          }}
+          className="absolute right-2 top-2 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-zinc-900/80 text-sm font-bold text-white shadow-md transition hover:bg-red-600"
+        >
+          ×
+        </button>
+      ) : null}
+      <button
+        type="button"
+        onClick={onPick}
+        className="flex min-h-[180px] w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-[10px] px-3 py-6 text-center text-sm text-zinc-600"
+      >
+        {previewUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={previewUrl}
+            alt={title}
+            className="max-h-40 w-full rounded-lg object-contain"
+          />
+        ) : (
+          <>
+            <span className="text-sm font-medium text-zinc-800">{title}</span>
+            <span className="text-xs text-zinc-500">{hint}</span>
+          </>
+        )}
+      </button>
+    </div>
   );
 }
 
@@ -238,6 +314,7 @@ export default function Home() {
   const [downloadBusyIndex, setDownloadBusyIndex] = useState<number | null>(
     null,
   );
+  const [copyBusyIndex, setCopyBusyIndex] = useState<number | null>(null);
   const [feedFromResultBusyIndex, setFeedFromResultBusyIndex] = useState<
     number | null
   >(null);
@@ -549,37 +626,76 @@ export default function Home() {
     }
   }, []);
 
+  const fetchResultUrlAsBlob = useCallback(async (url: string): Promise<Blob> => {
+    if (url.startsWith("data:image/")) {
+      const res = await fetch(url);
+      return res.blob();
+    }
+    if (url.startsWith("http://") || url.startsWith("https://")) {
+      const res = await fetch("/api/download-image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url }),
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        let msg = "获取图片失败";
+        try {
+          const j = JSON.parse(text) as { error?: string };
+          if (j.error) msg = j.error;
+        } catch {
+          if (text) msg = text.slice(0, 120);
+        }
+        throw new Error(msg);
+      }
+      return res.blob();
+    }
+    throw new Error("不支持的图片地址格式");
+  }, []);
+
+  const copyResultToClipboard = useCallback(
+    async (url: string, index: number) => {
+      if (
+        typeof ClipboardItem === "undefined" ||
+        typeof navigator.clipboard?.write !== "function"
+      ) {
+        setError("当前浏览器不支持复制图片到剪贴板。");
+        return;
+      }
+      setCopyBusyIndex(index);
+      setError(null);
+      try {
+        const blob = await fetchResultUrlAsBlob(url);
+        const raw = blob.type.split(";")[0].trim().toLowerCase();
+        let mime = "image/png";
+        if (raw.startsWith("image/")) {
+          mime = raw === "image/jpg" ? "image/jpeg" : raw;
+        }
+        await navigator.clipboard.write([
+          new ClipboardItem({
+            [mime]: blob,
+          }),
+        ]);
+      } catch (e) {
+        setError(
+          e instanceof Error
+            ? e.message
+            : "复制失败，可改用下载后在其他应用中打开。",
+        );
+      } finally {
+        setCopyBusyIndex(null);
+      }
+    },
+    [fetchResultUrlAsBlob],
+  );
+
   const convertResultToFeedImage = useCallback(
     async (url: string, index: number) => {
       if (tenMode) return;
       setFeedFromResultBusyIndex(index);
       setError(null);
       try {
-        let blob: Blob;
-        if (url.startsWith("data:image/")) {
-          const res = await fetch(url);
-          blob = await res.blob();
-        } else if (url.startsWith("http://") || url.startsWith("https://")) {
-          const res = await fetch("/api/download-image", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ url }),
-          });
-          if (!res.ok) {
-            const text = await res.text();
-            let msg = "获取图片失败";
-            try {
-              const j = JSON.parse(text) as { error?: string };
-              if (j.error) msg = j.error;
-            } catch {
-              if (text) msg = text.slice(0, 120);
-            }
-            throw new Error(msg);
-          }
-          blob = await res.blob();
-        } else {
-          throw new Error("不支持的图片地址格式");
-        }
+        const blob = await fetchResultUrlAsBlob(url);
         const mime = blob.type || "image/png";
         const ext = mime.includes("webp")
           ? "webp"
@@ -605,7 +721,7 @@ export default function Home() {
         setFeedFromResultBusyIndex(null);
       }
     },
-    [tenMode, clearResults],
+    [tenMode, clearResults, fetchResultUrlAsBlob],
   );
 
   const onPickFile = useCallback(() => {
@@ -645,42 +761,59 @@ export default function Home() {
     tenSlotInputRef.current?.click();
   }, []);
 
-  const onFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0];
-    setError(null);
-    clearResults();
-    if (!f) {
-      setFile(null);
-      setPreviewUrl(null);
-      return;
-    }
-    if (!f.type.startsWith("image/")) {
-      setError(
-        mode === "flat_to_3d_packaging"
-          ? "2D 包装平面稿请选择图片文件。"
-          : mode === "nails_in_box"
-            ? "美甲款式图请选择图片文件。"
-            : "美甲产品图请选择图片文件。",
-      );
-      setFile(null);
-      setPreviewUrl(null);
-      return;
-    }
-    setFile(f);
-    setPreviewUrl((prev) => {
-      if (prev) URL.revokeObjectURL(prev);
-      return URL.createObjectURL(f);
-    });
-  }, [clearResults, mode]);
+  const applyMainImageFile = useCallback(
+    (f: File | null) => {
+      setError(null);
+      clearResults();
+      if (!f) {
+        setFile(null);
+        setPreviewUrl((prev) => {
+          if (prev) URL.revokeObjectURL(prev);
+          return null;
+        });
+        return;
+      }
+      if (!f.type.startsWith("image/")) {
+        setError(
+          mode === "flat_to_3d_packaging"
+            ? "2D 包装平面稿请选择图片文件。"
+            : mode === "nails_in_box"
+              ? "美甲款式图请选择图片文件。"
+              : "美甲产品图请选择图片文件。",
+        );
+        setFile(null);
+        setPreviewUrl((prev) => {
+          if (prev) URL.revokeObjectURL(prev);
+          return null;
+        });
+        return;
+      }
+      setFile(f);
+      setPreviewUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev);
+        return URL.createObjectURL(f);
+      });
+    },
+    [clearResults, mode],
+  );
 
-  const onSecondFileChange = useCallback(
+  const onFileChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
-      const f = e.target.files?.[0];
+      applyMainImageFile(e.target.files?.[0] ?? null);
+    },
+    [applyMainImageFile],
+  );
+
+  const applySecondImageFile = useCallback(
+    (f: File | null) => {
       setError(null);
       clearResults();
       if (!f) {
         setSecondFile(null);
-        setSecondPreviewUrl(null);
+        setSecondPreviewUrl((prev) => {
+          if (prev) URL.revokeObjectURL(prev);
+          return null;
+        });
         return;
       }
       if (!f.type.startsWith("image/")) {
@@ -696,7 +829,10 @@ export default function Home() {
                   : "模特图请选择图片文件。",
         );
         setSecondFile(null);
-        setSecondPreviewUrl(null);
+        setSecondPreviewUrl((prev) => {
+          if (prev) URL.revokeObjectURL(prev);
+          return null;
+        });
         return;
       }
       setSecondFile(f);
@@ -706,6 +842,84 @@ export default function Home() {
       });
     },
     [clearResults, dualKind],
+  );
+
+  const onSecondFileChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      applySecondImageFile(e.target.files?.[0] ?? null);
+    },
+    [applySecondImageFile],
+  );
+
+  const applyTenSlotFile = useCallback(
+    (slotIndex: number, f: File) => {
+      setError(null);
+      clearResults();
+      if (slotIndex < 0 || slotIndex > 9) return;
+      if (!f.type.startsWith("image/")) {
+        setError("请选择图片文件。");
+        return;
+      }
+      setTenSlots((prev) => {
+        const next = [...prev];
+        const old = next[slotIndex];
+        if (old?.previewUrl) URL.revokeObjectURL(old.previewUrl);
+        next[slotIndex] = {
+          file: f,
+          previewUrl: URL.createObjectURL(f),
+        };
+        return next;
+      });
+    },
+    [clearResults],
+  );
+
+  const onTenSlotFileChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const slotIndex = tenSlotPickIndexRef.current;
+      tenSlotPickIndexRef.current = null;
+      const f = e.target.files?.[0];
+      e.target.value = "";
+      if (slotIndex === null || slotIndex < 0 || slotIndex > 9) return;
+      if (!f) return;
+      applyTenSlotFile(slotIndex, f);
+    },
+    [applyTenSlotFile],
+  );
+
+  const onPasteTenSlot = useCallback(
+    (slotIndex: number) => (e: React.ClipboardEvent) => {
+      const pasted = firstImageFileFromDataTransfer(e.clipboardData);
+      if (!pasted) return;
+      e.preventDefault();
+      e.stopPropagation();
+      applyTenSlotFile(slotIndex, pasted);
+    },
+    [applyTenSlotFile],
+  );
+
+  const applyTenPasteToFirstAvailable = useCallback(
+    (f: File) => {
+      setError(null);
+      clearResults();
+      if (!f.type.startsWith("image/")) {
+        setError("请选择图片文件。");
+        return;
+      }
+      setTenSlots((prev) => {
+        const empty = prev.findIndex((s) => !s.file);
+        const i = empty === -1 ? 0 : empty;
+        const next = [...prev];
+        const old = next[i];
+        if (old?.previewUrl) URL.revokeObjectURL(old.previewUrl);
+        next[i] = {
+          file: f,
+          previewUrl: URL.createObjectURL(f),
+        };
+        return next;
+      });
+    },
+    [clearResults],
   );
 
   const onTenBatchFilesChange = useCallback(
@@ -732,34 +946,6 @@ export default function Home() {
           file: f,
           previewUrl: URL.createObjectURL(f),
         }));
-      });
-    },
-    [clearResults],
-  );
-
-  const onTenSlotFileChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      const slotIndex = tenSlotPickIndexRef.current;
-      tenSlotPickIndexRef.current = null;
-      const f = e.target.files?.[0];
-      e.target.value = "";
-      setError(null);
-      clearResults();
-      if (slotIndex === null || slotIndex < 0 || slotIndex > 9) return;
-      if (!f) return;
-      if (!f.type.startsWith("image/")) {
-        setError("请选择图片文件。");
-        return;
-      }
-      setTenSlots((prev) => {
-        const next = [...prev];
-        const old = next[slotIndex];
-        if (old?.previewUrl) URL.revokeObjectURL(old.previewUrl);
-        next[slotIndex] = {
-          file: f,
-          previewUrl: URL.createObjectURL(f),
-        };
-        return next;
       });
     },
     [clearResults],
@@ -1361,6 +1547,12 @@ export default function Home() {
             <h2 className="text-sm font-semibold text-zinc-500">投喂图片</h2>
             {tenMode ? (
               <div className="flex flex-col gap-3">
+                <FeedPasteZone
+                  ariaLabel="剪贴板粘贴到十格首个空位"
+                  onPasteImage={applyTenPasteToFirstAvailable}
+                >
+                  在对应区域点击一下使焦点落在该处后，可用 Ctrl+V（Windows）或 ⌘+V（Mac）将剪贴板中的图片粘贴为投喂图（填入<strong>首个空位</strong>；十格已满则替换第 1 格）。各格内可点击从文件夹选图或粘贴。
+                </FeedPasteZone>
                 <p className="text-xs leading-relaxed text-zinc-500">
                   共 10 格：第 1–5 格 → 上排左→右；第 6–10 格 → 下排左→右。每格可单独添加、替换或删除；亦可一次选 10 张按顺序填满。提交后服务端会先将每格做「指尖朝下」校正，再按位置拼成**一张 2×5 白底参考图**，**每行内上对齐**使甲根后缘共线（格角带 1–10 小标）；模型成品提示词要求**不保留**小标。
                 </p>
@@ -1386,6 +1578,7 @@ export default function Home() {
                           <button
                             type="button"
                             onClick={() => beginPickTenSlot(i)}
+                            onPaste={onPasteTenSlot(i)}
                             className="flex h-full w-full items-stretch justify-stretch p-0.5"
                           >
                             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -1403,6 +1596,7 @@ export default function Home() {
                         <button
                           type="button"
                           onClick={() => beginPickTenSlot(i)}
+                          onPaste={onPasteTenSlot(i)}
                           className="flex h-full w-full flex-col items-center justify-center gap-0.5 bg-zinc-50 px-1 text-center transition hover:bg-rose-50/80"
                         >
                           <span className="text-xs font-semibold text-zinc-500">{i + 1}</span>
@@ -1433,11 +1627,33 @@ export default function Home() {
                   </button>
                 </div>
                 <p className="text-xs text-zinc-500">
-                  点击已有图片可替换该格；角标 × 仅删除本格。
+                  点击已有图片可替换该格；角标 × 仅删除本格。各格内点击后亦可 Ctrl+V / ⌘+V 粘贴；或使用上方粘贴区填入首个空位。
                 </p>
               </div>
             ) : dualKind ? (
               <div className="flex flex-col gap-4">
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  <FeedPasteZone
+                    ariaLabel="粘贴第一张投喂图"
+                    className="min-h-[4.5rem]"
+                    onPasteImage={(f) => {
+                      applyMainImageFile(f);
+                    }}
+                  >
+                    <span className="font-medium text-zinc-700">① </span>
+                    在对应区域点击一下使焦点落在该处后，可用 Ctrl+V（Windows）或 ⌘+V（Mac）将剪贴板中的图片粘贴为投喂图（第一张）。
+                  </FeedPasteZone>
+                  <FeedPasteZone
+                    ariaLabel="粘贴第二张投喂图"
+                    className="min-h-[4.5rem]"
+                    onPasteImage={(f) => {
+                      applySecondImageFile(f);
+                    }}
+                  >
+                    <span className="font-medium text-zinc-700">② </span>
+                    在对应区域点击一下使焦点落在该处后，可用 Ctrl+V（Windows）或 ⌘+V（Mac）将剪贴板中的图片粘贴为投喂图（第二张）。
+                  </FeedPasteZone>
+                </div>
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <div className="flex flex-col gap-2">
                     <span className="text-xs font-medium text-zinc-500">
@@ -1458,6 +1674,9 @@ export default function Home() {
                       hint={firstDualProductHint}
                       previewUrl={previewUrl}
                       onPick={onPickFile}
+                      onClear={() => {
+                        applyMainImageFile(null);
+                      }}
                     />
                   </div>
                   <div className="flex flex-col gap-2">
@@ -1477,9 +1696,15 @@ export default function Home() {
                       hint={secondSlotHint}
                       previewUrl={secondPreviewUrl}
                       onPick={onPickSecond}
+                      onClear={() => {
+                        applySecondImageFile(null);
+                      }}
                     />
                   </div>
                 </div>
+                <p className="text-xs text-zinc-500">
+                  下方虚线区域点击后仅从文件夹选图；剪贴板粘贴请使用上方两个「粘贴区」。
+                </p>
                 {dualKind === "nails_box" ? (
                   <fieldset className="rounded-lg border border-zinc-200 bg-zinc-50/90 px-3 py-3">
                     <legend className="px-1 text-xs font-semibold text-zinc-600">
@@ -1521,25 +1746,57 @@ export default function Home() {
                 ) : null}
               </div>
             ) : (
-              <button
-                type="button"
-                onClick={onPickFile}
-                className="flex min-h-[200px] cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-zinc-300 bg-zinc-50 px-4 py-8 text-center text-sm text-zinc-600 transition hover:border-rose-300 hover:bg-rose-50/60"
-              >
-                {previewUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={previewUrl}
-                    alt="已选择的预览"
-                    className="max-h-48 w-full rounded-lg object-contain"
-                  />
-                ) : (
-                  <>
-                    <span className="text-base font-medium text-zinc-800">{singleUploadTitle}</span>
-                    <span className="text-zinc-500">{singleUploadHint}</span>
-                  </>
-                )}
-              </button>
+              <>
+                <FeedPasteZone
+                  ariaLabel="剪贴板粘贴投喂图"
+                  onPasteImage={(f) => {
+                    applyMainImageFile(f);
+                  }}
+                >
+                  在对应区域点击一下使焦点落在该处后，可用 Ctrl+V（Windows）或 ⌘+V（Mac）将剪贴板中的图片粘贴为投喂图。
+                </FeedPasteZone>
+                <div className="relative rounded-xl border-2 border-dashed border-zinc-300 bg-zinc-50 transition hover:border-rose-300 hover:bg-rose-50/60">
+                  {previewUrl ? (
+                    <button
+                      type="button"
+                      aria-label="删除投喂图"
+                      onClick={() => {
+                        applyMainImageFile(null);
+                      }}
+                      className="absolute right-3 top-3 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-zinc-900/80 text-base font-bold text-white shadow-md transition hover:bg-red-600"
+                    >
+                      ×
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={onPickFile}
+                    className="flex min-h-[200px] w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-[10px] px-4 py-8 text-center text-sm text-zinc-600"
+                  >
+                    {previewUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={previewUrl}
+                        alt="已选择的预览"
+                        className="max-h-48 w-full rounded-lg object-contain"
+                      />
+                    ) : (
+                      <>
+                        <span className="text-base font-medium text-zinc-800">
+                          {singleUploadTitle}
+                        </span>
+                        <span className="text-zinc-500">{singleUploadHint}</span>
+                        <span className="text-xs text-zinc-400">
+                          点此区域仅从文件夹选择文件
+                        </span>
+                      </>
+                    )}
+                  </button>
+                </div>
+                <p className="text-xs text-zinc-500">
+                  下方虚线区域点击后仅从文件夹选图；剪贴板粘贴请使用上方「粘贴区」。
+                </p>
+              </>
             )}
           </div>
 
@@ -1592,7 +1849,11 @@ export default function Home() {
                       <div className="flex flex-wrap items-center justify-center gap-2">
                         <button
                           type="button"
-                          disabled={!slot || downloadBusyIndex === i}
+                          disabled={
+                            !slot ||
+                            downloadBusyIndex === i ||
+                            copyBusyIndex === i
+                          }
                           onClick={() => {
                             if (!slot) return;
                             void downloadResult(slot.url, i);
@@ -1601,10 +1862,31 @@ export default function Home() {
                         >
                           {downloadBusyIndex === i ? "下载中…" : "下载"}
                         </button>
+                        <button
+                          type="button"
+                          disabled={
+                            !slot ||
+                            copyBusyIndex === i ||
+                            downloadBusyIndex === i
+                          }
+                          onClick={() => {
+                            if (!slot) return;
+                            void copyResultToClipboard(slot.url, i);
+                          }}
+                          title="复制图片到剪贴板，便于粘贴到其他应用"
+                          className="inline-flex h-9 min-w-[5.5rem] items-center justify-center rounded-lg border border-zinc-300 bg-white px-3 text-sm font-medium text-zinc-800 shadow-sm transition hover:border-rose-400 hover:bg-rose-50 hover:text-rose-900 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {copyBusyIndex === i ? "复制中…" : "复制"}
+                        </button>
                         {!tenMode ? (
                           <button
                             type="button"
-                            disabled={!slot || feedFromResultBusyIndex === i}
+                            disabled={
+                              !slot ||
+                              feedFromResultBusyIndex === i ||
+                              downloadBusyIndex === i ||
+                              copyBusyIndex === i
+                            }
                             onClick={() => {
                               if (!slot) return;
                               void convertResultToFeedImage(slot.url, i);
@@ -1959,7 +2241,7 @@ export default function Home() {
                     {mode === "extract_ten_grid"
                       ? "本模式由模型按下列数值排版；每次并行出 **2 张**（方案 A/B）供择优；数值含义与十枚单甲/单甲补齐的服务端拼图一致。"
                       : mode === "white_grid_rectify"
-                        ? "几何矫正：**逐格锁定**输入图每枚甲的轮廓与长短（仅刚性旋转+平移）；每次并行出 **2 张**（方案 A/B）供择优。附录：外留白/列缝/行间缝；「五列宽」无效。"
+                        ? "几何矫正：**十格拆层整版重排**（非整图扶正），逐格锁定甲型与长短，每枚 **刚性旋转至竖直** + 平移；并行 **2 张**（A/B）择优。附录：外留白/列缝/行间缝；「五列宽」无效。"
                       : mode === "complete_single_grid"
                         ? "单甲补齐：下列数值仅用于服务端把「一枚抠图甲片」按列宽复制成 10 格（体现拇→小尺码差），**不会**再次发给模型改甲型。"
                         : "提交时服务端会按最大列归一；缝过大时可能自动缩小甲片以适配画布。"}
