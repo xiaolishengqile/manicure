@@ -7,8 +7,9 @@ import { ImageModelSelect } from "@/components/image-model-select";
 import {
   getDualUploadKind,
   modeIsPhotoExtractToGrid,
+  modeIsVerticalToScatteredFlatLay,
   modeShowsWhiteGridLayoutPanel,
-  modeUsesParallelDualVariants,
+  parallelImageJobCountForMode,
   modeUsesWhiteGridFormFields,
   requiresTenSingleNails,
   type GenerationMode,
@@ -102,11 +103,7 @@ function newPresetId(): string {
 type StreamResultSlot = { url: string; label: string } | null;
 
 function parallelStreamJobCount(m: GenerationMode): number {
-  if (m === "multi_angle") return 4;
-  if (modeUsesParallelDualVariants(m) || m === "nails_in_box") {
-    return 2;
-  }
-  return 0;
+  return parallelImageJobCountForMode(m);
 }
 
 function defaultPresetItems(): PromptPresetItem[] {
@@ -780,7 +777,7 @@ export default function Home() {
             : mode === "nails_in_box"
               ? "美甲款式图请选择图片文件。"
               : mode === "extract_angle_scattered"
-                ? "斜拍 / 散落实拍请选择图片文件。"
+                ? "竖直白底商品图请选择图片文件。"
                 : "美甲产品图请选择图片文件。",
         );
         setFile(null);
@@ -1312,7 +1309,7 @@ export default function Home() {
         : mode === "flat_to_3d_packaging"
           ? "产出（2D→3D 开窗盒装 · 1张）"
           : mode === "nails_in_box"
-            ? "产出（开窗盒装 · 甲片入盒 · 并行 2 路）"
+            ? "产出（开窗盒装 · 甲片入盒 · 1张）"
             : mode === "model_tryon"
             ? "产出（试戴效果图）"
             : mode === "accessory_tryon"
@@ -1320,17 +1317,17 @@ export default function Home() {
               : mode === "ten_singles_grid"
                 ? "产出（十枚单甲 · 一张合集）"
                 : mode === "extract_ten_grid"
-                  ? "产出（白底栅格 · 仅抠图 · 2张择优）"
+                  ? "产出（白底栅格 · 仅抠图 · 1张）"
                   : mode === "extract_angle_scattered"
-                    ? "产出（白底栅格 · 斜拍散落 · 2张择优）"
+                    ? "产出（散落实拍 · 同步倾斜 + 散乱 · 2张）"
                     : mode === "white_grid_rectify"
-                    ? "产出（白底栅格 · 几何矫正 · 2张择优）"
+                    ? "产出（白底栅格 · 几何矫正 · 1张）"
                     : mode === "complete_single_grid"
                       ? "产出（白底栅格 · 单甲补齐10支）"
                       : "产出";
 
   const gridClass =
-    mode === "multi_angle" || modeUsesParallelDualVariants(mode)
+    mode === "multi_angle" || parallelImageJobCountForMode(mode) > 1
       ? "grid grid-cols-1 gap-6 md:grid-cols-2"
       : mode === "packaging_mockup"
         ? "grid grid-cols-1"
@@ -1378,7 +1375,7 @@ export default function Home() {
 
   const singleUploadTitle =
     mode === "extract_angle_scattered"
-      ? "点击选择斜拍 / 散落实拍（多枚甲片）"
+      ? "点击选择竖直 2×5 白底商品图（或规整竖直甲片）"
       : mode === "extract_ten_grid"
         ? "点击选择含多枚甲片的照片"
         : mode === "white_grid_rectify"
@@ -1388,11 +1385,11 @@ export default function Home() {
           : "点击选择美甲照片";
   const singleUploadHint =
     mode === "extract_angle_scattered"
-      ? "对角两排、多枚散落、各枚倾斜角度不一均可；逐枚抠出后排 2×5，不补款；并行 **2 张**择优"
+      ? "输入须为**竖直甲片**（常见 2×5）；**A/B 白底、甲片互不压住**；**A** 同角+间距匀；**B** **15–20 枚**随机+镜头远；并行 **2 张**择优"
       : mode === "extract_ten_grid"
-        ? "托盘、卡纸、实拍平铺等；只抠图中已出现的甲片，不补全款式；每次并行生成 **2 张**供择优"
+        ? "托盘、卡纸、实拍平铺等；只抠图中已出现的甲片，不补全款式；每次生成 **1 张**"
         : mode === "white_grid_rectify"
-          ? "请上传 2×5 白底成品图。**不改甲型与长短**，仅刚性旋转摆正歪斜，用外留白/列缝/行间缝控距；每次并行生成 **2 张**供择优"
+          ? "请上传 2×5 白底成品图。**不改甲型与长短**，仅刚性旋转摆正歪斜，用外留白/列缝/行间缝控距；每次生成 **1 张**"
           : mode === "complete_single_grid"
             ? "请上传甲尖朝下、甲根朝上的单枚（或含一枚主款）；仅做 EXIF 转正后由模型抠出一枚高清单甲，再由服务端按五列相对宽度复制成 10 格"
             : "支持常见图片格式";
@@ -1495,7 +1492,7 @@ export default function Home() {
                 : mode === "flat_to_3d_packaging"
                   ? "正在生成 3D 开窗盒装主视图…"
                   : mode === "nails_in_box"
-                    ? "正在并行生成开窗盒装效果图（2 路）…"
+                    ? "正在生成开窗盒装效果图…"
                     : mode === "model_tryon"
                       ? "正在生成试戴图…"
                       : mode === "accessory_tryon"
@@ -1505,11 +1502,11 @@ export default function Home() {
                           : mode === "complete_single_grid"
                             ? "正在生成单甲并拼成 10 枚…"
                             : mode === "extract_ten_grid"
-                              ? "正在并行抠图排版（2张）…"
+                              ? "正在抠图排版…"
                               : mode === "extract_angle_scattered"
-                                ? "正在处理斜拍散落抠图（2张）…"
+                                ? "正在生成散落实拍（2张）…"
                                 : mode === "white_grid_rectify"
-                                ? "正在并行几何矫正（2张）…"
+                                ? "正在几何矫正…"
                                 : "正在生成…"
             : "开始生成"}
         </button>
@@ -1779,19 +1776,19 @@ export default function Home() {
 
           <div className="flex flex-col gap-4">
             <h2 className="text-sm font-semibold text-zinc-500">{resultHeading}</h2>
-            {parallelStreamJobCount(mode) > 0 ? (
+            {parallelImageJobCountForMode(mode) > 1 ? (
               <p className="text-xs leading-relaxed text-zinc-500">
                 多路会同时打模型；若网关排队或限流，总耗时不一定比单路短（有时接近「两路各自变慢」）。先完成的图会先显示，不必等全部结束。
               </p>
             ) : null}
-            {modeUsesParallelDualVariants(mode) && filledResultSlotCount > 0 ? (
+            {parallelImageJobCountForMode(mode) > 1 && filledResultSlotCount > 0 ? (
               <p className="text-xs leading-relaxed text-zinc-600">
                 已并行生成 {filledResultSlotCount} 张，请对比
-                {modeIsPhotoExtractToGrid(mode)
-                  ? mode === "extract_angle_scattered"
-                    ? "斜拍源图的抠全率、竖直度与槽位顺序"
-                    : "抠图保真度与排版"
-                  : "甲型保真度与竖直/间距"}
+                {modeIsVerticalToScatteredFlatLay(mode)
+                  ? "甲片是否互不压住；A 间距是否均匀；B 是否 15–20 枚、够乱、镜头够远"
+                  : modeIsPhotoExtractToGrid(mode)
+                    ? "抠图保真度与排版"
+                    : "甲型保真度与竖直/间距"}
                 ，选用更合适的一张；可点「转为投喂图片」继续处理。
               </p>
             ) : null}
@@ -2214,11 +2211,9 @@ export default function Home() {
                   <p className="text-xs leading-relaxed text-zinc-600">
                     五列相对宽度对应上排左→右拇→小（下排同列再重复一遍）。
                     {mode === "extract_ten_grid"
-                      ? "本模式由模型按下列数值排版；每次并行出 **2 张**（方案 A/B）供择优；数值含义与十枚单甲/单甲补齐的服务端拼图一致。"
-                      : mode === "extract_angle_scattered"
-                        ? "斜拍/散落实拍专用抠图：模型按下列数值排 2×5；每次并行 **2 张**（A/B）择优；适合对角两排或多枚散落原图。"
-                        : mode === "white_grid_rectify"
-                        ? "几何矫正：**十格拆层整版重排**（非整图扶正），逐格锁定甲型与长短，每枚 **刚性旋转至竖直** + 平移；并行 **2 张**（A/B）择优。附录：外留白/列缝/行间缝；「五列宽」无效。"
+                      ? "本模式由模型按下列数值排版；每次 **1 张**；数值含义与十枚单甲/单甲补齐的服务端拼图一致。"
+                      : mode === "white_grid_rectify"
+                        ? "几何矫正：**十格拆层整版重排**（非整图扶正），逐格锁定甲型与长短，每枚 **刚性旋转至竖直** + 平移；每次 **1 张**。附录：外留白/列缝/行间缝；「五列宽」无效。"
                       : mode === "complete_single_grid"
                         ? "单甲补齐：下列数值仅用于服务端把「一枚抠图甲片」按列宽复制成 10 格（体现拇→小尺码差），**不会**再次发给模型改甲型。"
                         : "提交时服务端会按最大列归一；缝过大时可能自动缩小甲片以适配画布。"}

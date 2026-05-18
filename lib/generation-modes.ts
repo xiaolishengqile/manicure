@@ -28,15 +28,15 @@ export const GENERATION_MODE_OPTIONS: {
     shortLabel: "规整实拍 · 抠图排版",
     whenToUse: "背卡、托盘、较正的 2×5 或平铺，甲片大致对齐",
     description:
-      "从实拍/背卡识别并抠出已出现的甲片，摆成 2×5 白底；不补款。优先**保持每枚甲片的甲型与长短大小**与源图一致，仅做竖直摆正（yaw=0°）与栅格留白；可选完整「白底栅格排版」（含五列相对宽）写入提示词。每次并行生成 **2 张**供择优。仅 EXIF 转正，不整图强制 180°。",
+      "从实拍/背卡识别并抠出已出现的甲片，摆成 2×5 白底；不补款。优先**保持每枚甲片的甲型与长短大小**与源图一致，仅做竖直摆正（yaw=0°）与栅格留白；可选完整「白底栅格排版」（含五列相对宽）写入提示词。每次生成 **1 张**。仅 EXIF 转正，不整图强制 180°。",
   },
   {
     value: "extract_angle_scattered",
-    label: "白底栅格 · 斜拍散落抠图",
+    label: "白底实拍 · 斜拍散落排版",
     shortLabel: "斜拍 / 散落 · 抠图排版",
-    whenToUse: "对角两排、多枚散落、各枚倾斜角度不一的实拍",
+    whenToUse: "已是竖直 2×5 白底商品图，要白底散落实拍风",
     description:
-      "专为 **angle shot / loose shot**：对角排布或多枚散落、各枚平面内倾斜不一。逐枚拆层抠出 → 刚性旋转至竖直 → 排成 2×5 白底；**不补款**、不改甲型。弱化整图扶正，避免漏枚与列错位。每次并行 **2 张**择优。",
+      "投喂图须为 **竖直甲片**（常见 2×5）。**A/B 纯白底，甲片互不压住**。**方案 A**：同步倾斜 + **间距均匀**。**方案 B**：**15–20 枚**、位置/朝向随机、镜头更远；可重复源图款。并行 **2 张**择优。",
   },
   {
     value: "white_grid_rectify",
@@ -44,7 +44,7 @@ export const GENERATION_MODE_OPTIONS: {
     shortLabel: "已有 2×5 · 二次矫正",
     whenToUse: "已是白底 2×5，只需摆正、调缝，不再从实拍抠",
     description:
-      "专用于已生成的 **2×5 白底图**：把 10 格当作**独立图层拆掉整版重排**（非整图扶正），**不改变**各格甲型与长短，仅**刚性旋转至竖直（yaw=0°）**+ 平移，并用**外留白、列缝、行间缝**控距（附录不含列宽缩放）。每次并行 **2 张**择优；可与「转为投喂图片」衔接。",
+      "专用于已生成的 **2×5 白底图**：把 10 格当作**独立图层拆掉整版重排**（非整图扶正），**不改变**各格甲型与长短，仅**刚性旋转至竖直（yaw=0°）**+ 平移，并用**外留白、列缝、行间缝**控距（附录不含列宽缩放）。每次生成 **1 张**；可与「转为投喂图片」衔接。",
   },
   {
     value: "complete_single_grid",
@@ -92,7 +92,7 @@ export const GENERATION_MODE_OPTIONS: {
     shortLabel: "款式 + 盒型 · 入盒",
     whenToUse: "款式图 + 包装盒参考，窗内替换为你的甲片",
     description:
-      "双图：① 美甲款式/甲片产品图（窗内**只**用这一套；**甲型与图案逐枚保真**）；② 包装盒参考（**盒比例、Logo 与盒面文字须与②一致**，勿改样式）。窗内**同一行左右紧挨**、**上下两排之间也无空隙**（勿把参考里两排之间的字标当成留白）；若参考开窗里已是别的甲片，**成品整窗替换为①**。可选**竖向双列**或**横向 2×5**。**每次提交并行 2 路**（方案 A/B）；两路皆成则 **2 张**备选，仅一路成则返回 **1 张**。",
+      "双图：① 美甲款式/甲片产品图（窗内**只**用这一套；**甲型与图案逐枚保真**）；② 包装盒参考（**盒比例、Logo 与盒面文字须与②一致**，勿改样式）。窗内**同一行左右紧挨**、**上下两排之间也无空隙**（勿把参考里两排之间的字标当成留白）；若参考开窗里已是别的甲片，**成品整窗替换为①**。可选**竖向双列**或**横向 2×5**。**每次提交生成 1 张**（两路方案提示一致，合并为单次请求）。",
   },
   {
     value: "model_tryon",
@@ -155,7 +155,6 @@ export function modeUsesWhiteGridFormFields(mode: GenerationMode): boolean {
   return (
     mode === "complete_single_grid" ||
     mode === "extract_ten_grid" ||
-    mode === "extract_angle_scattered" ||
     mode === "white_grid_rectify"
   );
 }
@@ -166,23 +165,23 @@ export function modeShowsWhiteGridLayoutPanel(mode: GenerationMode): boolean {
     mode === "ten_singles_grid" ||
     mode === "complete_single_grid" ||
     mode === "extract_ten_grid" ||
-    mode === "extract_angle_scattered" ||
     mode === "white_grid_rectify"
   );
 }
 
-/** 并行 2 路抠图 / 矫正，结果区 2 列展示 */
+/** 实际会并行多路请求（prompt 不同）；相同 prompt 仅 1 路 */
 export function modeUsesParallelDualVariants(mode: GenerationMode): boolean {
-  return (
-    mode === "extract_ten_grid" ||
-    mode === "extract_angle_scattered" ||
-    mode === "white_grid_rectify"
-  );
+  return parallelImageJobCountForMode(mode) > 1;
 }
 
 /** 从一张实拍抠多枚并排 2×5 */
 export function modeIsPhotoExtractToGrid(mode: GenerationMode): boolean {
-  return mode === "extract_ten_grid" || mode === "extract_angle_scattered";
+  return mode === "extract_ten_grid";
+}
+
+/** 竖直源图 → 白底散落实拍（同步倾斜 / 散乱，并行 A/B） */
+export function modeIsVerticalToScatteredFlatLay(mode: GenerationMode): boolean {
+  return mode === "extract_angle_scattered";
 }
 
 export function parseGenerationMode(raw: FormDataEntryValue | null): GenerationMode {
@@ -586,68 +585,190 @@ ${PACKSHOT_OUTPUT_COMPLIANCE_EN}
 
 Return a single square product-ready image.`;
 
-/** 斜拍 / 散落实拍：强调逐枚拆层，禁止整图扶正 */
-const EXTRACT_ANGLE_SCATTERED_SCENE_EN = `ANGLE / SCATTERED / DIAGONAL-ROW SOURCE (this mode — read before generic grid rules):
-- Typical inputs: nails on white at **different in-plane rotations**; **two diagonal rows**; or **loose scatter** with gaps — **not** a clean straight 2×5 card photo.
-- **Camera perspective** may foreshorten nails (look shorter/wider). That is **not** permission to **stretch, squash, or shear** — only **per-nail rigid rotation + translation** after cutout.
-- **Soft contact shadows** under each nail: remove with the nail layer; **do not** leave gray blobs as separate objects.
-- **3D charms / flowers / beads:** include them as part of that nail’s cutout silhouette; **do not** drop or redraw them.
+/** 斜拍 / 散落：竖直源图 → 白底散落实拍（共用输入与保真） */
+const EXTRACT_ANGLE_SCATTERED_SOURCE_EN = `INPUT — **VERTICAL** PRESS-ON SOURCE (mandatory; Figure 1 style):
+- User uploads a **clean packshot** where **each nail is already upright** in the image plane: **long axis parallel to the frame vertical**, **free edge / tip toward the bottom**, **cuticle / root toward the top** (**yaw ≈ 0°** per nail).
+- Typical layout: **2 horizontal rows × 5 columns** on flat **#FFFFFF** (slots **1–5** top left→right, **6–10** bottom left→right; columns **1→5 = thumb → pinky**).
+- **Wrong input for this mode:** diagonal rows, loose scatter, or nails already tilted at mixed angles — use **「规整实拍 · 抠图排版」** to normalize those to vertical 2×5 first, then run this mode.
+- **3D charms / flowers / beads:** stay attached to that nail’s cutout; **do not** drop or redraw.
 
-DECOMPOSE FIRST — **never** “fix” the group as one photo:
-- **Forbidden:** rotating, deskewing, or perspective-correcting the **entire canvas** because the **group** is diagonal.
-- **Mandatory:** find **each individual** press-on → separate layer → **its own** rotation to **yaw = 0°** → place on fresh 2×5.
-
-SLOT ORDER when layout is messy:
-1) If two **diagonal rows** are obvious: map **upper row** slots **1–5** left→right, then **lower row** **6–10** left→right (columns = thumb→pinky).
-2) If **scattered**: sort by **visual center Y** (higher on image = earlier row), then **X** left→right within a row band; assign slots **1→10** without swapping art between nails.
-3) If **ambiguous**, prefer **reading order** that preserves **distinct designs** — **never** duplicate one nail to fill empty cells.
+DECOMPOSE — per nail, not whole sheet:
+- Treat the sheet as **ten independent nail layers** (or fewer if some cells empty).
+- **Forbidden:** rotating or deskewing the **entire canvas** as one block.
+- **Slot map:** output nail **N** must carry **only** the artwork from input slot **N** — **never** swap columns or duplicate one design to fill gaps.
 
 `;
 
-/** 斜拍 / 散落实拍 → 2×5 白底（专用 prompt） */
-const EXTRACT_ANGLE_SCATTERED_PROMPT = `You act as a **professional e-commerce product retoucher** specializing in **messy flat-lay and angle-shot** press-on photography.
+/** 斜拍散落：保真 + 方案 A/B 共用纯白底 */
+const EXTRACT_ANGLE_SCATTERED_FIDELITY_BG_EN = `DESIGN & SHAPE FIDELITY (hard — failure if violated):
+- Do **not** change nail **shape, length, C-curve, thickness, or proportions** vs each corresponding source nail.
+- Do **not** alter **colour, gradients, opacity, gloss level, matte finish, or surface texture** beyond neutral cleanup.
+- Do **not** add, remove, or modify **patterns, decals, lines, chrome, glitter, or 3D charms**; **no** beauty filters or stylised reinterpretation.
+- **Aspect-ratio lock** within a few percent per nail.
 
-TASK — **extraction and layout normalization only** from **tilted / scattered** sources. **Not** creative redesign. **Not** filling missing SKUs.
+ALLOWED CLEANUP ON NAILS ONLY:
+- Remove dust, lint, glue residue; crisp cutout edges **without** changing silhouettes.
+- Gentle white balance on nail art — **no** heavy HDR or recolour.
 
-${EXTRACT_ANGLE_SCATTERED_SCENE_EN}
-${EXTRACT_TEN_GRID_PRIORITY_LEDE_EN}
-${PACKSHOT_FIDELITY_CLEANUP_BG_EN}
+BACKGROUND — **PURE WHITE (mandatory for BOTH variants A and B):**
+- Seamless **#FFFFFF** (or uniform **#F7F7F7** at most) — **flat**, **no** gradient wash, **no** props, **no** acrylic rods, **no** fabric, **no** grey sweep, **no** paper texture.
+- **Nails are the hero** on white: sharp, readable art; **forbidden** busy backdrop or coloured sets.
+- **Contact shadows only:** soft **drop shadow** under each nail (studio key **upper-left**, shadow falls **lower-right**) — shadows sit **on the white**, not a grey floor plate.
+- **Forbidden:** muddy halos, dirty fringes, or grey blobs between nails.
 
-GOAL — cut out **every clearly visible** artificial nail and composite onto **2×5** white. **No invention.**
+`;
 
-FIDELITY FIRST (hard):
-- Each nail keeps **same silhouette, length, width, nail-art** as in the source cutout — **aspect-ratio lock** within a few percent.
-- **Allowed:** rigid in-plane rotation → **yaw = 0°** + translation.
-- **Forbidden:** stretch, squish, liquify, or non-uniform scale to “correct” perspective or fit gutters.
+const EXTRACT_ANGLE_SCATTERED_TASK_CORE_EN = `You act as a **professional e-commerce product photographer / retoucher** for press-on nail **white-background flat-lay** shots.
 
-IMAGE EDITING STEPS:
-1) Segment **each** nail (including 3D decor) from white / pale backdrop; ignore gaps between nails.
-2) **Crisp edges** — no halos, no leftover shadow patches **between** nails.
-3) Place on **#FFFFFF** / **#F7F7F7** in **2×5** per SLOT ORDER rules above.
+TASK — from a **vertical** source sheet, **cut out each nail** and **re-compose on pure white** — **not** another rigid 2×5 grid, **not** creative redesign.
 
-NO INVENTION:
-- Fewer than 10 visible → **empty cells = flat backdrop only**.
-- More than 10 → output **exactly 10** from the dominant set in reading / sort order; drop extras.
+${EXTRACT_ANGLE_SCATTERED_SOURCE_EN}
+${EXTRACT_ANGLE_SCATTERED_FIDELITY_BG_EN}
 
-${PACKSHOT_GRID_DECOMPOSE_RELAYOUT_EN}
-${PACKSHOT_GRID_VERTICAL_QA_EN}
+FIDELITY (hard):
+- Each nail keeps **same silhouette, length, width, and nail-art** as that slot in the source.
+- **Allowed:** **rigid in-plane rotation** + **rigid translation** + soft per-nail **drop shadow** on **#FFFFFF**.
+- **Forbidden:** stretch, squish, liquify, non-uniform scale, inventing nails, beauty-filter redraw, non-white backgrounds, reverting to a strict **2×5 modular grid**, or **any nail overlapping / stacking on another** (see NO OVERLAP below).
 
-UNIFORM MODULAR GRID:
-- **2 rows × 5 columns**; column alignment across rows; minimal gutters.
+**NO OVERLAP (方案 A & B — hard):**
+- Every press-on is a **separate layer** on white: **full silhouette visible**, **not** covered by another nail.
+- **Forbidden:** tips crossing over another plate, nails **stacked** or **piled on top of each other**, partial occlusion of art, or “pressed together” so one nail hides part of another.
+- Nails may be **close** side-by-side (small white gap) but must **not touch or overlap** in the 2D layout.
 
-${PACKSHOT_TIP_STAGGER_ROW_EN}
+CUTOUT STEPS:
+1) Segment **each** visible nail (including 3D decor) from the source; crisp edges on white.
+2) Place on **#FFFFFF**; add **fresh** soft drop shadows under each nail (upper-left key, lower-right shadow).
 
-WHITE-GRID PRODUCT RULES:
-${WHITE_BG_NAIL_GRID_FINGER_LADDER}
-${WHITE_BG_NAIL_GRID_TOP_BASELINE}
-${PACKSHOT_FAILSAFE_GRID_EN}
+NO INVENTION (shared):
+- **Never** invent nail designs not in the source — only reposition / rotate nails you cut from the upload.
+- More than **10** in source → use the dominant **2×5** set; omit extras. **How many nails to show in frame** is defined per variant below (A vs B).
 
-FINAL QA (angle/scatter):
-- **Every** occupied slot **yaw = 0°**; no nail still at source slant.
-- No **group-level** diagonal — only **per-nail** upright pieces.
-- Defringe on white; 3D decor still attached to the correct nail.
+`;
+
+/** 发往 API 时置于方案 A prompt 最前，压低「保持竖直 2×5」惯性 */
+export const EXTRACT_ANGLE_SCATTERED_UNIFORM_TILT_API_PREFIX =
+  `方案 A 硬性目标：**纯白底** + **全片同步倾斜** + **间距均匀**；**禁止甲片互相压住或重叠**。\n\n`;
+
+/** 发往 API 时置于方案 B prompt 最前 */
+export const EXTRACT_ANGLE_SCATTERED_SCATTERED_API_PREFIX =
+  `方案 B 硬性目标：**15–20 枚**、位置/朝向随机、镜头拉远；**枚与枚禁止互相压住或重叠**（可近但不叠）。白底散落实拍。\n\n`;
+
+export function composeExtractAngleScatteredEditPrompt(
+  prompt: string,
+  label: string,
+): string {
+  if (label.includes("方案 A") || label.includes("同步倾斜")) {
+    return `${EXTRACT_ANGLE_SCATTERED_UNIFORM_TILT_API_PREFIX}${prompt}`;
+  }
+  if (label.includes("方案 B") || label.includes("散乱排布")) {
+    return `${EXTRACT_ANGLE_SCATTERED_SCATTERED_API_PREFIX}${prompt}`;
+  }
+  return prompt;
+}
+
+/** 方案 A：全片同步倾斜 + 镜头拉远 */
+const EXTRACT_ANGLE_SCATTERED_UNIFORM_TILT_PROMPT = `${EXTRACT_ANGLE_SCATTERED_TASK_CORE_EN}
+OUTPUT STYLE — **UNIFORM SYNCHRONIZED TILT** (方案 A：全片同一倾斜角 + 远景 flat-lay):
+
+**#1 — SYNCHRONIZED TILT (non-negotiable; failure if any nail still reads upright like the input):**
+- After cutout, rotate **every** nail you place by the **exact same** in-plane angle — target **~35–50° clockwise** from the source vertical (or **~35–50° counter-clockwise**, but **one** direction for **all**). The tilt must be **obvious at thumbnail size** — if the cluster still looks like a vertical 2×5 sheet, you **failed**.
+- **Forbidden:** leaving any nail at **~0°** (parallel to frame vertical). **Forbidden:** per-nail different angles (that is Style B). **Forbidden:** a “tiny” **5–15°** lean that reads almost upright.
+- **Ruler test:** imagine one straight line through all nail long axes — they must be **parallel** within **≤2°**. Side walls should read as **diagonal stripes**, not vertical bars.
+- Tips still point along each nail’s **own** rotated long axis (cohesive “整版一起歪倒” feel).
+
+**#2 — PULL THE CAMERA BACK (wide hero on white; non-negotiable):**
+- **Background:** seamless **#FFFFFF** only.
+- Simulate **stepping back** / **wider lens**: the **entire nail group** occupies only about **45–60%** of the square frame area; leave **generous white margin** on **all four sides**.
+- Each individual nail should read **smaller** than in the tight input crop — **scale down** the cluster uniformly if needed; **do not** fill the frame edge-to-edge like the source grid.
+- Nails may form **two loose diagonal rows** or a soft arc — **not** a rigid 2×5 catalog grid, but spacing must feel **rhythmic and even**.
+
+**#3 — CONSISTENT SPACING (方案 A — non-negotiable):**
+- **Neighbor gaps should match:** center-to-center spacing along each loose row / arc should stay **visually even** — like nails laid out with a **fixed gutter** between them (thumb→pinky order preserved).
+- **Same gap band:** gaps between **adjacent** nails in a row should differ by at most **~15–20%** — **forbidden** one huge void beside a tight pair, or “clumped + isolated” randomness (that is 方案 B).
+- **Align to an invisible rhythm:** imagine equal-spaced slots along the tilted row direction; place each nail in its slot with **uniform** side clearance — reads as **one intentional product group**, not accidental scatter.
+- **Forbidden:** any **overlap** or stacking between nails — keep a **clear white gap** between every pair (even when close).
+- **Forbidden:** uneven gutters, staircase offsets, or per-nail random distances that break the rhythm.
+
+- **Forbidden:** output that matches the input’s **tight framing** or **upright** alignment.
+
+**COUNT:** show **all 10** nails from the source (unless source has fewer) — but **smaller on canvas** because of the pull-back.
+
+**Shadows:** single studio key (upper-left); soft **drop shadows** on white lower-right, **same** offset for every nail.
+
+FINAL QA (uniform tilt + wide white shot):
+- **Pure white** background; no props or grey cast.
+- Cluster **clearly tilted together**, **not** vertical; **wider** than input framing.
+- **Spacing check:** adjacent nails show **consistent** gutters — no chaotic tight/loose mix.
+- **No overlap:** every nail fully visible, none covering another.
+- All placed nails: **one** shared rotation angle; art/slot fidelity; clean edges on white.
 
 ${PACKSHOT_OUTPUT_COMPLIANCE_EN}
+
+Return a single square product-ready image.`;
+
+/** 方案 B：白底俯拍 — 真随机散落，反「AI 摆盘」 */
+const EXTRACT_ANGLE_SCATTERED_SCATTERED_ANTI_AI_EN = `ANTI–“AI LAYOUT” (方案 B — **critical**; polished scatter = failure):
+- Target: a **real phone flat-lay** after someone **dumped** press-ons from a bag onto white paper — **imperfect**, **slightly awkward**, **not** a designer composition.
+- **Forbidden — “too perfect” scatter:** Poisson/evenly-distributed spacing, hidden grid, implied **rows or arcs**, rotational symmetry, S-curve, triangle composition, “clock face” around center, or nails spaced like a **tutorial Pinterest flat-lay**.
+- **Forbidden — CGI / generative tells:** every nail **equidistant**, all shadows **clone-identical**, every rotation a **clean 15° step** (0°, 15°, 30°…), all nails **face the camera** too neatly, waxy plastic sheen, or **too-beautiful** negative space.
+- **Required — human messiness:**
+  - **Clumps + stragglers:** with **15–20** nails, allow **tight groups** (**6–10** nails **near** each other but **not overlapping**) plus **loners** farther away (gap ratio **3×–8×** vs inside a group).
+  - **Chaotic gaps:** neighbor distances should **not** rhyme — mix **close pairs** (still **separated** by white), **wide voids**, and one **“why is this one here?”** placement.
+  - **Forbidden — stacked dump:** nails **on top of** each other or **covering** another nail’s art — every nail fully visible.
+  - **Off-center mass:** weight **not** in geometric center — bias **random** corner/quadrant (e.g. bottom-left heavy with empty top-right white).
+- If it looks like you **planned** where each nail goes, **redo** with more disorder.
+
+`;
+
+/** 方案 B：白底俯拍散落 */
+const EXTRACT_ANGLE_SCATTERED_SCATTERED_PROMPT = `${EXTRACT_ANGLE_SCATTERED_TASK_CORE_EN}
+OUTPUT STYLE — **CHAOTIC WHITE-BG SCATTER** (方案 B — **real dumped tray**, not AI arrangement):
+
+${EXTRACT_ANGLE_SCATTERED_SCATTERED_ANTI_AI_EN}
+
+**CAMERA — PULL BACK (mandatory):**
+- Simulate **stepping back** / **wider lens** vs a tight product grid shot.
+- Each individual nail reads **noticeably smaller** than the source upload — the **whole scatter** (all nails together) occupies only about **30–45%** of the square frame; **at least ~55%** of the image is **empty white** margin.
+- **Forbidden:** large nails filling the frame like the input 2×5 crop.
+
+**CAMERA & BACKGROUND:**
+- **Top-down** flat-lay on seamless **#FFFFFF** — simple product photo, **not** a 3D render scene.
+- **Nails = only subject**; art must come **only** from the source sheet designs.
+
+**NAIL COUNT — 15 to 20 (mandatory for 方案 B):**
+- Output must show **at least 15** and **at most 20** separate press-on nails in frame.
+- Source usually has **10** designs on a 2×5 sheet → **duplicate** cutouts from those **10 slots** (pick slots at random, repeats OK) until you reach **15–20** instances.
+- **Allowed:** the same slot’s art appearing **2–3 times** in different positions/angles — **forbidden:** inventing **new** patterns, colours, or shapes not on the source.
+- **Forbidden:** outputting only **10** nails when the source has a full set — aim for a **full bag dump** density.
+
+**LAYOUT — maximum disorder (still readable):**
+- **No pattern** in X/Y: do **not** place nails on invisible lines, grids, curves, or equal angles from center.
+- **Dump logic:** imagine pouring **15–20** nails from a bag — they **land where they land**; multiple **loose groups** + loners; **no** thumb→pinky spatial order in layout.
+- **Distance chaos:** mix **near neighbors** (small gaps, **zero overlap**), **pairs**, and **wide voids** — ratios feel **random**, not tuned.
+- **NO OVERLAP:** each nail’s outline fully visible; **forbidden** crossing tips, stacked plates, or one nail hiding another.
+- Spread across a **wide** area (can use more of the canvas than before) but keep **large white borders** because the camera is **far** — nails stay **small**, not edge-to-edge giants.
+
+**ROTATION — wild, unrelated angles (vs 方案 A):**
+- Each nail: **independent** rotation — span **~0°–170°** with **no** modular step pattern.
+- Include **awkward** angles: some almost flat horizontal, some steep diagonal, **two** nails nearly parallel by accident is OK, but **forbidden** **all** nails within a **20°** band (that reads AI-synchronized).
+- **Forbidden:** shared tilt direction across the set.
+
+**LIGHTING & SHADOWS:**
+- Soft studio key upper-left; **per-nail** drop shadow lower-right — shadows may vary **slightly** in length/softness (real contact), not copy-paste identical.
+
+**PHOTO FINISH (not illustration):**
+- Slight **natural** imperfection OK — minor shadow inconsistency, one nail a bit more isolated — reads as **photograph**, not **generated catalogue**.
+
+FINAL QA (方案 B):
+- **Count:** **15–20** nails visible (count them — **not** 10).
+- **Pure white** + **pulled-back** framing (small nails, **~55%+** white margin).
+- **Chaotic** positions and **independent** rotations — not uniform tilt.
+- **No overlap / no stacking** — **15–20** nails all separately visible.
+- Every nail’s art is a **copy of some source slot** — no invented designs.
+- Passes **anti-AI layout** block above.
+
+OUTPUT:
+- **Exactly one** square photorealistic image; **no** text or watermarks. Must read as a **casual product snap**, not a synthetic “perfect scatter” render.
 
 Return a single square product-ready image.`;
 
@@ -991,9 +1112,49 @@ function buildWhiteGridDualVariantJobs(
   }));
 }
 
+export type GenerationImageJob = { prompt: string; label: string };
+
+/** 去掉并行择优时的「· 方案 A/B」后缀（合并为单次请求时用） */
+export function stripParallelVariantSchemeLabel(label: string): string {
+  const stripped = label
+    .replace(/\s*·\s*方案\s+[AB](\s*·\s*.+)?$/u, "")
+    .trim();
+  return stripped || label;
+}
+
+/**
+ * 多路任务若最终 prompt 完全一致，只保留 1 路（1 次 API、1 张结果）。
+ * 方案 A/B prompt 不同时原样返回（如斜拍散落：倾斜 vs 散乱）。
+ */
+export function collapseIdenticalPromptJobs(
+  jobs: ReadonlyArray<GenerationImageJob>,
+): GenerationImageJob[] {
+  if (jobs.length <= 1) return [...jobs];
+  const firstPrompt = jobs[0]!.prompt;
+  if (!jobs.every((j) => j.prompt === firstPrompt)) {
+    return jobs.map((j) => ({ ...j }));
+  }
+  return [
+    {
+      prompt: firstPrompt,
+      label: stripParallelVariantSchemeLabel(jobs[0]!.label),
+    },
+  ];
+}
+
+/** 按模式定义的路数；相同 prompt 的模式在 API 层会合并为 1 路 */
+export function parallelImageJobCountForMode(mode: GenerationMode): number {
+  if (mode === "multi_angle") return 4;
+  if (mode === "nails_in_box") return 1;
+  const jobs = promptsForMode(mode);
+  if (jobs.length === 0) return 0;
+  if (jobs.every((j) => j.prompt === jobs[0]!.prompt)) return 1;
+  return jobs.length;
+}
+
 /** 并行多方案、至少成功 1 张即可返回的模式 */
 export function modeAllowsPartialDualVariants(mode: GenerationMode): boolean {
-  return modeUsesParallelDualVariants(mode);
+  return parallelImageJobCountForMode(mode) > 1;
 }
 
 export function promptsForMode(mode: GenerationMode): { prompt: string; label: string }[] {
@@ -1004,10 +1165,16 @@ export function promptsForMode(mode: GenerationMode): { prompt: string; label: s
     }
     case "extract_angle_scattered": {
       const baseLabel = generationModeOption("extract_angle_scattered").label;
-      return buildWhiteGridDualVariantJobs(
-        baseLabel,
-        EXTRACT_ANGLE_SCATTERED_PROMPT,
-      );
+      return [
+        {
+          prompt: EXTRACT_ANGLE_SCATTERED_UNIFORM_TILT_PROMPT,
+          label: `${baseLabel} · 方案 A · 同步倾斜`,
+        },
+        {
+          prompt: EXTRACT_ANGLE_SCATTERED_SCATTERED_PROMPT,
+          label: `${baseLabel} · 方案 B · 散乱排布`,
+        },
+      ];
     }
     case "white_grid_rectify": {
       const baseLabel = generationModeOption("white_grid_rectify").label;

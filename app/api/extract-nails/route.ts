@@ -4,11 +4,14 @@ import {
   MODEL_TRYON_PROMPT,
   TEN_SINGLES_COLLAGE_REF_PROMPT,
   WHITE_GRID_RECTIFY_API_PREFIX,
+  collapseIdenticalPromptJobs,
+  composeExtractAngleScatteredEditPrompt,
   buildNailsInBoxPackagingPrompt,
   parseGenerationMode,
   parseNailsInBoxArrangement,
   modeAllowsPartialDualVariants,
   promptsForMode,
+  type GenerationImageJob,
   type GenerationMode,
 } from "@/lib/generation-modes";
 import {
@@ -42,6 +45,41 @@ export const runtime = "nodejs";
 export const maxDuration = 300;
 
 const MAX_BYTES = 12 * 1024 * 1024;
+
+function composeImageEditPrompt(
+  mode: GenerationMode,
+  prompt: string,
+  label: string,
+  extractGridAddendum: string,
+): string {
+  if (mode === "extract_ten_grid") {
+    return `${prompt}${extractGridAddendum}`;
+  }
+  if (mode === "white_grid_rectify") {
+    return `${WHITE_GRID_RECTIFY_API_PREFIX}${prompt}${extractGridAddendum}`;
+  }
+  if (mode === "extract_angle_scattered") {
+    return composeExtractAngleScatteredEditPrompt(prompt, label);
+  }
+  return prompt;
+}
+
+function resolveImageEditJobs(
+  mode: GenerationMode,
+  extractGridAddendum: string,
+): GenerationImageJob[] {
+  const raw = promptsForMode(mode);
+  const composed = raw.map((job) => ({
+    label: job.label,
+    prompt: composeImageEditPrompt(
+      mode,
+      job.prompt,
+      job.label,
+      extractGridAddendum,
+    ),
+  }));
+  return collapseIdenticalPromptJobs(composed);
+}
 
 function getApiKey(): string | undefined {
   return (
@@ -668,17 +706,17 @@ export async function POST(request: Request) {
     const arrangement = parseNailsInBoxArrangement(
       formData.get("nailArrangement"),
     );
-    const basePrompt = buildNailsInBoxPackagingPrompt(arrangement);
-    const jobs = [
+    const basePrompt = imageEditPrompt(buildNailsInBoxPackagingPrompt(arrangement));
+    const jobs = collapseIdenticalPromptJobs([
       {
-        prompt: imageEditPrompt(basePrompt),
+        prompt: basePrompt,
         label: "开窗盒装效果图 · 方案 A",
       },
       {
-        prompt: imageEditPrompt(basePrompt),
+        prompt: basePrompt,
         label: "开窗盒装效果图 · 方案 B",
       },
-    ];
+    ]);
 
     try {
       if (streamResults && jobs.length > 1) {
@@ -702,7 +740,6 @@ export async function POST(request: Request) {
       const outcome = await runParallelImageEditJobs({
         jobs,
         replicateDownloadAuth: replAuth,
-        /** 两路独立采样：任一路成功即返回（两路皆成则 2 张备选） */
         minSuccessful: 1,
         edit: async ({ prompt }) =>
           editDualSceneNailsRoute(
@@ -915,16 +952,16 @@ export async function POST(request: Request) {
     }
   }
 
-  const jobs = promptsForMode(mode);
   const gridLayoutParsed = parseTenSinglesGridLayoutFromFormData(formData);
   const extractGridAddendum =
-    mode === "extract_ten_grid" || mode === "extract_angle_scattered"
+    mode === "extract_ten_grid"
       ? buildWhiteGridLayoutPromptAddendum(gridLayoutParsed)
       : mode === "white_grid_rectify"
         ? buildWhiteGridLayoutPromptAddendum(gridLayoutParsed, {
             variant: "spacing_only",
           })
         : "";
+  const jobs = resolveImageEditJobs(mode, extractGridAddendum);
 
   try {
     if (streamResults && jobs.length > 1) {
@@ -933,44 +970,30 @@ export async function POST(request: Request) {
         replicateDownloadAuth: replAuth,
         minSuccessful: modeAllowsPartialDualVariants(mode) ? 1 : jobs.length,
         mode,
-        edit: async ({ prompt }) => {
-          const composed =
-            mode === "extract_ten_grid" || mode === "extract_angle_scattered"
-              ? `${prompt}${extractGridAddendum}`
-              : mode === "white_grid_rectify"
-                ? `${WHITE_GRID_RECTIFY_API_PREFIX}${prompt}${extractGridAddendum}`
-                : prompt;
-          return editOnceRoute(
+        edit: async (job) =>
+          editOnceRoute(
             imageCtx,
             buffer,
             ext,
             mime,
-            imageEditPrompt(composed),
+            imageEditPrompt(job.prompt),
             editImageModel,
-          );
-        },
+          ),
       });
     }
     const outcome = await runParallelImageEditJobs({
       jobs,
       replicateDownloadAuth: replAuth,
       minSuccessful: modeAllowsPartialDualVariants(mode) ? 1 : jobs.length,
-      edit: async ({ prompt }) => {
-        const composed =
-          mode === "extract_ten_grid" || mode === "extract_angle_scattered"
-            ? `${prompt}${extractGridAddendum}`
-            : mode === "white_grid_rectify"
-              ? `${WHITE_GRID_RECTIFY_API_PREFIX}${prompt}${extractGridAddendum}`
-              : prompt;
-        return editOnceRoute(
+      edit: async (job) =>
+        editOnceRoute(
           imageCtx,
           buffer,
           ext,
           mime,
-          imageEditPrompt(composed),
+          imageEditPrompt(job.prompt),
           editImageModel,
-        );
-      },
+        ),
     });
     if (!outcome.ok) {
       return Response.json(
