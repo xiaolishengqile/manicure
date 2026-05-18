@@ -36,7 +36,7 @@ export const GENERATION_MODE_OPTIONS: {
     shortLabel: "斜拍 / 散落 · 抠图排版",
     whenToUse: "已是竖直 2×5 白底商品图，要白底散落实拍风",
     description:
-      "投喂图须为 **竖直甲片**（常见 2×5）。**A/B 必须恰好 10 枚**、**底边纯白 #FFFFFF**、甲片互不压住。**方案 A**：同步倾斜 + **间距均匀**。**方案 B**：随机散落 + **镜头更远**。并行 **2 张**择优。",
+      "竖直 2×5 投喂图。**A**：保留甲型，**整组约 45° 倾斜**、间距均匀。**B**：10 枚全部抠出，**随机排布**（打乱位置与角度）。均纯白底、10 枚、不重叠。并行 **2 张**择优。",
   },
   {
     value: "white_grid_rectify",
@@ -585,78 +585,28 @@ ${PACKSHOT_OUTPUT_COMPLIANCE_EN}
 
 Return a single square product-ready image.`;
 
-/** 斜拍 / 散落：竖直源图 → 白底散落实拍（共用输入与保真） */
-const EXTRACT_ANGLE_SCATTERED_SOURCE_EN = `INPUT — **VERTICAL** PRESS-ON SOURCE (mandatory; Figure 1 style):
-- User uploads a **clean packshot** where **each nail is already upright** in the image plane: **long axis parallel to the frame vertical**, **free edge / tip toward the bottom**, **cuticle / root toward the top** (**yaw ≈ 0°** per nail).
-- Typical layout: **2 horizontal rows × 5 columns** on flat **#FFFFFF** (slots **1–5** top left→right, **6–10** bottom left→right; columns **1→5 = thumb → pinky**).
-- **Wrong input for this mode:** diagonal rows, loose scatter, or nails already tilted at mixed angles — use **「规整实拍 · 抠图排版」** to normalize those to vertical 2×5 first, then run this mode.
-- **3D charms / flowers / beads:** stay attached to that nail’s cutout; **do not** drop or redraw.
+/** 斜拍 / 散落：共用底座（短）+ A/B 各自独立成片指令 */
+const EXTRACT_ANGLE_SCATTERED_BASE_EN = `You edit a **press-on nail product photo**.
 
-DECOMPOSE — per nail, not whole sheet:
-- Treat the sheet as **ten independent nail layers** (or fewer if some cells empty).
-- **Forbidden:** rotating or deskewing the **entire canvas** as one block.
-- **Slot map:** output nail **N** must carry **only** the artwork from input slot **N** — **never** swap columns or duplicate one design to fill gaps.
+INPUT:
+- **10 nails** in **2 rows × 5 columns** on white (slots 1–5 top row, 6–10 bottom row, left→right).
+- In the photo each nail is **upright** (tip down). Cut out **each nail as its own layer** (keep charms/decals on the nail).
 
-`;
-
-/** 斜拍散落：保真 + 方案 A/B 共用纯白底 */
-const EXTRACT_ANGLE_SCATTERED_FIDELITY_BG_EN = `DESIGN & SHAPE FIDELITY (hard — failure if violated):
-- Do **not** change nail **shape, length, C-curve, thickness, or proportions** vs each corresponding source nail.
-- Do **not** alter **colour, gradients, opacity, gloss level, matte finish, or surface texture** beyond neutral cleanup.
-- Do **not** add, remove, or modify **patterns, decals, lines, chrome, glitter, or 3D charms**; **no** beauty filters or stylised reinterpretation.
-- **Aspect-ratio lock** within a few percent per nail.
-
-ALLOWED CLEANUP ON NAILS ONLY:
-- Remove dust, lint, glue residue; crisp cutout edges **without** changing silhouettes.
-- Gentle white balance on nail art — **no** heavy HDR or recolour.
-
-BACKGROUND — **PURE WHITE (mandatory for BOTH variants A and B):**
-- Seamless **#FFFFFF** — **flat**, **no** gradient wash, **no** props, **no** acrylic rods, **no** fabric, **no** grey sweep, **no** paper texture, **no** off-white table at the bottom.
-- **Nails are the hero** on white: sharp, readable art; **forbidden** busy backdrop or coloured sets.
-- **Contact shadows only:** soft **drop shadow** under each nail (studio key **upper-left**, shadow falls **lower-right**) — shadows sit **on the white**, not a grey floor plate.
-- **Forbidden:** muddy halos, dirty fringes, or grey blobs between nails.
-
-**BOTTOM EDGE — PURE WHITE (hard; 方案 A & B):**
-- The **bottom** of the square frame must read as seamless **#FFFFFF** — **no** grey/beige gradient band, **no** table edge, **no** vignette, **no** shadow pool filling the lower edge.
-- Leave a **clear white margin** below the lowest nail — **forbidden** cropping nails **flush** against the bottom border; **forbidden** any nail tip or heavy shadow **touching** the bottom image edge without white padding beneath.
-- When in doubt, bias the cluster **upward** so the **lower ~20–30%** of the frame is **empty white**.
+SHARED RULES (Variant A and B):
+1. **Exactly 10 nails** in the output when the source has 10 — **count before finish**; do not drop slots.
+2. **Keep each nail’s shape, length, colour, and art** — no redesign, no warping, no beauty filter.
+3. Background: flat **#FFFFFF** on all sides; **bottom of frame must be white** with margin below the lowest nail.
+4. **No overlap** — every nail fully visible; thin white gap between neighbors.
+5. Only **move** and **rotate** cutouts — do not invent new nails or duplicate a design to change count.
 
 `;
 
-const EXTRACT_ANGLE_SCATTERED_TASK_CORE_EN = `You act as a **professional e-commerce product photographer / retoucher** for press-on nail **white-background flat-lay** shots.
-
-TASK — from a **vertical** source sheet, **cut out each nail** and **re-compose on pure white** — **not** another rigid 2×5 grid, **not** creative redesign.
-
-${EXTRACT_ANGLE_SCATTERED_SOURCE_EN}
-${EXTRACT_ANGLE_SCATTERED_FIDELITY_BG_EN}
-
-FIDELITY (hard):
-- Each nail keeps **same silhouette, length, width, and nail-art** as that slot in the source.
-- **Allowed:** **rigid in-plane rotation** + **rigid translation** + soft per-nail **drop shadow** on **#FFFFFF**.
-- **Forbidden:** stretch, squish, liquify, non-uniform scale, inventing nails, beauty-filter redraw, non-white backgrounds, reverting to a strict **2×5 modular grid**, or **any nail overlapping / stacking on another** (see NO OVERLAP below).
-
-**NO OVERLAP (方案 A & B — hard):**
-- Every press-on is a **separate layer** on white: **full silhouette visible**, **not** covered by another nail.
-- **Forbidden:** tips crossing over another plate, nails **stacked** or **piled on top of each other**, partial occlusion of art, or “pressed together” so one nail hides part of another.
-- Nails may be **close** side-by-side (small white gap) but must **not touch or overlap** in the 2D layout.
-
-CUTOUT STEPS:
-1) Segment **each** visible nail (including 3D decor) from the source; crisp edges on white.
-2) Place on **#FFFFFF**; add **fresh** soft drop shadows under each nail (upper-left key, lower-right shadow).
-
-NO INVENTION (shared):
-- **Never** invent nail designs not in the source — only reposition / rotate nails you cut from the upload.
-- More than **10** in source → use the dominant **2×5** set; omit extras. **How many nails to show in frame** is defined per variant below (A vs B).
-
-`;
-
-/** 发往 API 时置于方案 A prompt 最前，压低「保持竖直 2×5」惯性 */
+/** 发往 API：中文硬性摘要置首（贞贞等中转站权重更高） */
 export const EXTRACT_ANGLE_SCATTERED_UNIFORM_TILT_API_PREFIX =
-  `方案 A 硬性目标：**必须恰好 10 枚美甲** + **底边与四周纯白 #FFFFFF** + **全片同步倾斜** + **间距均匀**；**禁止甲片互相压住或重叠**。\n\n`;
+  `【方案A】保留每枚甲型；10枚全部保留；整组同一倾斜角约45度（必须肉眼明显倾斜，禁止接近竖直2×5）；间距均匀；纯白底；禁止重叠。\n\n`;
 
-/** 发往 API 时置于方案 B prompt 最前 */
 export const EXTRACT_ANGLE_SCATTERED_SCATTERED_API_PREFIX =
-  `方案 B 硬性目标：**必须恰好 10 枚美甲**（少 1 或多 1 均失败）+ **底边与四周纯白 #FFFFFF** + 位置/朝向随机 + 镜头拉远；**枚与枚禁止互相压住或重叠**（可近但不叠）。白底散落实拍。\n\n`;
+  `【方案B】保留每枚甲型；10枚全部抠出；在白底上随机打散位置、每枚随机角度（禁止仍排成整齐2×5）；纯白底；禁止漏枚；禁止重叠。\n\n`;
 
 export function composeExtractAngleScatteredEditPrompt(
   prompt: string,
@@ -671,118 +621,65 @@ export function composeExtractAngleScatteredEditPrompt(
   return prompt;
 }
 
-/** 方案 A：全片同步倾斜 + 镜头拉远 */
-const EXTRACT_ANGLE_SCATTERED_UNIFORM_TILT_PROMPT = `${EXTRACT_ANGLE_SCATTERED_TASK_CORE_EN}
-OUTPUT STYLE — **UNIFORM SYNCHRONIZED TILT** (方案 A：全片同一倾斜角 + 远景 flat-lay):
+/** 方案 A：保留甲型 + 整组倾斜 */
+const EXTRACT_ANGLE_SCATTERED_UNIFORM_TILT_PROMPT = `${EXTRACT_ANGLE_SCATTERED_BASE_EN}
+VARIANT A — **GROUP TILT** (same 10 nails, **one shared tilt angle**):
 
-**#1 — SYNCHRONIZED TILT (non-negotiable; failure if any nail still reads upright like the input):**
-- After cutout, rotate **every** nail you place by the **exact same** in-plane angle — target **~35–50° clockwise** from the source vertical (or **~35–50° counter-clockwise**, but **one** direction for **all**). The tilt must be **obvious at thumbnail size** — if the cluster still looks like a vertical 2×5 sheet, you **failed**.
-- **Forbidden:** leaving any nail at **~0°** (parallel to frame vertical). **Forbidden:** per-nail different angles (that is Style B). **Forbidden:** a “tiny” **5–15°** lean that reads almost upright.
-- **Ruler test:** imagine one straight line through all nail long axes — they must be **parallel** within **≤2°**. Side walls should read as **diagonal stripes**, not vertical bars.
-- Tips still point along each nail’s **own** rotated long axis (cohesive “整版一起歪倒” feel).
+WHAT TO DO:
+- Cut out all **10** nails. **Do not change** their shapes.
+- Rotate the **whole set** so **every nail uses the same tilt angle** — target **45°** from upright (OK: **40°–50°** only).
+- Arrange as **one product group** with **even spacing** between neighbors (not random scatter).
+- Background **#FFFFFF**.
 
-**#2 — PULL THE CAMERA BACK (wide hero on white; non-negotiable):**
-- **Background:** seamless **#FFFFFF** only.
-- Simulate **stepping back** / **wider lens**: the **entire nail group** occupies only about **45–60%** of the square frame area; leave **generous white margin** on **all four sides**.
-- Each individual nail should read **smaller** than in the tight input crop — **scale down** the cluster uniformly if needed; **do not** fill the frame edge-to-edge like the source grid.
-- Nails may form **two loose diagonal rows** or a soft arc — **not** a rigid 2×5 catalog grid, but spacing must feel **rhythmic and even**.
+TILT (most important — failure if ignored):
+- Pick clockwise **or** counter-clockwise once; apply **identically** to all 10 nails.
+- At thumbnail size, nails must look **clearly diagonal** (~45°), **not** like the upright input grid.
+- **Fail** if tilt is only **5°–25°** or if the layout still reads as vertical rows.
+- All nail long axes **parallel** (within ~2°).
 
-**#3 — CONSISTENT SPACING (方案 A — non-negotiable):**
-- **Neighbor gaps should match:** center-to-center spacing along each loose row / arc should stay **visually even** — like nails laid out with a **fixed gutter** between them (thumb→pinky order preserved).
-- **Same gap band:** gaps between **adjacent** nails in a row should differ by at most **~15–20%** — **forbidden** one huge void beside a tight pair, or “clumped + isolated” randomness (that is 方案 B).
-- **Align to an invisible rhythm:** imagine equal-spaced slots along the tilted row direction; place each nail in its slot with **uniform** side clearance — reads as **one intentional product group**, not accidental scatter.
-- **Forbidden:** any **overlap** or stacking between nails — keep a **clear white gap** between every pair (even when close).
-- **Forbidden:** uneven gutters, staircase offsets, or per-nail random distances that break the rhythm.
+LAYOUT:
+- **Not** the input’s upright 2×5 grid — form **two tilted loose rows** or one tilted band.
+- Keep **thumb→pinky order** within each row if possible, but the **cluster is tilted together**.
+- **Even white gaps** between adjacent nails.
 
-- **Forbidden:** output that matches the input’s **tight framing** or **upright** alignment.
+FORBIDDEN FOR VARIANT A:
+- Different tilt per nail (that is Variant B).
+- Fewer than 10 nails.
+- Overlapping nails.
+- Non-white background.
 
-**COUNT — exactly 10 (mandatory for 方案 A):**
-- Output **exactly 10** nails — **one per source slot** from the dominant 2×5 set (unless source has fewer).
-- **Forbidden:** 9 or fewer; **forbidden:** 11+; **forbidden:** duplicating a slot to change count.
-- Nails read **smaller on canvas** because of the pull-back.
-
-**Shadows:** single studio key (upper-left); soft **drop shadows** on white lower-right, **same** offset for every nail.
-
-FINAL QA (uniform tilt + wide white shot):
-- **Count:** **exactly 10** nails (count them).
-- **Pure white** background on **all four edges**, especially the **bottom** — no grey band or table line.
-- Cluster **clearly tilted together**, **not** vertical; **wider** than input framing.
-- **Spacing check:** adjacent nails show **consistent** gutters — no chaotic tight/loose mix.
-- **No overlap:** every nail fully visible, none covering another.
-- All placed nails: **one** shared rotation angle; art/slot fidelity; clean edges on white.
-
-${PACKSHOT_OUTPUT_COMPLIANCE_EN}
+OUTPUT: One square photorealistic packshot. No text.
 
 Return a single square product-ready image.`;
 
-/** 方案 B：白底俯拍 — 真随机散落，反「AI 摆盘」 */
-const EXTRACT_ANGLE_SCATTERED_SCATTERED_ANTI_AI_EN = `ANTI–“AI LAYOUT” (方案 B — **critical**; polished scatter = failure):
-- Target: a **real phone flat-lay** after someone **dumped** press-ons from a bag onto white paper — **imperfect**, **slightly awkward**, **not** a designer composition.
-- **Forbidden — “too perfect” scatter:** Poisson/evenly-distributed spacing, hidden grid, implied **rows or arcs**, rotational symmetry, S-curve, triangle composition, “clock face” around center, or nails spaced like a **tutorial Pinterest flat-lay**.
-- **Forbidden — CGI / generative tells:** every nail **equidistant**, all shadows **clone-identical**, every rotation a **clean 15° step** (0°, 15°, 30°…), all nails **face the camera** too neatly, waxy plastic sheen, or **too-beautiful** negative space.
-- **Required — human messiness:**
-  - **Clumps + stragglers:** with **10** nails, allow **tight groups** (**4–6** nails **near** each other but **not overlapping**) plus **loners** farther away (gap ratio **3×–8×** vs inside a group).
-  - **Chaotic gaps:** neighbor distances should **not** rhyme — mix **close pairs** (still **separated** by white), **wide voids**, and one **“why is this one here?”** placement.
-  - **Forbidden — stacked dump:** nails **on top of** each other or **covering** another nail’s art — every nail fully visible.
-  - **Off-center mass:** weight **not** in geometric center — bias **upper or side** quadrants; keep the **bottom band** mostly **empty white** (do **not** pile nails on the bottom border).
-- If it looks like you **planned** where each nail goes, **redo** with more disorder.
+/** 方案 B：保留甲型 + 随机排布 */
+const EXTRACT_ANGLE_SCATTERED_SCATTERED_PROMPT = `${EXTRACT_ANGLE_SCATTERED_BASE_EN}
+VARIANT B — **RANDOM LAYOUT** (same 10 nails, **shuffled** on white):
 
-`;
+WHAT TO DO:
+- Cut out all **10** nails from the input. **Do not change** their shapes.
+- **Shuffle** on white: **random X/Y positions** + **different rotation on each nail**.
+- Same 10 designs as the feed image — **only layout changes**.
+- Background **#FFFFFF**.
 
-/** 方案 B：白底俯拍散落 */
-const EXTRACT_ANGLE_SCATTERED_SCATTERED_PROMPT = `${EXTRACT_ANGLE_SCATTERED_TASK_CORE_EN}
-OUTPUT STYLE — **CHAOTIC WHITE-BG SCATTER** (方案 B — **real dumped tray**, not AI arrangement):
+LAYOUT:
+- **Scattered** — break the 2×5 grid completely. No neat rows or columns.
+- **All 10** must appear — **not 8, not 9**.
+- One instance per source slot; **no** invented designs.
 
-${EXTRACT_ANGLE_SCATTERED_SCATTERED_ANTI_AI_EN}
+ROTATION:
+- **Each nail its own angle** — angles should **vary** nail to nail.
+- **Forbidden:** all nails sharing one global tilt (~45° together) — that is Variant A.
 
-**CAMERA — PULL BACK (mandatory):**
-- Simulate **stepping back** / **wider lens** vs a tight product grid shot.
-- Each individual nail reads **noticeably smaller** than the source upload — the **whole scatter** (all nails together) occupies only about **30–45%** of the square frame; **at least ~55%** of the image is **empty white** margin.
-- **Forbidden:** large nails filling the frame like the input 2×5 crop.
+SPACING:
+- Casual, uneven gaps are OK. **No overlap**, no stacking.
 
-**CAMERA & BACKGROUND:**
-- **Top-down** flat-lay on seamless **#FFFFFF** — simple product photo, **not** a 3D render scene.
-- **Nails = only subject**; art must come **only** from the source sheet designs.
+FORBIDDEN FOR VARIANT B:
+- Omitting nails to simplify the picture.
+- Keeping an upright or evenly tilted 2×5 grid.
+- Fewer than 10 nails when source has 10.
 
-**BOTTOM — MUST BE WHITE (方案 B — non-negotiable):**
-- The **lowest** part of the image is **only** **#FFFFFF** — not grey, not cream, not a surface texture.
-- **Lowest nail** sits **above** a visible white band; **never** touch the bottom frame edge.
-- Prefer empty white in the **bottom 20–30%** of the square (pulled-back scatter).
-
-**NAIL COUNT — exactly 10 (mandatory for 方案 B):**
-- Output must show **exactly 10** separate press-on nails in frame — **one per source slot** from the dominant 2×5 set (unless source has fewer).
-- **Forbidden:** duplicating the same slot’s art twice to inflate count — **forbidden:** inventing **new** patterns, colours, or shapes not on the source.
-- **Forbidden:** omitting nails when the source has a full **10**-slot set.
-
-**LAYOUT — maximum disorder (still readable):**
-- **No pattern** in X/Y: do **not** place nails on invisible lines, grids, curves, or equal angles from center.
-- **Dump logic:** imagine pouring **10** nails from a bag — they **land where they land**; multiple **loose groups** + loners; **no** thumb→pinky spatial order in layout.
-- **Distance chaos:** mix **near neighbors** (small gaps, **zero overlap**), **pairs**, and **wide voids** — ratios feel **random**, not tuned.
-- **NO OVERLAP:** each nail’s outline fully visible; **forbidden** crossing tips, stacked plates, or one nail hiding another.
-- Spread across a **wide** area (can use more of the canvas than before) but keep **large white borders** because the camera is **far** — nails stay **small**, not edge-to-edge giants.
-
-**ROTATION — wild, unrelated angles (vs 方案 A):**
-- Each nail: **independent** rotation — span **~0°–170°** with **no** modular step pattern.
-- Include **awkward** angles: some almost flat horizontal, some steep diagonal, **two** nails nearly parallel by accident is OK, but **forbidden** **all** nails within a **20°** band (that reads AI-synchronized).
-- **Forbidden:** shared tilt direction across the set.
-
-**LIGHTING & SHADOWS:**
-- Soft studio key upper-left; **per-nail** drop shadow lower-right — shadows may vary **slightly** in length/softness (real contact), not copy-paste identical.
-
-**PHOTO FINISH (not illustration):**
-- Slight **natural** imperfection OK — minor shadow inconsistency, one nail a bit more isolated — reads as **photograph**, not **generated catalogue**.
-
-FINAL QA (方案 B):
-- **Count:** **exactly 10** nails visible (count them — **not** 9, **not** 11+).
-- **Bottom edge:** seamless **#FFFFFF** under the lowest nail — **no** grey strip, **no** nail touching the bottom border.
-- **Pure white** on all sides + **pulled-back** framing (small nails, **~55%+** white margin).
-- **Chaotic** positions and **independent** rotations — not uniform tilt.
-- **No overlap / no stacking** — all **10** nails separately visible.
-- Every nail’s art is a **copy of some source slot** — no invented designs.
-- Passes **anti-AI layout** block above.
-
-OUTPUT:
-- **Exactly one** square photorealistic image; **no** text or watermarks. Must read as a **casual product snap**, not a synthetic “perfect scatter” render.
+OUTPUT: One square photorealistic packshot. No text.
 
 Return a single square product-ready image.`;
 

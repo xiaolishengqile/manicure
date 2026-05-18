@@ -1356,7 +1356,7 @@ export default function Home() {
                 : mode === "extract_ten_grid"
                   ? "产出（白底栅格 · 仅抠图 · 1张）"
                   : mode === "extract_angle_scattered"
-                    ? "产出（散落实拍 · 同步倾斜 + 散乱 · 2张）"
+                    ? "产出（散落实拍 · A 整组倾斜 + B 随机排布 · 2张）"
                     : mode === "white_grid_rectify"
                     ? "产出（白底栅格 · 几何矫正 · 1张）"
                     : mode === "complete_single_grid"
@@ -1422,7 +1422,7 @@ export default function Home() {
           : "点击选择美甲照片";
   const singleUploadHint =
     mode === "extract_angle_scattered"
-      ? "输入须为**竖直甲片**（常见 2×5）；**A/B 必须恰好 10 枚**、**底边纯白**、互不压住；**A** 同角+间距匀；**B** 随机散落+镜头远；并行 **2 张**择优"
+      ? "输入须为**竖直甲片**（常见 2×5）；**A/B 均须恰好 10 枚**、**纯白底**、互不压住；**A** 保留甲型、**整组约 45° 倾斜**、间距均匀；**B** 保留甲型、**随机打散位置与角度**；并行 **2 张**择优"
       : mode === "extract_ten_grid"
         ? "托盘、卡纸、实拍平铺等；只抠图中已出现的甲片，不补全款式；每次生成 **1 张**"
         : mode === "white_grid_rectify"
@@ -1822,7 +1822,7 @@ export default function Home() {
               <p className="text-xs leading-relaxed text-zinc-600">
                 已并行生成 {filledResultSlotCount} 张，请对比
                 {modeIsVerticalToScatteredFlatLay(mode)
-                  ? "是否恰好 10 枚、底边是否纯白；A 间距是否均匀；B 是否够乱、镜头够远"
+                  ? "是否恰好 10 枚、底边是否纯白；A 是否明显约 45° 整组倾斜且间距均匀；B 是否 10 枚全部打散、非整齐 2×5"
                   : modeIsPhotoExtractToGrid(mode)
                     ? "抠图保真度与排版"
                     : "甲型保真度与竖直/间距"}
