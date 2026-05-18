@@ -4,17 +4,25 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { GenerationModePicker } from "@/components/generation-mode-picker";
 import { ImageModelSelect } from "@/components/image-model-select";
+import { PanelColorPicker } from "@/components/panel-color-picker";
 import {
   getDualUploadKind,
   modeIsPhotoExtractToGrid,
   modeIsVerticalToScatteredFlatLay,
   modeShowsWhiteGridLayoutPanel,
   parallelImageJobCountForMode,
+  modeUsesDominantColorExtraction,
   modeUsesWhiteGridFormFields,
   requiresTenSingleNails,
   type GenerationMode,
   type NailsInBoxArrangement,
 } from "@/lib/generation-modes";
+import { extractDominantColorFromImageUrl } from "@/lib/panel-color-client";
+import {
+  DEFAULT_PANEL_COLOR_HEX,
+  normalizePanelColorHex,
+  type PanelColorSource,
+} from "@/lib/panel-color";
 import {
   extFromContentType,
   extFromDataUrl,
@@ -330,6 +338,11 @@ export default function Home() {
   /** 下标 0–9 即合成第 1–10 位顺序，与 FormData append 顺序一致 */
   const [tenSlots, setTenSlots] = useState<TenSlotCell[]>(() => emptyTenSlots());
 
+  const [panelColorHex, setPanelColorHex] = useState(DEFAULT_PANEL_COLOR_HEX);
+  const [panelColorSource, setPanelColorSource] =
+    useState<PanelColorSource>("auto");
+  const [panelAutoHex, setPanelAutoHex] = useState<string | null>(null);
+
   const [userExtraNotes, setUserExtraNotes] = useState("");
   /** 非空时：服务端在框内文前加两句白底底线后发图；不拼长系统提示与「补充说明」 */
   const [soloImageEditPrompt, setSoloImageEditPrompt] = useState("");
@@ -479,6 +492,7 @@ export default function Home() {
 
   const dualKind = getDualUploadKind(mode);
   const tenMode = requiresTenSingleNails(mode);
+  const showPanelColorPicker = modeUsesDominantColorExtraction(mode);
 
   const applyGridPresetAt = useCallback(
     (index: number) => {
@@ -791,8 +805,10 @@ export default function Home() {
       }
       if (!f.type.startsWith("image/")) {
         setError(
-          mode === "flat_to_3d_packaging"
-            ? "2D 包装平面稿请选择图片文件。"
+          mode === "flat_to_3d_packaging" || mode === "flat_to_3d_sachet"
+            ? mode === "flat_to_3d_sachet"
+              ? "袋装正面平面稿请选择图片文件。"
+              : "2D 包装平面稿请选择图片文件。"
             : mode === "nails_in_box"
               ? "美甲款式图请选择图片文件。"
               : mode === "extract_angle_scattered"
@@ -842,9 +858,11 @@ export default function Home() {
               ? "握姿参考图请选择图片文件。"
               : dualKind === "packaging_3d_ref"
                 ? "3D/摄影参考图请选择图片文件。"
-                : dualKind === "nails_box"
-                  ? "包装盒样式参考图请选择图片文件。"
-                  : "模特图请选择图片文件。",
+                : dualKind === "sachet_back"
+                  ? "袋装背面平面稿请选择图片文件。"
+                  : dualKind === "nails_box"
+                    ? "包装盒样式参考图请选择图片文件。"
+                    : "模特图请选择图片文件。",
         );
         setSecondFile(null);
         setSecondPreviewUrl((prev) => {
@@ -984,7 +1002,9 @@ export default function Home() {
               ? "请同时上传「美甲产品图」与「握姿参考图」（真实手握盒构图）。"
               : dualKind === "packaging_3d_ref"
                 ? "请同时上传「2D 包装平面稿」与「3D/摄影参考图」。"
-                : dualKind === "nails_box"
+                : dualKind === "sachet_back"
+                  ? "请同时上传「袋装正面平面稿」与「袋装背面平面稿」。"
+                  : dualKind === "nails_box"
                   ? "请同时上传「美甲款式图」与「包装盒样式参考图」。"
                   : "请同时上传「美甲产品图」与「模特图」。",
         );
@@ -1033,6 +1053,9 @@ export default function Home() {
         if (dualKind === "packaging_3d_ref" && secondFile) {
           body.set("packaging3dReferenceImage", secondFile);
         }
+        if (dualKind === "sachet_back" && secondFile) {
+          body.set("sachetBackImage", secondFile);
+        }
         if (dualKind === "nails_box" && secondFile) {
           body.set("packagingBoxImage", secondFile);
           body.set("nailArrangement", nailBoxArrangement);
@@ -1047,6 +1070,15 @@ export default function Home() {
           body.set(
             "nailGridRowGutterPct",
             String(parsePctInput(rowGutterPctDraft, 0, 12, 0)),
+          );
+        }
+      }
+      if (modeUsesDominantColorExtraction(mode)) {
+        body.set("panelColorSource", panelColorSource);
+        if (panelColorSource === "manual") {
+          body.set(
+            "panelColorHex",
+            normalizePanelColorHex(panelColorHex) ?? DEFAULT_PANEL_COLOR_HEX,
           );
         }
       }
@@ -1191,6 +1223,8 @@ export default function Home() {
     imageModelChoice,
     tenMode,
     tenSlots,
+    panelColorHex,
+    panelColorSource,
     userExtraNotes,
     soloImageEditPrompt,
     nailBoxArrangement,
@@ -1345,7 +1379,9 @@ export default function Home() {
         ? "产出（包装 + 手握 · 1张）"
         : mode === "flat_to_3d_packaging"
           ? "产出（2D→3D 开窗盒装 · 1张）"
-          : mode === "nails_in_box"
+          : mode === "flat_to_3d_sachet"
+            ? "产出（2D 正背面 → 单片袋装实拍 · 1张）"
+            : mode === "nails_in_box"
             ? "产出（开窗盒装 · 甲片入盒 · 1张）"
             : mode === "model_tryon"
             ? "产出（试戴效果图）"
@@ -1368,7 +1404,7 @@ export default function Home() {
       ? "grid grid-cols-1 gap-6 md:grid-cols-2"
       : mode === "packaging_mockup"
         ? "grid grid-cols-1"
-        : mode === "flat_to_3d_packaging"
+        : mode === "flat_to_3d_packaging" || mode === "flat_to_3d_sachet"
           ? "grid grid-cols-1"
           : "grid grid-cols-1";
 
@@ -1385,9 +1421,11 @@ export default function Home() {
         ? "点击选择握姿 / 构图参考"
         : dualKind === "packaging_3d_ref"
           ? "点击选择 3D/摄影参考图"
-          : dualKind === "nails_box"
-            ? "点击选择包装盒样式参考图"
-            : "点击选择模特照片";
+          : dualKind === "sachet_back"
+            ? "点击选择袋装背面平面稿"
+            : dualKind === "nails_box"
+              ? "点击选择包装盒样式参考图"
+              : "点击选择模特照片";
   const secondSlotHint =
     dualKind === "accessory"
       ? "可含多只戒指；成片会生成手模并同时戴上甲片与这些饰品"
@@ -1395,7 +1433,9 @@ export default function Home() {
         ? "真实手握包装盒（或相近握持）照片；用于锁定手型与镜头，款式以左侧产品图为准"
         : dualKind === "packaging_3d_ref"
           ? "实拍盒型、竞品主图、电商光影与白底投影等；若参考为「开窗见甲片」更佳。盒面印刷与配色仍以左侧 2D 稿为准"
-          : dualKind === "nails_box"
+          : dualKind === "sachet_back"
+            ? "背面说明、成分表、撕口虚线等；袋身主色以右侧色板为准（手动指定时会替换正背面大面积底色）"
+            : dualKind === "nails_box"
             ? "盒型、开窗比例、背板质感与**盒面 Logo/文字**尽量与参考一致（勿改比例、勿杜撰印刷）；窗内**两排甲片之间不要留空带**；甲片款式与甲型以左侧图为准"
             : "需清晰露出指甲区域";
 
@@ -1403,8 +1443,10 @@ export default function Home() {
     dualKind === "packaging_pose"
       ? "款式来源：托盘、背卡、白底栅格等均可；不用于锁手型"
       : dualKind === "packaging_3d_ref"
-        ? "正面/背面展开、屏显效果图、刀版图截图均可；为盒面图文唯一来源"
-        : dualKind === "model" || dualKind === "accessory"
+        ? "正面/背面展开、屏显效果图、刀版图截图均可；为盒面图文唯一来源；服务端会**自动提取主色**写入提示词"
+        : dualKind === "sachet_back"
+          ? "方形正面稿：Logo、品名、版式不变；右侧可**手动选袋身色**或跟随正面稿自动提色"
+          : dualKind === "model" || dualKind === "accessory"
           ? "美甲产品图约定：甲尖朝下；每行从左到右大拇指→小指；试戴成图按格严格还原款式"
           : dualKind === "nails_box"
             ? "款式图：托盘/背卡/白底栅格均可；横向时**上下两排甲片紧挨无横缝**；左右与图案甲型逐枚保真"
@@ -1431,8 +1473,27 @@ export default function Home() {
             ? "请上传甲尖朝下、甲根朝上的单枚（或含一枚主款）；仅做 EXIF 转正后由模型抠出一枚高清单甲，再由服务端按五列相对宽度复制成 10 格"
             : "支持常见图片格式";
 
+  useEffect(() => {
+    if (!showPanelColorPicker || !previewUrl || panelColorSource !== "auto") {
+      return;
+    }
+    let cancelled = false;
+    void extractDominantColorFromImageUrl(previewUrl).then((hex) => {
+      if (cancelled) return;
+      setPanelAutoHex(hex);
+      if (hex) setPanelColorHex(hex);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [previewUrl, panelColorSource, showPanelColorPicker]);
+
   const onModeChange = useCallback((next: GenerationMode) => {
     setMode(next);
+    if (modeUsesDominantColorExtraction(next)) {
+      setPanelColorSource("auto");
+      setPanelAutoHex(null);
+    }
     if (next === "ten_singles_grid") {
       setFile(null);
       setPreviewUrl((prev) => {
@@ -1528,7 +1589,9 @@ export default function Home() {
                 ? "正在生成包装手握图…"
                 : mode === "flat_to_3d_packaging"
                   ? "正在生成 3D 开窗盒装主视图…"
-                  : mode === "nails_in_box"
+                  : mode === "flat_to_3d_sachet"
+                    ? "正在生成单片袋装实拍图…"
+                    : mode === "nails_in_box"
                     ? "正在生成开窗盒装效果图…"
                     : mode === "model_tryon"
                       ? "正在生成试戴图…"
@@ -1665,28 +1728,34 @@ export default function Home() {
                     在对应区域点击一下使焦点落在该处后，可用 Ctrl+V（Windows）或 ⌘+V（Mac）将剪贴板中的图片粘贴为投喂图（第二张）。
                   </FeedPasteZone>
                 </div>
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div className="flex flex-col gap-4">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <div className="flex flex-col gap-2">
                     <span className="text-xs font-medium text-zinc-500">
                       {dualKind === "packaging_3d_ref"
                         ? "① 2D 包装平面稿"
-                        : dualKind === "nails_box"
-                          ? "① 美甲款式 / 甲片产品图"
-                          : "① 美甲产品图"}
+                        : dualKind === "sachet_back"
+                          ? "① 袋装正面平面稿"
+                          : dualKind === "nails_box"
+                            ? "① 美甲款式 / 甲片产品图"
+                            : "① 美甲产品图"}
                     </span>
                     <UploadTile
                       title={
                         dualKind === "packaging_3d_ref"
                           ? "点击选择 2D 包装平面稿"
-                          : dualKind === "nails_box"
-                            ? "点击选择美甲款式图"
-                            : "点击选择产品 / 甲片款式图"
+                          : dualKind === "sachet_back"
+                            ? "点击选择袋装正面平面稿"
+                            : dualKind === "nails_box"
+                              ? "点击选择美甲款式图"
+                              : "点击选择产品 / 甲片款式图"
                       }
                       hint={firstDualProductHint}
                       previewUrl={previewUrl}
                       onPick={onPickFile}
                       onClear={() => {
                         applyMainImageFile(null);
+                        setPanelAutoHex(null);
                       }}
                     />
                   </div>
@@ -1698,9 +1767,11 @@ export default function Home() {
                           ? "② 握姿参考（真实手握盒）"
                           : dualKind === "packaging_3d_ref"
                             ? "② 3D/摄影参考图"
-                            : dualKind === "nails_box"
-                              ? "② 包装盒样式参考"
-                              : "② 模特图"}
+                            : dualKind === "sachet_back"
+                              ? "② 袋装背面平面稿"
+                              : dualKind === "nails_box"
+                                ? "② 包装盒样式参考"
+                                : "② 模特图"}
                     </span>
                     <UploadTile
                       title={secondSlotTitle}
@@ -1712,6 +1783,22 @@ export default function Home() {
                       }}
                     />
                   </div>
+                </div>
+                  {showPanelColorPicker ? (
+                    <PanelColorPicker
+                      value={panelColorHex}
+                      source={panelColorSource}
+                      autoHex={panelAutoHex}
+                      disabled={loading}
+                      onChange={setPanelColorHex}
+                      onSourceChange={(src) => {
+                        setPanelColorSource(src);
+                        if (src === "auto" && panelAutoHex) {
+                          setPanelColorHex(panelAutoHex);
+                        }
+                      }}
+                    />
+                  ) : null}
                 </div>
                 <p className="text-xs text-zinc-500">
                   下方虚线区域点击后仅从文件夹选图；剪贴板粘贴请使用上方两个「粘贴区」。

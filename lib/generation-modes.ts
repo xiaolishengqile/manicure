@@ -6,6 +6,7 @@ export type GenerationMode =
   | "multi_angle"
   | "packaging_mockup"
   | "flat_to_3d_packaging"
+  | "flat_to_3d_sachet"
   | "nails_in_box"
   | "model_tryon"
   | "accessory_tryon"
@@ -84,7 +85,15 @@ export const GENERATION_MODE_OPTIONS: {
     shortLabel: "2D 稿 → 3D 盒装",
     whenToUse: "平面稿 + 摄影参考，出立体开窗盒主图",
     description:
-      "双图：① 2D 包装平面稿（盒面印刷、色值、Logo、窗内甲片示意**均以稿为准**）；② 摄影/3D **氛围参考**（取景、光影、白底投影）。**只输出 1 张**立体开窗盒；窗内甲片与外盒图文须来自①，勿照搬②上的竞品品牌与甲片款式（服务端将②先于①送模型以抑制「抄成参考图」）。",
+      "双图：① 2D 包装平面稿（盒面印刷、色值、Logo、窗内甲片示意**均以稿为准**；服务端会从①**自动提主色 Hex** 写入提示词）；② 摄影/3D **氛围参考**（取景、光影、白底投影）。**只输出 1 张**立体开窗盒；窗内甲片与外盒图文须来自①，勿照搬②上的竞品品牌与甲片款式（服务端将②先于①送模型以抑制「抄成参考图」）。",
+  },
+  {
+    value: "flat_to_3d_sachet",
+    label: "2D 正背面 → 单片袋装实拍",
+    shortLabel: "2D 袋面 → 实拍袋装",
+    whenToUse: "方形正/背面平面稿，出铝箔袋电商主图",
+    description:
+      "双图：① **正面**平面稿；② **背面**平面稿。**只输出 1 张**正面朝向的立体哑光袋白底实拍。右侧**袋身主色**面板可手动选色（8 预设 + 取色器）或跟随正面稿自动提色；选中的 Hex 与提示词一并发送，**替换**袋身大面积底色，Logo/白字版式不变。",
   },
   {
     value: "nails_in_box",
@@ -100,7 +109,7 @@ export const GENERATION_MODE_OPTIONS: {
     shortLabel: "模特试戴",
     whenToUse: "产品图 + 模特图，换指甲款式",
     description:
-      "需同时上传「美甲产品图」与「模特图」。**美甲产品图约定：**每枚甲片**甲尖朝下**、每行**从左到右 = 大拇指 → 小指**；合成到模特手上时须**逐格还原**款式（色、纹、法式线、饰品与甲型），勿左右对调或整片戴反。尽量保持模特姿态、肤色、光线与背景不变。",
+      "需同时上传「美甲产品图」与「模特图」。**美甲产品图约定：**每枚甲片**甲尖朝下**、每行**从左到右 = 大拇指 → 小指**；合成须**五指全覆盖**、**清除模特原甲**（勿叠影/漏指），**甲根朝指根、甲尖朝指尖**（浅尖/深尖均须在真实指尖），逐格还原款式。模特图建议素甲或浅甲；尽量保持姿态、肤色、光线与背景不变。",
   },
   {
     value: "accessory_tryon",
@@ -140,7 +149,12 @@ export const GENERATION_MODE_GROUPS: {
     id: "packaging",
     title: "包装 / 盒装",
     subtitle: "手握、2D 转 3D、开窗入盒",
-    modes: ["packaging_mockup", "flat_to_3d_packaging", "nails_in_box"],
+    modes: [
+      "packaging_mockup",
+      "flat_to_3d_packaging",
+      "flat_to_3d_sachet",
+      "nails_in_box",
+    ],
   },
 ];
 
@@ -195,6 +209,7 @@ export function parseGenerationMode(raw: FormDataEntryValue | null): GenerationM
     s === "multi_angle" ||
     s === "packaging_mockup" ||
     s === "flat_to_3d_packaging" ||
+    s === "flat_to_3d_sachet" ||
     s === "nails_in_box" ||
     s === "model_tryon" ||
     s === "accessory_tryon" ||
@@ -213,7 +228,13 @@ export type DualUploadKind =
   | "accessory"
   | "packaging_pose"
   | "packaging_3d_ref"
+  | "sachet_back"
   | "nails_box";
+
+/** 提交时服务端从主平面稿自动提色并写入提示词 */
+export function modeUsesDominantColorExtraction(mode: GenerationMode): boolean {
+  return mode === "flat_to_3d_sachet" || mode === "flat_to_3d_packaging";
+}
 
 export function getDualUploadKind(
   mode: GenerationMode,
@@ -222,6 +243,7 @@ export function getDualUploadKind(
   if (mode === "accessory_tryon") return "accessory";
   if (mode === "packaging_mockup") return "packaging_pose";
   if (mode === "flat_to_3d_packaging") return "packaging_3d_ref";
+  if (mode === "flat_to_3d_sachet") return "sachet_back";
   if (mode === "nails_in_box") return "nails_box";
   return null;
 }
@@ -389,14 +411,20 @@ Return **one** square high-resolution photograph only.`;
 }
 
 /**
- * 有法/深色指尖（法式、豹纹尖等）时：深色必须在解剖学**指尖**（游离缘），拇指最易反贴。
+ * 产品图 proximal/distal 映射到真实手指：深色在尖或浅色在尖都必须在解剖学**指尖**；禁止 180° 戴反。拇指最易错。
  * 与包装手握、试戴、多角度上手共用。
  */
-export const DISTAL_PATTERN_AT_ANATOMICAL_FINGERTIP_EN = `DISTAL TIP DIRECTION — “DARK AT THE REAL FINGERTIP” (whenever a real hand wears press-ons; failure if violated):
-- If the product art shows a **darker distal zone** (black / deep brown French band, leopard **tip**, ombré **darkening toward free edge**, chrome cap at tip, etc.), that **dark / patterned distal band must cap the anatomical free edge** — the margin of the nail plate **toward the fingertip and away from the knuckle** — on **every** visible finger **and thumb**.
-- The **lighter / nude proximal zone** stays toward the **cuticle and finger base**. **Forbidden:** wearing the nail **180° flipped** so the dark band sits against the **proximal nail fold** while nude points out to the fingertip (reads as “black at the knuckle”).
-- **Thumb (highest error rate):** even when the thumb is horizontal, sideways, or presses the box edge, **column-1** art must still place **distal dark art on the true thumb free margin** (the working edge toward air / opposite the palm), **not** mirrored so “tip” art hugs the thenar web.
-（中文：有深色指尖时**指尖应是深色**、甲根偏浅；禁止整片戴反。拇指常错，须单独自检。）`;
+export const DISTAL_PATTERN_AT_ANATOMICAL_FINGERTIP_EN = `PROXIMAL vs DISTAL ON THE REAL FINGER (mandatory whenever press-ons are worn on a hand; failure if violated):
+
+**Direction (all nails):** On the product sheet, **proximal / cuticle / root** is toward the **TOP** of the image and **distal / free edge / tip** is toward the **BOTTOM** (tips down / 甲尖朝下). On the output hand, that becomes **proximal → knuckle / nail fold** and **distal → anatomical fingertip (free margin toward air)** — on **every** finger including thumb. **Forbidden:** mounting any nail **180° flipped** vs the sheet.
+
+**Darker or more patterned at the product’s distal end** (black French, leopard tip, ombré darkening toward free edge, chrome cap at tip, etc.): that **darker / patterned band must cap the anatomical free edge**, not the cuticle. The **lighter / nude proximal zone** stays toward the cuticle.
+
+**Lighter or paler at the product’s distal end** (white / ivory / pale pink French tip, pearlescent free edge, highlight at tip, etc.): that **lighter / paler band must cap the anatomical free edge**, not the cuticle. The **deeper / nude / more saturated zone** stays toward the cuticle. **Forbidden:** pale “tip” art hugging the proximal nail fold while nude points to the fingertip.
+
+**Thumb (highest error rate):** even when the thumb is horizontal or sideways, place **distal art on the true free margin** (toward air / opposite the palm), **not** mirrored so tip art hugs the thenar web.
+
+（中文：甲根朝指根、甲尖朝指尖；深色在尖则尖必深，浅色在尖则尖必浅；禁止 180° 戴反；拇指单独自检。）`;
 
 /**
  * 高频错法对照 + 单遍输出前的自审锚点；接在 DISTAL 后，随 NAIL_ON_HAND 进入试戴 / 包装 / 多角度。
@@ -404,16 +432,20 @@ export const DISTAL_PATTERN_AT_ANATOMICAL_FINGERTIP_EN = `DISTAL TIP DIRECTION �
 const HAND_NAIL_ANTIPATTERNS_AND_VERIFY_EN = `COMMON FAILURE MODES vs TARGET (do not reproduce the WRONG column):
 - WRONG: Thumb wears index / column-2 floral or a “prettier” hero motif. CORRECT: Thumb = **column-1** product slot only.
 - WRONG: Dark leopard / French tip hugging **cuticle / knuckle** side. CORRECT: Dark distal band at **free edge toward fingertip / air** on **every** finger including thumb.
+- WRONG: Pale / white French or light distal band at **cuticle**, deeper nude at **fingertip**. CORRECT: **Lighter distal art at free edge toward fingertip**; deeper/nude toward cuticle.
+- WRONG: Only some fingers updated; others keep the **first-image** nail art. CORRECT: **100%** of visible fingernails and thumbnails show **only** product-slot art.
+- WRONG: Original model nail pattern **visible through** or under the new nail (ghosting, double layer, semi-transparent blend). CORRECT: Old nail art **fully erased**; surface shows **only** the mapped product design.
 - WRONG: Flowers on thumb/middle/pinky when those reference columns are plain. CORRECT: Accents **only** on columns that have them in the sheet (e.g. index+ring if only cols 2+4 show flowers).
-- WRONG: All fingers share one decorative motif. CORRECT: **Per-slot** fidelity — columns **1→5 = thumb→pinky**, no swapping or “balancing” art across columns.
+- WRONG: All fingers share one decorative motif when the sheet has **per-slot** designs. CORRECT: **Per-slot** fidelity — columns **1→5 = thumb→pinky**, no swapping or “balancing” art across columns.
 
 MENTAL PRE-FLIGHT (single pass — internalize, then render correctly):
-1. **Thumb:** distal dark/pattern on the **true free margin** (fingertip side), not the thenar/palm side.
-2. **Accents:** flowers/icons only where the **reference column** has them for that finger.
-3. **Orientation:** cuticle→tip on each nail matches that slot’s reference nail (no 180° wear).
-4. **Map:** thumb=col1, index=2, middle=3, ring=4, pinky=5 for the active row.
+1. **Coverage:** every visible nail replaced; **no** ghosting or leftover first-image patterns.
+2. **Thumb:** distal art on the **true free margin** (fingertip side), not the thenar/palm side.
+3. **Accents:** flowers/icons only where the **reference column** has them for that finger.
+4. **Orientation:** cuticle→tip on each nail matches that slot’s reference nail (no 180° wear; **light OR dark** distal art toward fingertip).
+5. **Map:** thumb=col1, index=2, middle=3, ring=4, pinky=5 for the active row.
 
-（中文：对照忌拇指偷花、忌深色贴指根；花朵严守列位；四步心里过一遍再出图。）`;
+（中文：对照忌漏指、忌叠影、忌白尖贴甲沟、忌深色贴指根；花朵严守列位；五步心里过一遍再出图。）`;
 
 /**
  * 上手戴甲：产品图左→右 = 大拇指→小指；甲根朝指根、指尖朝游离缘（款式「顶部」朝上）；严禁整片戴反或整行左右对调。
@@ -437,17 +469,28 @@ export const TRYON_SECOND_NAIL_PRODUCT_LAYOUT_EN = `**SECOND-image layout (manda
 - **Left → right = thumb → pinky (大拇指 → 小指)** on every horizontal row; two-row sheets: **top row then bottom row**, columns 1–5 = thumb…pinky per row — **no** whole-row mirroring, **no** shuffling designs for “balance.”
 - **Strict nail-art fidelity:** every visible fingernail in the output must **match the SECOND image for its mapped slot** — identical motifs, micro-patterns, charm placement, edge shapes, gloss — **not** a loose reinterpretation.`;
 
+/** 模特试戴、饰品试戴：旧甲须彻底清除、五指全覆盖（与 TRYON_SECOND / NAIL_ON_HAND 配套） */
+export const TRYON_NAIL_FULL_REPLACEMENT_EN = `TRY-ON COVERAGE — FULL REPLACE (mandatory; any violation fails the task):
+- **Every visible nail:** replace **all** fingernails and thumbnail nails on the hand(s) in the FIRST image — **no finger** may keep its original polish, pattern, glitter, decals, or color from that photograph.
+- **Erase, do not blend:** treat existing nail art on the FIRST image as **content to remove completely**. Each output nail must show **only** the SECOND-image product art for that finger’s mapped slot — **forbidden:** semi-transparent overlays, ghosting, double layers, or old motifs “showing through” the new nail.
+- **One coherent design per hand:** if every product slot shares the same art, **every** finger wears that same art (perspective-adjusted). If slots differ, each finger wears **only** its mapped slot — never mix leftover FIRST-image nail art on any finger.
+- **Natural composite:** after full replacement, align cuticles believably and match scene lighting on the nail surface — but **never** keep FIRST-image nail motifs as a shortcut.`;
+
 export const MODEL_TRYON_PROMPT = `You receive TWO input images in this order:
-1) FIRST image: the MODEL photograph — a person (hands visible) with natural nails, in a specific pose, lighting, skin tone, clothing, and background.
+1) FIRST image: the MODEL photograph — a person with **hands visible**, which may show **bare nails, natural nails, existing polish, or press-ons** that must be **fully replaced** (not preserved or blended). Keep pose, lighting, skin tone, clothing, jewelry, and background from this image.
 2) SECOND image: the NAIL PRODUCT reference — press-on / stick-on nails shown flat, on a card, or as a product shot, displaying the exact nail art (colors, patterns, 3D chrome, decals, shape) to apply.
 
 ${TRYON_SECOND_NAIL_PRODUCT_LAYOUT_EN}
 
+${TRYON_NAIL_FULL_REPLACEMENT_EN}
+
 TASK — photorealistic virtual try-on (image editing):
-- Replace ONLY the model’s fingernails (and visible thumbnail nails) with artificial nail tips that faithfully reproduce the artwork from the SECOND reference. Match each finger’s nail shape, length, and perspective; align cuticle lines believably.
+- **MANDATORY COVERAGE:** Replace **every** visible fingernail and thumbnail nail. **Zero** fingers may retain the FIRST image’s nail art, color, or pattern.
+- Apply artificial nail tips that **faithfully reproduce** the SECOND reference per mapped finger. Match nail shape, length, and perspective; align cuticle lines believably.
 - Preserve the model’s identity, face, body, skin texture, pose, jewelry, clothing, environment, and global lighting. Do NOT restyle the whole photo into a different scene.
-- If multiple nail designs exist in the product reference, map them to fingers in a coherent order (e.g. thumb→pinky) consistent with the product layout.
-- Edges must look naturally attached: no floating nails, no harsh paste lines, no duplicated hands.
+- If multiple nail designs exist in the product reference, map them to fingers in a coherent order (thumb→pinky) consistent with the product layout.
+- Edges must look naturally attached: no floating nails, no harsh paste lines, no duplicated hands, no ghosting of old nail art under new tips.
+- **ORIENTATION CHECK (before finalizing):** On each finger, whichever end of the product art is **lighter/paler or darker/patterned as the “tip”** on the sheet must sit on the **anatomical fingertip**; the cuticle/root side toward the knuckle. If any nail fails, correct that nail — do not ship a flipped wear.
 
 ${NAIL_ON_HAND_SHEET_TO_FINGER_ORDER_EN}
 
@@ -459,10 +502,12 @@ export const ACCESSORY_TRYON_PROMPT = `You receive TWO input images in this orde
 
 ${TRYON_SECOND_NAIL_PRODUCT_LAYOUT_EN}
 
+${TRYON_NAIL_FULL_REPLACEMENT_EN}
+
 TASK — premium social / e-commerce “matching ad” (nails + jewelry try-on):
 - **Scene continuity (critical):** If the FIRST image already shows a **real hand** (with or without packaging, box, sleeve, or props), **preserve that pose, crop, interaction, and environment** as much as possible. Only replace/enhance fingernails and place the referenced jewelry believably on that hand. Do **not** jump to a totally new generic studio disembodied hand or a different crop **solely** to satisfy per-finger nail-art notes — map nail designs to the **correct anatomical fingers** within the **existing** composition instead.
 - If the FIRST image has **no usable hand** (only loose jewelry on white / packshot with no finger to wear it), then synthesize ONE photorealistic photograph of a single elegant adult HAND and forearm only (crop: no face, no torso). The hand may be fully AI-generated.
-- FINGERNAILS: apply press-on tips that faithfully reproduce the nail art from the SECOND reference, in a coherent finger order (thumb → pinky) matching the product layout, **unless** USER REFINEMENT specifies particular fingers for particular designs — then obey that mapping on the visible fingers. Preserve micro-details: gradients, patterns, 3D charms, gloss, and nail shape.
+- FINGERNAILS: apply press-on tips that faithfully reproduce the nail art from the SECOND reference on **every** visible nail (thumb → pinky), matching the product layout, **unless** USER REFINEMENT specifies particular fingers for particular designs — then obey that mapping on the visible fingers. **Fully erase** any existing nail art on the hand; no ghosting or blend-through. Preserve micro-details: gradients, patterns, 3D charms, gloss, and nail shape. **Orientation:** light or dark distal art toward the anatomical fingertip, never 180° flipped vs the sheet.
 - JEWELRY: the hand must WEAR the exact rings/jewelry seen in the FIRST reference — same metal color, band profile, thickness, and style. If two different rings appear in the first image, place them on believable fingers (e.g. index + ring finger) like a professional styling, not floating beside the hand.
 - **Hero vs packaging:** Prefer a believable manicured hand wearing BOTH the nails and the jewelry; this is NOT a flat-lay of loose nails only. If the reference already includes product packaging in frame, **keeping that retail/packaging context is allowed** and should not be stripped when the user only asks which finger gets which nail design.
 - Lighting & set: match the FIRST image’s lighting when preserving its scene; otherwise soft beauty / commercial studio light; clean neutral or pale backdrop; optional subtle sleeve cuff is fine; avoid busy clutter unless already in the reference.
@@ -1010,6 +1055,41 @@ const FLAT_TO_3D_PACKAGING_PROMPTS: { prompt: string; label: string }[] = [
   },
 ];
 
+/** 双图袋装：FIRST=正面平面稿，SECOND=背面平面稿（与 API `editDualSceneNails` 顺序一致） */
+const FLAT_TO_3D_SACHET_DUAL_PREFIX = `You receive TWO input images supplied to the editor in this **fixed** order:
+1) **FIRST — FRONT FACE SOURCE OF TRUTH:** Square (or near-square) **flat print artwork** for the **front** of a single-serve foil / laminate sachet (pouch). **Every** visible graphic on the hero face — background fill color, logos, product name, taglines, icons, legal micro-copy on the front — must be taken **only** from this image.
+2) **SECOND — BACK FACE SOURCE OF TRUTH:** Square flat artwork for the **back** of the **same** sachet SKU — instructions, ingredients, “tear here” dashed line, regulatory copy, etc. Use this for the **reverse side** if any back edge peeks into frame; **do not** invent back text.
+
+`;
+
+const FLAT_TO_3D_SACHET_COLOR_LOCK_EN = `COLOR & PRINT FIDELITY — **ABSOLUTE LOCK** (treat any drift as failure):
+- **Background fill:** the dusty pink / mauve / lilac (or whatever solid panel color appears on the **FIRST** flat) must remain **the same hue, saturation, and lightness** on the printed face of the 3D sachet — **forbidden:** shifting toward warmer coral, cooler grey-lilac, or a “prettier” pastel retouch.
+- **White typography & icons:** stay **the same clean white** as the FIRST flat — **forbidden:** cream, yellow, or grey cast on type; **forbidden:** re-typesetting with a different weight unless the flat already shows it.
+- **No global grade:** **forbidden:** whole-image white balance, LUT, or saturation boost that changes the brand panel color. **Allowed:** **local** foil specular highlights and soft shadow on the **physical laminate** only — the **underlying ink color** must still match the flat when highlights are mentally removed.
+- **Graphics:** logos, script wordmarks, line art, and emoji-style icons must be **pixel-faithful** in layout and color — **no** redraw, **no** substitute fonts, **no** “cleaning up” illustration style.
+（中文：**背景色、白字、插画色相必须与正面稿一致**；只允许物理材质高光，禁止整体调色或美化饱和度。）
+
+`;
+
+const FLAT_TO_3D_SACHET_PROMPT = `${FLAT_TO_3D_SACHET_DUAL_PREFIX}${FLAT_TO_3D_SACHET_COLOR_LOCK_EN}TASK — output **exactly ONE** photorealistic e-commerce hero photograph of a **single sealed sachet / pouch** on a seamless **#FFFFFF** (or very light neutral) studio sweep:
+
+HARD STRUCTURE (failure if violated):
+- **Subject:** one **flat square-ish** retail sachet, **front face toward camera** (straight-on or very slight yaw only — hero must read the **FIRST** artwork clearly). **Product-only** — no hands, no props, no extra SKUs.
+- **Material:** **matte-laminate / soft-touch pouch** by default (subtle sheen only) — **avoid heavy metallic foil** unless the FIRST flat clearly shows foil. Heavy gloss shifts perceived panel hue vs the flat; **heat-sealed crimped borders** on all four sides with a fine **cross-hatch / grid texture** in the seal flange (slightly denser color than the flat center — still in the **same family** as the FIRST background, not a different brand color).
+- **Front print:** warp the **FIRST** flat artwork onto the front panel in correct perspective — **typography legible**, no mirrored text, no missing lines.
+- **Back print:** if the pouch shows a sliver of reverse side, carry **SECOND** artwork only — **never** duplicate front copy on the back.
+- **Tear notch:** if the **SECOND** flat shows a “tear here” line or a V-notch cue, you may place a **small functional tear notch** on the top edge consistent with retail sachets — **do not** print the dashed “TEAR HERE” banner large on the **front** unless it exists on the **FIRST** flat.
+- **Lighting:** soft commercial studio key + fill; **one** gentle contact shadow under the pouch; crisp edges; no busy environment.
+
+Return **exactly ONE** square high-resolution photograph.`;
+
+const FLAT_TO_3D_SACHET_PROMPTS: { prompt: string; label: string }[] = [
+  {
+    label: "单片袋装实拍主图",
+    prompt: FLAT_TO_3D_SACHET_PROMPT,
+  },
+];
+
 /** 白底栅格「仅抠图 / 几何矫正」并行出图张数（同 prompt 多次，供用户择优） */
 export const WHITE_GRID_DUAL_VARIANT_COUNT = 2;
 
@@ -1104,6 +1184,8 @@ export function promptsForMode(mode: GenerationMode): { prompt: string; label: s
       return PACKAGING_PROMPTS;
     case "flat_to_3d_packaging":
       return FLAT_TO_3D_PACKAGING_PROMPTS;
+    case "flat_to_3d_sachet":
+      return FLAT_TO_3D_SACHET_PROMPTS;
     case "nails_in_box":
       return [];
     case "model_tryon":

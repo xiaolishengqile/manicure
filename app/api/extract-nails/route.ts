@@ -7,6 +7,7 @@ import {
   collapseIdenticalPromptJobs,
   composeExtractAngleScatteredEditPrompt,
   buildNailsInBoxPackagingPrompt,
+  modeUsesDominantColorExtraction,
   parseGenerationMode,
   parseNailsInBoxArrangement,
   modeAllowsPartialDualVariants,
@@ -26,6 +27,16 @@ import {
   exifUprightToPng,
   normalizeTenSingleNailForCollageCell,
 } from "@/lib/ten-singles-nail-preprocess";
+import {
+  appendDominantColorHintToPrompt,
+  extractDominantColorFromBuffer,
+} from "@/lib/dominant-color";
+import {
+  parsePanelColorHex,
+  parsePanelColorSource,
+  swatchFromHex,
+  type PanelColorSource,
+} from "@/lib/panel-color";
 import {
   appendUserRefinementToPrompt,
   parseUserExtraNotes,
@@ -518,6 +529,35 @@ async function validateImageFile(
   return { ok: true, buffer, mime: entry.type || "image/jpeg" };
 }
 
+/** 从平面稿提主色或用户指定色，拼进系统提示 */
+async function systemPromptWithDominantColor(
+  mode: GenerationMode,
+  systemPrompt: string,
+  flatArtBuffer: Buffer,
+  panelLabel: string,
+  panelColorSource: PanelColorSource,
+  userPanelHex: string | null,
+): Promise<string> {
+  if (!modeUsesDominantColorExtraction(mode)) return systemPrompt;
+
+  /** 仅当用户在前端点选预设/取色器（panelColorSource=manual 且带 hex）才改色；否则从正面稿自动提色 */
+  const useUserPanelColor =
+    panelColorSource === "manual" && userPanelHex != null;
+
+  let swatch = useUserPanelColor ? swatchFromHex(userPanelHex) : null;
+  if (!swatch) {
+    swatch = await extractDominantColorFromBuffer(flatArtBuffer);
+  }
+  if (!swatch) return systemPrompt;
+
+  const hintSource: "auto" | "user" = useUserPanelColor ? "user" : "auto";
+
+  return appendDominantColorHintToPrompt(systemPrompt, swatch, {
+    panelLabel,
+    source: hintSource,
+  });
+}
+
 export async function POST(request: Request) {
   const useReplicate = imageProviderIsReplicate();
   const replicateToken = getReplicateApiToken();
@@ -561,6 +601,10 @@ export async function POST(request: Request) {
   }
 
   const mode: GenerationMode = parseGenerationMode(formData.get("mode"));
+  const panelColorSource = parsePanelColorSource(
+    formData.get("panelColorSource"),
+  );
+  const userPanelHex = parsePanelColorHex(formData.get("panelColorHex"));
   /** 多路并行生图时：以 NDJSON 流推送，先完成的先下发，便于前端渐进展示 */
   const streamResults = formData.get("streamResults") === "1";
   const userExtraNotes = parseUserExtraNotes(formData.get("userExtraNotes"));
@@ -870,6 +914,16 @@ export async function POST(request: Request) {
     }
 
     const jobs = promptsForMode(mode);
+    if (jobs[0]) {
+      jobs[0].prompt = await systemPromptWithDominantColor(
+        mode,
+        jobs[0].prompt,
+        flatRes.buffer,
+        "BOX PANEL",
+        panelColorSource,
+        userPanelHex,
+      );
+    }
 
     try {
       const outcome = await runParallelImageEditJobs({
@@ -882,6 +936,71 @@ export async function POST(request: Request) {
             refRes.mime,
             flatRes.buffer,
             flatRes.mime,
+            imageEditPrompt(prompt),
+            editImageModel,
+          ),
+      });
+      if (!outcome.ok) {
+        return Response.json(
+          {
+            error: outcome.error,
+            imageUrls: outcome.imageUrls,
+            labels: outcome.labels,
+          },
+          { status: 502 },
+        );
+      }
+      return Response.json({
+        imageUrls: outcome.imageUrls,
+        labels: outcome.labels,
+        imageUrl: outcome.imageUrls[0],
+        mode,
+      });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "图像编辑接口调用失败";
+      return Response.json({ error: message, imageUrls: [], labels: [] }, { status: 502 });
+    }
+  }
+
+  if (mode === "flat_to_3d_sachet") {
+    const frontRes = await validateImageFile(
+      formData.get("image"),
+      "袋装正面平面稿（字段 image）",
+    );
+    if (!frontRes.ok) {
+      return Response.json({ error: frontRes.error }, { status: 400 });
+    }
+    const backRes = await validateImageFile(
+      formData.get("sachetBackImage"),
+      "袋装背面平面稿（字段 sachetBackImage）",
+    );
+    if (!backRes.ok) {
+      return Response.json({ error: backRes.error }, { status: 400 });
+    }
+
+    const jobs = promptsForMode(mode);
+    if (jobs[0]) {
+      jobs[0].prompt = await systemPromptWithDominantColor(
+        mode,
+        jobs[0].prompt,
+        frontRes.buffer,
+        "FRONT PANEL",
+        panelColorSource,
+        userPanelHex,
+      );
+    }
+
+    try {
+      const outcome = await runParallelImageEditJobs({
+        jobs,
+        replicateDownloadAuth: replAuth,
+        edit: async ({ prompt }) =>
+          editDualSceneNailsRoute(
+            imageCtx,
+            frontRes.buffer,
+            frontRes.mime,
+            backRes.buffer,
+            backRes.mime,
             imageEditPrompt(prompt),
             editImageModel,
           ),
