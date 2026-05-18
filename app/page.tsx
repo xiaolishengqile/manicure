@@ -1616,7 +1616,23 @@ export default function Home() {
           </p>
         ) : null}
 
-        <section className="grid gap-8 rounded-2xl border border-zinc-200 bg-white p-8 shadow-sm lg:grid-cols-2">
+        <section className="flex flex-col gap-6 rounded-2xl border border-zinc-200 bg-white p-8 shadow-sm">
+          {showPanelColorPicker ? (
+            <PanelColorPicker
+              value={panelColorHex}
+              source={panelColorSource}
+              autoHex={panelAutoHex}
+              disabled={loading}
+              onChange={setPanelColorHex}
+              onSourceChange={(src) => {
+                setPanelColorSource(src);
+                if (src === "auto" && panelAutoHex) {
+                  setPanelColorHex(panelAutoHex);
+                }
+              }}
+            />
+          ) : null}
+          <div className="grid gap-8 lg:grid-cols-2">
           <div className="flex flex-col gap-4">
             <h2 className="text-sm font-semibold text-zinc-500">投喂图片</h2>
             {tenMode ? (
@@ -1784,21 +1800,6 @@ export default function Home() {
                     />
                   </div>
                 </div>
-                  {showPanelColorPicker ? (
-                    <PanelColorPicker
-                      value={panelColorHex}
-                      source={panelColorSource}
-                      autoHex={panelAutoHex}
-                      disabled={loading}
-                      onChange={setPanelColorHex}
-                      onSourceChange={(src) => {
-                        setPanelColorSource(src);
-                        if (src === "auto" && panelAutoHex) {
-                          setPanelColorHex(panelAutoHex);
-                        }
-                      }}
-                    />
-                  ) : null}
                 </div>
                 <p className="text-xs text-zinc-500">
                   下方虚线区域点击后仅从文件夹选图；剪贴板粘贴请使用上方两个「粘贴区」。
@@ -2320,6 +2321,7 @@ export default function Home() {
                 </div>
               </div>
             ) : null}
+          </div>
           </div>
           </div>
         </section>
