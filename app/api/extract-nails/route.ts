@@ -36,6 +36,13 @@ import {
 } from "@/lib/solo-image-edit-prompt";
 import { parseGatewayEditFieldsFromForm } from "@/lib/image-gateway-fields";
 import {
+  buildOpenAiImagesEditParams,
+  getOpenAiImageApiKey,
+  getOpenAiImageBaseUrl,
+  imagesEditViaGatewayMultipart,
+  openAiImagesEditUsesMinimalParams,
+} from "@/lib/openai-image-gateway";
+import {
   getReplicateApiToken,
   imageProviderIsReplicate,
   runReplicateGptImage2,
@@ -81,27 +88,12 @@ function resolveImageEditJobs(
   return collapseIdenticalPromptJobs(composed);
 }
 
-function getApiKey(): string | undefined {
-  return (
-    process.env.OPENAI_API_KEY?.trim() ||
-    process.env.LLM_GATEWAY_API_KEY?.trim()
-  );
-}
-
-function getBaseURL(): string {
-  return (
-    process.env.OPENAI_BASE_URL?.trim() ||
-    process.env.LLM_GATEWAY_BASE_URL?.trim() ||
-    "https://www.llmgateway.cn/v1"
-  );
-}
-
 function getImageModel(): string {
   return process.env.OPENAI_IMAGE_MODEL?.trim() || "gpt-image-2";
 }
 
 type ImageCtx =
-  | { provider: "openai"; openai: OpenAI }
+  | { provider: "openai"; openai: OpenAI; baseURL: string; apiKey: string }
   | { provider: "replicate"; token: string };
 
 function replicateDownloadAuth(ctx: ImageCtx): string | undefined {
@@ -134,7 +126,7 @@ function imageDataUrlToBuffer(url: string): Buffer | null {
 
 async function imageUrlToBuffer(
   url: string,
-  opts?: { replicateDownloadAuth?: string },
+  opts?: { replicateDownloadAuth?: string; timeoutMs?: number },
 ): Promise<Buffer> {
   const dataBuffer = imageDataUrlToBuffer(url);
   if (dataBuffer) return dataBuffer;
@@ -164,7 +156,7 @@ async function imageUrlToBuffer(
   const upstream = await fetch(url, {
     redirect: "follow",
     cache: "no-store",
-    signal: AbortSignal.timeout(60_000),
+    signal: AbortSignal.timeout(opts?.timeoutMs ?? 60_000),
     headers,
   });
   if (!upstream.ok) {
@@ -193,7 +185,11 @@ async function toClientDisplayableImageUrl(
   if (!urlOrData) return null;
   if (urlOrData.startsWith("data:")) return urlOrData;
   try {
-    const buf = await imageUrlToBuffer(urlOrData, { replicateDownloadAuth });
+    const buf = await imageUrlToBuffer(urlOrData, {
+      replicateDownloadAuth,
+      /** 网关已出图后，拉取结果图不宜阻塞过久；失败则把 https 直接交给浏览器 */
+      timeoutMs: 25_000,
+    });
     return `data:image/png;base64,${buf.toString("base64")}`;
   } catch {
     return urlOrData;
@@ -374,26 +370,30 @@ function ndjsonStreamParallelImageJobsResponse(args: {
 }
 
 async function editOnce(
-  openai: OpenAI,
+  ctx: { openai: OpenAI; baseURL: string; apiKey: string },
   buffer: Buffer,
   ext: string,
   mime: string,
   prompt: string,
   imageModel: string,
 ): Promise<string | null> {
+  if (openAiImagesEditUsesMinimalParams(ctx.baseURL)) {
+    return imagesEditViaGatewayMultipart({
+      apiKey: ctx.apiKey,
+      baseURL: ctx.baseURL,
+      model: imageModel,
+      prompt,
+      images: [{ buffer, mime, filename: `input.${ext}` }],
+    });
+  }
   const uploadable = await toFile(buffer, `input.${ext}`, { type: mime });
-  const res = await openai.images.edit({
-    model: imageModel,
-    image: uploadable,
-    prompt,
-    n: 1,
-    size: "1024x1024",
-    quality: "high",
-    background: "opaque",
-    output_format: "png",
-    input_fidelity: "high",
-    stream: false,
-  });
+  const res = (await ctx.openai.images.edit(
+    buildOpenAiImagesEditParams(ctx.baseURL, {
+      model: imageModel,
+      image: uploadable,
+      prompt,
+    }),
+  )) as OpenAI.Images.ImagesResponse;
   return firstImageUrl(res);
 }
 
@@ -412,12 +412,12 @@ async function editOnceRoute(
       images: [{ buffer, mime, filename: `input.${ext}` }],
     });
   }
-  return editOnce(ctx.openai, buffer, ext, mime, prompt, imageModel);
+  return editOnce(ctx, buffer, ext, mime, prompt, imageModel);
 }
 
 /** 第一张：场景（模特或饰品陈列），第二张：美甲产品 */
 async function editDualSceneNails(
-  openai: OpenAI,
+  ctx: { openai: OpenAI; baseURL: string; apiKey: string },
   sceneBuffer: Buffer,
   sceneMime: string,
   nailsBuffer: Buffer,
@@ -427,24 +427,39 @@ async function editDualSceneNails(
 ): Promise<string | null> {
   const sceneExt = extFromMime(sceneMime);
   const nailsExt = extFromMime(nailsMime);
+  if (openAiImagesEditUsesMinimalParams(ctx.baseURL)) {
+    return imagesEditViaGatewayMultipart({
+      apiKey: ctx.apiKey,
+      baseURL: ctx.baseURL,
+      model: imageModel,
+      prompt,
+      images: [
+        {
+          buffer: sceneBuffer,
+          mime: sceneMime,
+          filename: `scene.${sceneExt}`,
+        },
+        {
+          buffer: nailsBuffer,
+          mime: nailsMime,
+          filename: `nails.${nailsExt}`,
+        },
+      ],
+    });
+  }
   const sceneFile = await toFile(sceneBuffer, `scene.${sceneExt}`, {
     type: sceneMime,
   });
   const nailsFile = await toFile(nailsBuffer, `nails.${nailsExt}`, {
     type: nailsMime,
   });
-  const res = await openai.images.edit({
-    model: imageModel,
-    image: [sceneFile, nailsFile],
-    prompt,
-    n: 1,
-    size: "1024x1024",
-    quality: "high",
-    background: "opaque",
-    output_format: "png",
-    input_fidelity: "high",
-    stream: false,
-  });
+  const res = (await ctx.openai.images.edit(
+    buildOpenAiImagesEditParams(ctx.baseURL, {
+      model: imageModel,
+      image: [sceneFile, nailsFile],
+      prompt,
+    }),
+  )) as OpenAI.Images.ImagesResponse;
   return firstImageUrl(res);
 }
 
@@ -470,7 +485,7 @@ async function editDualSceneNailsRoute(
     });
   }
   return editDualSceneNails(
-    ctx.openai,
+    ctx,
     firstBuffer,
     firstMime,
     secondBuffer,
@@ -506,7 +521,8 @@ async function validateImageFile(
 export async function POST(request: Request) {
   const useReplicate = imageProviderIsReplicate();
   const replicateToken = getReplicateApiToken();
-  const apiKey = getApiKey();
+  const apiKey = getOpenAiImageApiKey();
+  const openAiBaseURL = getOpenAiImageBaseUrl();
 
   if (useReplicate) {
     if (!replicateToken) {
@@ -522,7 +538,7 @@ export async function POST(request: Request) {
     return Response.json(
       {
         error:
-          "服务器未配置 API Key。请在 .env.local 中设置 OPENAI_API_KEY（或 LLM_GATEWAY_API_KEY），对应中转站发放的密钥。",
+          "服务器未配置 API Key。请在 .env.local 中设置 T8STAR_API_KEY 或 OPENAI_API_KEY（贞贞工坊 https://ai.t8star.org 控制台获取）。",
       },
       { status: 500 },
     );
@@ -530,7 +546,12 @@ export async function POST(request: Request) {
 
   const imageCtx: ImageCtx = useReplicate
     ? { provider: "replicate", token: replicateToken! }
-    : { provider: "openai", openai: new OpenAI({ apiKey: apiKey!, baseURL: getBaseURL() }) };
+    : {
+        provider: "openai",
+        openai: new OpenAI({ apiKey: apiKey!, baseURL: openAiBaseURL }),
+        baseURL: openAiBaseURL,
+        apiKey: apiKey!,
+      };
 
   let formData: FormData;
   try {
@@ -719,7 +740,7 @@ export async function POST(request: Request) {
     ]);
 
     try {
-      if (streamResults && jobs.length > 1) {
+      if (streamResults && jobs.length > 0) {
         return ndjsonStreamParallelImageJobsResponse({
           jobs,
           replicateDownloadAuth: replAuth,
@@ -964,7 +985,7 @@ export async function POST(request: Request) {
   const jobs = resolveImageEditJobs(mode, extractGridAddendum);
 
   try {
-    if (streamResults && jobs.length > 1) {
+    if (streamResults && jobs.length > 0) {
       return ndjsonStreamParallelImageJobsResponse({
         jobs,
         replicateDownloadAuth: replAuth,

@@ -102,8 +102,10 @@ function newPresetId(): string {
 /** 与 `/api/extract-nails` 并行流式分支一致：多路时先完成的先下发 */
 type StreamResultSlot = { url: string; label: string } | null;
 
+/** 仅多路并行时走 NDJSON 流；单路用 JSON，避免占位格一直转圈 */
 function parallelStreamJobCount(m: GenerationMode): number {
-  return parallelImageJobCountForMode(m);
+  const n = parallelImageJobCountForMode(m);
+  return n > 1 ? n : 0;
 }
 
 function defaultPresetItems(): PromptPresetItem[] {
@@ -551,11 +553,42 @@ export default function Home() {
     gridPresets.length,
   ]);
 
+  const resultObjectUrlsRef = useRef<string[]>([]);
+
+  const revokeResultObjectUrls = useCallback(() => {
+    for (const u of resultObjectUrlsRef.current) {
+      URL.revokeObjectURL(u);
+    }
+    resultObjectUrlsRef.current = [];
+  }, []);
+
+  /** 超大 data URL 转 blob URL，避免 <img> 长时间不绘制 */
+  const prepareResultUrlForDisplay = useCallback((url: string): string => {
+    if (!url.startsWith("data:") || url.length < 512_000) return url;
+    try {
+      const comma = url.indexOf(",");
+      if (comma < 0) return url;
+      const meta = url.slice(0, comma);
+      const b64 = url.slice(comma + 1);
+      const mime =
+        /^data:([^;,]+)/i.exec(meta)?.[1]?.trim() || "image/png";
+      const bin = atob(b64);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      const obj = URL.createObjectURL(new Blob([bytes], { type: mime }));
+      resultObjectUrlsRef.current.push(obj);
+      return obj;
+    } catch {
+      return url;
+    }
+  }, []);
+
   const clearResults = useCallback(() => {
+    revokeResultObjectUrls();
     setResultUrls([]);
     setResultLabels([]);
     setStreamSlots(null);
-  }, []);
+  }, [revokeResultObjectUrls]);
 
   const downloadResult = useCallback(async (url: string, index: number) => {
     const extFromDataUrl = (u: string): string => {
@@ -1052,6 +1085,7 @@ export default function Home() {
         let carry = "";
         let finalUrls: string[] = [];
         let finalLabels: string[] = [];
+        const streamedByIndex = new Map<number, StreamResultSlot>();
         const flushLine = (line: string) => {
           const t = line.trim();
           if (!t) return;
@@ -1080,17 +1114,19 @@ export default function Home() {
             typeof msg.index === "number" &&
             msg.imageUrl
           ) {
+            const idx = msg.index;
+            const slot: StreamResultSlot = {
+              url: prepareResultUrlForDisplay(msg.imageUrl),
+              label: msg.label ?? `图 ${idx + 1}`,
+            };
+            streamedByIndex.set(idx, slot);
             setStreamSlots((prev) => {
-              const idx = msg.index!;
               const n = Math.max(prev?.length ?? 0, idx + 1);
               const next: StreamResultSlot[] = Array.from(
                 { length: n },
                 (_, i) => (prev && i < prev.length ? prev[i]! : null),
               );
-              next[idx] = {
-                url: msg.imageUrl!,
-                label: msg.label ?? `图 ${idx + 1}`,
-              };
+              next[idx] = slot;
               return next;
             });
           } else if (msg.type === "done") {
@@ -1110,16 +1146,26 @@ export default function Home() {
           for (const line of parts) flushLine(line);
         }
         if (carry.trim()) flushLine(carry);
+        if (finalUrls.length === 0 && streamedByIndex.size > 0) {
+          finalUrls = [...streamedByIndex.entries()]
+            .sort(([a], [b]) => a - b)
+            .map(([, slot]) => slot!.url);
+          if (finalLabels.length === 0) {
+            finalLabels = [...streamedByIndex.entries()]
+              .sort(([a], [b]) => a - b)
+              .map(([, slot]) => slot!.label);
+          }
+        }
         if (finalUrls.length === 0) {
           throw new Error("未收到结果图片（流可能中断）。");
         }
-        setResultUrls(finalUrls);
+        setStreamSlots(null);
+        setResultUrls(finalUrls.map(prepareResultUrlForDisplay));
         setResultLabels(
           finalLabels.length
             ? finalLabels
             : finalUrls.map((_, i) => `图 ${i + 1}`),
         );
-        setStreamSlots(null);
       } else {
         const data = (await res.json()) as {
           imageUrls?: string[];
@@ -1138,13 +1184,15 @@ export default function Home() {
         if (!urls.length) {
           throw new Error("未收到结果图片。");
         }
-        setResultUrls(urls);
+        setStreamSlots(null);
+        setResultUrls(urls.map(prepareResultUrlForDisplay));
         setResultLabels(data.labels ?? urls.map((_, i) => `图 ${i + 1}`));
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "处理失败");
       setStreamSlots(null);
     } finally {
+      setStreamSlots(null);
       setLoading(false);
     }
   }, [
@@ -1163,6 +1211,7 @@ export default function Home() {
     marginPctDraft,
     colGutterSumPct,
     rowGutterPctDraft,
+    prepareResultUrlForDisplay,
   ]);
 
   const clearUserNotes = useCallback(() => {
