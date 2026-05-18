@@ -16,6 +16,12 @@ import {
   type NailsInBoxArrangement,
 } from "@/lib/generation-modes";
 import {
+  extFromContentType,
+  extFromDataUrl,
+  resultImageUrlToBlob,
+  triggerDownloadFromResultUrl,
+} from "@/lib/result-image-url";
+import {
   LS_GRID_LAYOUT_PRESETS,
   MAX_GRID_LAYOUT_PRESETS,
   newGridPresetId,
@@ -100,7 +106,11 @@ function newPresetId(): string {
 }
 
 /** 与 `/api/extract-nails` 并行流式分支一致：多路时先完成的先下发 */
-type StreamResultSlot = { url: string; label: string } | null;
+type StreamResultSlot = {
+  url: string;
+  exportUrl: string;
+  label: string;
+} | null;
 
 /** 仅多路并行时走 NDJSON 流；单路用 JSON，避免占位格一直转圈 */
 function parallelStreamJobCount(m: GenerationMode): number {
@@ -554,6 +564,8 @@ export default function Home() {
   ]);
 
   const resultObjectUrlsRef = useRef<string[]>([]);
+  /** 与 resultUrls 下标对齐：中转站原始 data/https，供下载/复制（展示可能是 blob:） */
+  const resultExportUrlsRef = useRef<string[]>([]);
 
   const revokeResultObjectUrls = useCallback(() => {
     for (const u of resultObjectUrlsRef.current) {
@@ -585,106 +597,78 @@ export default function Home() {
 
   const clearResults = useCallback(() => {
     revokeResultObjectUrls();
+    resultExportUrlsRef.current = [];
     setResultUrls([]);
     setResultLabels([]);
     setStreamSlots(null);
   }, [revokeResultObjectUrls]);
 
-  const downloadResult = useCallback(async (url: string, index: number) => {
-    const extFromDataUrl = (u: string): string => {
-      const m = /^data:image\/(png|jpeg|jpg|webp|gif)/i.exec(u);
-      if (!m) return "png";
-      const t = m[1].toLowerCase();
-      return t === "jpeg" ? "jpg" : t;
-    };
-    const extFromContentType = (ct: string | null): string => {
-      if (!ct) return "png";
-      if (ct.includes("webp")) return "webp";
-      if (ct.includes("jpeg")) return "jpg";
-      if (ct.includes("png")) return "png";
-      if (ct.includes("gif")) return "gif";
-      return "png";
-    };
-
-    setDownloadBusyIndex(index);
-    setError(null);
-    try {
-      if (url.startsWith("data:image/")) {
-        const ext = extFromDataUrl(url);
-        const filename = `美甲生成_${index + 1}.${ext}`;
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = filename;
-        a.rel = "noopener";
-        a.click();
-        return;
+  const fetchRemoteResultBlob = useCallback(async (httpUrl: string): Promise<Blob> => {
+    const res = await fetch("/api/download-image", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: httpUrl }),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      let msg = "获取图片失败";
+      try {
+        const j = JSON.parse(text) as { error?: string };
+        if (j.error) msg = j.error;
+      } catch {
+        if (text) msg = text.slice(0, 120);
       }
-      if (url.startsWith("http://") || url.startsWith("https://")) {
-        const res = await fetch("/api/download-image", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ url }),
-        });
-        if (!res.ok) {
-          const text = await res.text();
-          let msg = "下载失败";
-          try {
-            const j = JSON.parse(text) as { error?: string };
-            if (j.error) msg = j.error;
-          } catch {
-            if (text) msg = text.slice(0, 120);
-          }
-          throw new Error(msg);
-        }
-        const ext = extFromContentType(res.headers.get("content-type"));
-        const filename = `美甲生成_${index + 1}.${ext}`;
-        const blob = await res.blob();
-        const objectUrl = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = objectUrl;
-        a.download = filename;
-        a.rel = "noopener";
-        a.click();
-        URL.revokeObjectURL(objectUrl);
-        return;
-      }
-      throw new Error("不支持的图片地址格式");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "下载失败，请稍后重试。");
-    } finally {
-      setDownloadBusyIndex(null);
+      throw new Error(msg);
     }
+    return res.blob();
   }, []);
 
-  const fetchResultUrlAsBlob = useCallback(async (url: string): Promise<Blob> => {
-    if (url.startsWith("data:image/")) {
-      const res = await fetch(url);
-      return res.blob();
-    }
-    if (url.startsWith("http://") || url.startsWith("https://")) {
-      const res = await fetch("/api/download-image", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url }),
-      });
-      if (!res.ok) {
-        const text = await res.text();
-        let msg = "获取图片失败";
-        try {
-          const j = JSON.parse(text) as { error?: string };
-          if (j.error) msg = j.error;
-        } catch {
-          if (text) msg = text.slice(0, 120);
-        }
-        throw new Error(msg);
-      }
-      return res.blob();
-    }
-    throw new Error("不支持的图片地址格式");
+  const resolveExportUrl = useCallback((displayUrl: string, index: number) => {
+    return resultExportUrlsRef.current[index] ?? displayUrl;
   }, []);
+
+  const commitResultUrls = useCallback(
+    (rawUrls: string[], labels: string[]) => {
+      resultExportUrlsRef.current = rawUrls;
+      setResultUrls(rawUrls.map(prepareResultUrlForDisplay));
+      setResultLabels(labels);
+    },
+    [prepareResultUrlForDisplay],
+  );
+
+  const downloadResult = useCallback(
+    async (
+      displayUrl: string,
+      index: number,
+      exportUrlOverride?: string,
+    ) => {
+      const exportUrl = exportUrlOverride ?? resolveExportUrl(displayUrl, index);
+      setDownloadBusyIndex(index);
+      setError(null);
+      try {
+        let ext = "png";
+        if (exportUrl.startsWith("data:image/")) {
+          ext = extFromDataUrl(exportUrl);
+        } else if (exportUrl.startsWith("blob:")) {
+          const blob = await resultImageUrlToBlob(exportUrl);
+          ext = extFromContentType(blob.type);
+        }
+        await triggerDownloadFromResultUrl(
+          exportUrl,
+          `美甲生成_${index + 1}.${ext}`,
+          fetchRemoteResultBlob,
+        );
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "下载失败，请稍后重试。");
+      } finally {
+        setDownloadBusyIndex(null);
+      }
+    },
+    [fetchRemoteResultBlob, resolveExportUrl],
+  );
 
   const copyResultToClipboard = useCallback(
-    async (url: string, index: number) => {
+    async (displayUrl: string, index: number, exportUrlOverride?: string) => {
       if (
         typeof ClipboardItem === "undefined" ||
         typeof navigator.clipboard?.write !== "function"
@@ -695,7 +679,8 @@ export default function Home() {
       setCopyBusyIndex(index);
       setError(null);
       try {
-        const blob = await fetchResultUrlAsBlob(url);
+        const exportUrl = exportUrlOverride ?? resolveExportUrl(displayUrl, index);
+        const blob = await resultImageUrlToBlob(exportUrl, fetchRemoteResultBlob);
         const raw = blob.type.split(";")[0].trim().toLowerCase();
         let mime = "image/png";
         if (raw.startsWith("image/")) {
@@ -716,16 +701,17 @@ export default function Home() {
         setCopyBusyIndex(null);
       }
     },
-    [fetchResultUrlAsBlob],
+    [fetchRemoteResultBlob, resolveExportUrl],
   );
 
   const convertResultToFeedImage = useCallback(
-    async (url: string, index: number) => {
+    async (displayUrl: string, index: number, exportUrlOverride?: string) => {
       if (tenMode) return;
       setFeedFromResultBusyIndex(index);
       setError(null);
       try {
-        const blob = await fetchResultUrlAsBlob(url);
+        const exportUrl = exportUrlOverride ?? resolveExportUrl(displayUrl, index);
+        const blob = await resultImageUrlToBlob(exportUrl, fetchRemoteResultBlob);
         const mime = blob.type || "image/png";
         const ext = mime.includes("webp")
           ? "webp"
@@ -751,7 +737,7 @@ export default function Home() {
         setFeedFromResultBusyIndex(null);
       }
     },
-    [tenMode, clearResults, fetchResultUrlAsBlob],
+    [tenMode, clearResults, fetchRemoteResultBlob, resolveExportUrl],
   );
 
   const onPickFile = useCallback(() => {
@@ -1117,6 +1103,7 @@ export default function Home() {
             const idx = msg.index;
             const slot: StreamResultSlot = {
               url: prepareResultUrlForDisplay(msg.imageUrl),
+              exportUrl: msg.imageUrl,
               label: msg.label ?? `图 ${idx + 1}`,
             };
             streamedByIndex.set(idx, slot);
@@ -1149,7 +1136,7 @@ export default function Home() {
         if (finalUrls.length === 0 && streamedByIndex.size > 0) {
           finalUrls = [...streamedByIndex.entries()]
             .sort(([a], [b]) => a - b)
-            .map(([, slot]) => slot!.url);
+            .map(([, slot]) => slot!.exportUrl);
           if (finalLabels.length === 0) {
             finalLabels = [...streamedByIndex.entries()]
               .sort(([a], [b]) => a - b)
@@ -1160,8 +1147,8 @@ export default function Home() {
           throw new Error("未收到结果图片（流可能中断）。");
         }
         setStreamSlots(null);
-        setResultUrls(finalUrls.map(prepareResultUrlForDisplay));
-        setResultLabels(
+        commitResultUrls(
+          finalUrls,
           finalLabels.length
             ? finalLabels
             : finalUrls.map((_, i) => `图 ${i + 1}`),
@@ -1185,8 +1172,7 @@ export default function Home() {
           throw new Error("未收到结果图片。");
         }
         setStreamSlots(null);
-        setResultUrls(urls.map(prepareResultUrlForDisplay));
-        setResultLabels(data.labels ?? urls.map((_, i) => `图 ${i + 1}`));
+        commitResultUrls(urls, data.labels ?? urls.map((_, i) => `图 ${i + 1}`));
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "处理失败");
@@ -1197,6 +1183,7 @@ export default function Home() {
     }
   }, [
     clearResults,
+    commitResultUrls,
     dualKind,
     file,
     secondFile,
@@ -1343,6 +1330,7 @@ export default function Home() {
     if (resultUrls.length === 0) return null;
     return resultUrls.map((url, i) => ({
       url,
+      exportUrl: resultExportUrlsRef.current[i] ?? url,
       label: resultLabels[i] ?? `图 ${i + 1}`,
     }));
   }, [streamSlots, resultUrls, resultLabels]);
@@ -1434,7 +1422,7 @@ export default function Home() {
           : "点击选择美甲照片";
   const singleUploadHint =
     mode === "extract_angle_scattered"
-      ? "输入须为**竖直甲片**（常见 2×5）；**A/B 白底、甲片互不压住**；**A** 同角+间距匀；**B** **15–20 枚**随机+镜头远；并行 **2 张**择优"
+      ? "输入须为**竖直甲片**（常见 2×5）；**A/B 必须恰好 10 枚**、**底边纯白**、互不压住；**A** 同角+间距匀；**B** 随机散落+镜头远；并行 **2 张**择优"
       : mode === "extract_ten_grid"
         ? "托盘、卡纸、实拍平铺等；只抠图中已出现的甲片，不补全款式；每次生成 **1 张**"
         : mode === "white_grid_rectify"
@@ -1834,7 +1822,7 @@ export default function Home() {
               <p className="text-xs leading-relaxed text-zinc-600">
                 已并行生成 {filledResultSlotCount} 张，请对比
                 {modeIsVerticalToScatteredFlatLay(mode)
-                  ? "甲片是否互不压住；A 间距是否均匀；B 是否 15–20 枚、够乱、镜头够远"
+                  ? "是否恰好 10 枚、底边是否纯白；A 间距是否均匀；B 是否够乱、镜头够远"
                   : modeIsPhotoExtractToGrid(mode)
                     ? "抠图保真度与排版"
                     : "甲型保真度与竖直/间距"}
@@ -1880,7 +1868,7 @@ export default function Home() {
                           }
                           onClick={() => {
                             if (!slot) return;
-                            void downloadResult(slot.url, i);
+                            void downloadResult(slot.url, i, slot.exportUrl);
                           }}
                           className="inline-flex h-9 min-w-[5.5rem] items-center justify-center rounded-lg border border-zinc-300 bg-white px-3 text-sm font-medium text-zinc-800 shadow-sm transition hover:border-rose-400 hover:bg-rose-50 hover:text-rose-900 disabled:cursor-not-allowed disabled:opacity-50"
                         >
@@ -1895,7 +1883,7 @@ export default function Home() {
                           }
                           onClick={() => {
                             if (!slot) return;
-                            void copyResultToClipboard(slot.url, i);
+                            void copyResultToClipboard(slot.url, i, slot.exportUrl);
                           }}
                           title="复制图片到剪贴板，便于粘贴到其他应用"
                           className="inline-flex h-9 min-w-[5.5rem] items-center justify-center rounded-lg border border-zinc-300 bg-white px-3 text-sm font-medium text-zinc-800 shadow-sm transition hover:border-rose-400 hover:bg-rose-50 hover:text-rose-900 disabled:cursor-not-allowed disabled:opacity-50"
@@ -1913,7 +1901,7 @@ export default function Home() {
                             }
                             onClick={() => {
                               if (!slot) return;
-                              void convertResultToFeedImage(slot.url, i);
+                              void convertResultToFeedImage(slot.url, i, slot.exportUrl);
                             }}
                             title="用该图替换左侧「投喂图片」中的主图，便于继续处理"
                             className="inline-flex h-9 min-w-[6.5rem] items-center justify-center rounded-lg border border-rose-200 bg-rose-50 px-3 text-sm font-medium text-rose-900 shadow-sm transition hover:border-rose-400 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50"
