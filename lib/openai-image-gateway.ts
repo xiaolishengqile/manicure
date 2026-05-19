@@ -1,4 +1,9 @@
 import type OpenAI from "openai";
+import {
+  imageModelUsesNanoBananaEdits,
+  type ImageAspectRatioOption,
+  type ImageSizeKOption,
+} from "@/lib/image-gateway-fields";
 
 /** 贞贞 AI 工坊 OpenAI 兼容根路径（须以 /v1 结尾） */
 export const DEFAULT_OPENAI_IMAGE_BASE_URL = "https://ai.t8star.org/v1";
@@ -83,8 +88,14 @@ export async function imagesEditViaGatewayMultipart(args: {
   model: string;
   prompt: string;
   images: { buffer: Buffer; mime: string; filename: string }[];
+  /** gpt-image 等：OpenAI 兼容 size */
   size?: string;
   quality?: string;
+  /** Nano-banana-2(Pro)(Edits)：aspect_ratio */
+  aspectRatio?: ImageAspectRatioOption;
+  /** Nano-banana-2(Pro)(Edits)：image_size */
+  imageSize?: ImageSizeKOption;
+  responseFormat?: "url" | "b64_json";
 }): Promise<string | null> {
   if (args.images.length === 0) {
     throw new Error("图像编辑请求缺少图片。");
@@ -95,12 +106,19 @@ export async function imagesEditViaGatewayMultipart(args: {
     }
   }
 
+  const nanoBanana = imageModelUsesNanoBananaEdits(args.model);
   const root = args.baseURL.replace(/\/$/, "");
   const form = new FormData();
   form.append("model", args.model);
   form.append("prompt", args.prompt);
-  form.append("size", args.size ?? "1024x1024");
-  form.append("quality", args.quality ?? "high");
+  if (nanoBanana) {
+    form.append("response_format", args.responseFormat ?? "url");
+    if (args.aspectRatio) form.append("aspect_ratio", args.aspectRatio);
+    if (args.imageSize) form.append("image_size", args.imageSize);
+  } else {
+    form.append("size", args.size ?? "1024x1024");
+    form.append("quality", args.quality ?? "high");
+  }
   for (const img of args.images) {
     form.append(
       "image",

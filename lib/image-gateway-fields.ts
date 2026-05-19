@@ -1,7 +1,13 @@
 /**
- * 中转站 OpenAI 兼容 `/v1/images/edits` 扩展字段（如 nano-banana-2）。
- * @see 用户提供的 Apifox OpenAPI：aspect_ratio、image_size
+ * 中转站 OpenAI 兼容 `/v1/images/edits` 扩展字段（Nano-banana-2 Pro 等）。
+ * @see Apifox：Nano-banana-2(Pro)(Edits兼容) — aspect_ratio、image_size、response_format
  */
+
+/** Nano-banana-2(Pro)(Edits兼容) 在网关上的 model 字段值 */
+export const NANO_BANANA_2_IMAGE_MODEL = "nano-banana-2";
+
+/** @deprecated 请使用 NANO_BANANA_2_IMAGE_MODEL */
+export const NANO_BANANA_FLASH_IMAGE_MODEL = NANO_BANANA_2_IMAGE_MODEL;
 
 export const IMAGE_ASPECT_RATIO_OPTIONS = [
   "1:1",
@@ -18,9 +24,15 @@ export const IMAGE_ASPECT_RATIO_OPTIONS = [
 
 export type ImageAspectRatioOption = (typeof IMAGE_ASPECT_RATIO_OPTIONS)[number];
 
+/** 仅 nano-banana-2 支持 image_size */
 export const IMAGE_SIZE_K_OPTIONS = ["1K", "2K", "4K"] as const;
 
 export type ImageSizeKOption = (typeof IMAGE_SIZE_K_OPTIONS)[number];
+
+export function imageModelUsesNanoBananaEdits(model: string): boolean {
+  const m = model.trim();
+  return m === NANO_BANANA_2_IMAGE_MODEL || m === "gemini-3.1-flash-image-preview";
+}
 
 /** 前端下拉与 datalist 共用：默认走服务器 OPENAI_IMAGE_MODEL，未设置时回退 gpt-image-2 */
 export const IMAGE_MODEL_PRESET_OPTIONS: {
@@ -34,9 +46,9 @@ export const IMAGE_MODEL_PRESET_OPTIONS: {
     shortLabel: "默认",
   },
   {
-    value: "gemini-3.1-flash-image-preview",
-    label: "gemini-3.1-flash-image-preview（Gemini 出图）",
-    shortLabel: "Gemini Flash",
+    value: NANO_BANANA_2_IMAGE_MODEL,
+    label: "Nano-banana-2 Pro（Edits，nano-banana-2）",
+    shortLabel: "Nano-banana-2",
   },
 ];
 

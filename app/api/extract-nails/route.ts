@@ -47,7 +47,10 @@ import {
   buildFullSoloImageEditPrompt,
   parseSoloImageEditPrompt,
 } from "@/lib/solo-image-edit-prompt";
-import { parseGatewayEditFieldsFromForm } from "@/lib/image-gateway-fields";
+import {
+  parseGatewayEditFieldsFromForm,
+  type ParsedGatewayEditFields,
+} from "@/lib/image-gateway-fields";
 import {
   buildOpenAiImagesEditParams,
   getOpenAiImageApiKey,
@@ -388,21 +391,24 @@ async function editOnce(
   ext: string,
   mime: string,
   prompt: string,
-  imageModel: string,
+  gateway: ParsedGatewayEditFields,
 ): Promise<string | null> {
+  const { model, aspectRatio, imageSize } = gateway;
   if (openAiImagesEditUsesMinimalParams(ctx.baseURL)) {
     return imagesEditViaGatewayMultipart({
       apiKey: ctx.apiKey,
       baseURL: ctx.baseURL,
-      model: imageModel,
+      model,
       prompt,
       images: [{ buffer, mime, filename: `input.${ext}` }],
+      aspectRatio,
+      imageSize,
     });
   }
   const uploadable = await toFile(buffer, `input.${ext}`, { type: mime });
   const res = (await ctx.openai.images.edit(
     buildOpenAiImagesEditParams(ctx.baseURL, {
-      model: imageModel,
+      model,
       image: uploadable,
       prompt,
     }),
@@ -416,7 +422,7 @@ async function editOnceRoute(
   ext: string,
   mime: string,
   prompt: string,
-  imageModel: string,
+  gateway: ParsedGatewayEditFields,
 ): Promise<string | null> {
   if (ctx.provider === "replicate") {
     return runReplicateGptImage2({
@@ -425,7 +431,7 @@ async function editOnceRoute(
       images: [{ buffer, mime, filename: `input.${ext}` }],
     });
   }
-  return editOnce(ctx, buffer, ext, mime, prompt, imageModel);
+  return editOnce(ctx, buffer, ext, mime, prompt, gateway);
 }
 
 /** 第一张：场景（模特或饰品陈列），第二张：美甲产品 */
@@ -436,15 +442,16 @@ async function editDualSceneNails(
   nailsBuffer: Buffer,
   nailsMime: string,
   prompt: string,
-  imageModel: string,
+  gateway: ParsedGatewayEditFields,
 ): Promise<string | null> {
+  const { model, aspectRatio, imageSize } = gateway;
   const sceneExt = extFromMime(sceneMime);
   const nailsExt = extFromMime(nailsMime);
   if (openAiImagesEditUsesMinimalParams(ctx.baseURL)) {
     return imagesEditViaGatewayMultipart({
       apiKey: ctx.apiKey,
       baseURL: ctx.baseURL,
-      model: imageModel,
+      model,
       prompt,
       images: [
         {
@@ -458,6 +465,8 @@ async function editDualSceneNails(
           filename: `nails.${nailsExt}`,
         },
       ],
+      aspectRatio,
+      imageSize,
     });
   }
   const sceneFile = await toFile(sceneBuffer, `scene.${sceneExt}`, {
@@ -468,7 +477,7 @@ async function editDualSceneNails(
   });
   const res = (await ctx.openai.images.edit(
     buildOpenAiImagesEditParams(ctx.baseURL, {
-      model: imageModel,
+      model,
       image: [sceneFile, nailsFile],
       prompt,
     }),
@@ -483,7 +492,7 @@ async function editDualSceneNailsRoute(
   secondBuffer: Buffer,
   secondMime: string,
   prompt: string,
-  imageModel: string,
+  gateway: ParsedGatewayEditFields,
 ): Promise<string | null> {
   if (ctx.provider === "replicate") {
     const firstExt = extFromMime(firstMime);
@@ -504,7 +513,7 @@ async function editDualSceneNailsRoute(
     secondBuffer,
     secondMime,
     prompt,
-    imageModel,
+    gateway,
   );
 }
 
@@ -620,7 +629,7 @@ export async function POST(request: Request) {
       ? buildFullSoloImageEditPrompt(soloImageEditPrompt)
       : withNotes(systemPrompt);
 
-  const { model: editImageModel } = parseGatewayEditFieldsFromForm(
+  const gatewayEdit = parseGatewayEditFieldsFromForm(
     formData,
     getImageModel(),
   );
@@ -673,7 +682,7 @@ export async function POST(request: Request) {
         "png",
         "image/png",
         imageEditPrompt(TEN_SINGLES_COLLAGE_REF_PROMPT),
-        editImageModel,
+        gatewayEdit,
       );
       if (!url) {
         return Response.json(
@@ -733,7 +742,7 @@ export async function POST(request: Request) {
         nailsRes.buffer,
         nailsRes.mime,
         prompt,
-        editImageModel,
+        gatewayEdit,
       );
       if (!url) {
         return Response.json(
@@ -741,6 +750,7 @@ export async function POST(request: Request) {
           { status: 502 },
         );
       }
+
       const displayUrl = await toClientDisplayableImageUrl(url, replAuth);
       return Response.json({
         imageUrls: [displayUrl],
@@ -800,7 +810,7 @@ export async function POST(request: Request) {
               boxRes.buffer,
               boxRes.mime,
               prompt,
-              editImageModel,
+              gatewayEdit,
             ),
         });
       }
@@ -816,7 +826,7 @@ export async function POST(request: Request) {
             boxRes.buffer,
             boxRes.mime,
             prompt,
-            editImageModel,
+            gatewayEdit,
           ),
       });
       if (!outcome.ok) {
@@ -874,7 +884,7 @@ export async function POST(request: Request) {
             nailsRes.buffer,
             nailsRes.mime,
             imageEditPrompt(prompt),
-            editImageModel,
+            gatewayEdit,
           ),
       });
       if (!outcome.ok) {
@@ -939,7 +949,7 @@ export async function POST(request: Request) {
             flatRes.buffer,
             flatRes.mime,
             imageEditPrompt(prompt),
-            editImageModel,
+            gatewayEdit,
           ),
       });
       if (!outcome.ok) {
@@ -1004,7 +1014,7 @@ export async function POST(request: Request) {
             backRes.buffer,
             backRes.mime,
             imageEditPrompt(prompt),
-            editImageModel,
+            gatewayEdit,
           ),
       });
       if (!outcome.ok) {
@@ -1063,7 +1073,7 @@ export async function POST(request: Request) {
         ext,
         mime,
         imageEditPrompt(job.prompt),
-        editImageModel,
+        gatewayEdit,
       );
       if (!singleNailUrl) {
         return Response.json(
@@ -1134,7 +1144,7 @@ export async function POST(request: Request) {
         planALayoutRef.buffer,
         planALayoutRef.mime,
         prompt,
-        editImageModel,
+        gatewayEdit,
       );
     }
     return editOnceRoute(
@@ -1143,7 +1153,7 @@ export async function POST(request: Request) {
       ext,
       mime,
       prompt,
-      editImageModel,
+      gatewayEdit,
     );
   };
 
