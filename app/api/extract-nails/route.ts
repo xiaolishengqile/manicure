@@ -6,6 +6,7 @@ import {
   WHITE_GRID_RECTIFY_API_PREFIX,
   collapseIdenticalPromptJobs,
   composeExtractAngleScatteredEditPrompt,
+  extractAngleScatteredJobUsesPlanALayoutRef,
   buildNailsInBoxPackagingPrompt,
   modeUsesDominantColorExtraction,
   parseGenerationMode,
@@ -23,6 +24,7 @@ import {
   buildWhiteGridLayoutPromptAddendum,
   parseTenSinglesGridLayoutFromFormData,
 } from "@/lib/ten-singles-grid-layout";
+import { loadExtractAngleScatteredPlanALayoutRef } from "@/lib/extract-angle-scattered-plan-a-ref";
 import {
   exifUprightToPng,
   normalizeTenSingleNailForCollageCell,
@@ -1103,6 +1105,48 @@ export async function POST(request: Request) {
         : "";
   const jobs = resolveImageEditJobs(mode, extractGridAddendum);
 
+  let planALayoutRef: { buffer: Buffer; mime: string } | null = null;
+  if (mode === "extract_angle_scattered") {
+    try {
+      planALayoutRef = await loadExtractAngleScatteredPlanALayoutRef();
+    } catch {
+      return Response.json(
+        { error: "内置方案 A 排版参考图缺失，请确认 public/references/ 已部署。" },
+        { status: 500 },
+      );
+    }
+  }
+
+  const editResolvedExtractJob = async (job: {
+    prompt: string;
+    label: string;
+  }) => {
+    const prompt = imageEditPrompt(job.prompt);
+    if (
+      mode === "extract_angle_scattered" &&
+      planALayoutRef &&
+      extractAngleScatteredJobUsesPlanALayoutRef(job.label)
+    ) {
+      return editDualSceneNailsRoute(
+        imageCtx,
+        buffer,
+        mime,
+        planALayoutRef.buffer,
+        planALayoutRef.mime,
+        prompt,
+        editImageModel,
+      );
+    }
+    return editOnceRoute(
+      imageCtx,
+      buffer,
+      ext,
+      mime,
+      prompt,
+      editImageModel,
+    );
+  };
+
   try {
     if (streamResults && jobs.length > 0) {
       return ndjsonStreamParallelImageJobsResponse({
@@ -1110,30 +1154,14 @@ export async function POST(request: Request) {
         replicateDownloadAuth: replAuth,
         minSuccessful: modeAllowsPartialDualVariants(mode) ? 1 : jobs.length,
         mode,
-        edit: async (job) =>
-          editOnceRoute(
-            imageCtx,
-            buffer,
-            ext,
-            mime,
-            imageEditPrompt(job.prompt),
-            editImageModel,
-          ),
+        edit: async (job) => editResolvedExtractJob(job),
       });
     }
     const outcome = await runParallelImageEditJobs({
       jobs,
       replicateDownloadAuth: replAuth,
       minSuccessful: modeAllowsPartialDualVariants(mode) ? 1 : jobs.length,
-      edit: async (job) =>
-        editOnceRoute(
-          imageCtx,
-          buffer,
-          ext,
-          mime,
-          imageEditPrompt(job.prompt),
-          editImageModel,
-        ),
+      edit: async (job) => editResolvedExtractJob(job),
     });
     if (!outcome.ok) {
       return Response.json(

@@ -1374,7 +1374,7 @@ export default function Home() {
 
   const resultHeading =
     mode === "multi_angle"
-      ? "产出（多角度上手 · 固定4张 · 真实棚拍感）"
+      ? "产出（正视上手 · 1张 · 真实棚拍感）"
       : mode === "packaging_mockup"
         ? "产出（包装 + 手握 · 1张）"
         : mode === "flat_to_3d_packaging"
@@ -1392,7 +1392,7 @@ export default function Home() {
                 : mode === "extract_ten_grid"
                   ? "产出（白底栅格 · 仅抠图 · 1张）"
                   : mode === "extract_angle_scattered"
-                    ? "产出（散落实拍 · A 整组倾斜 + B 随机排布 · 2张）"
+                    ? "产出（散落实拍 · A 内置排版参考 + B 随机排布 · 2张）"
                     : mode === "white_grid_rectify"
                     ? "产出（白底栅格 · 几何矫正 · 1张）"
                     : mode === "complete_single_grid"
@@ -1400,7 +1400,7 @@ export default function Home() {
                       : "产出";
 
   const gridClass =
-    mode === "multi_angle" || parallelImageJobCountForMode(mode) > 1
+    parallelImageJobCountForMode(mode) > 1
       ? "grid grid-cols-1 gap-6 md:grid-cols-2"
       : mode === "packaging_mockup"
         ? "grid grid-cols-1"
@@ -1464,7 +1464,7 @@ export default function Home() {
           : "点击选择美甲照片";
   const singleUploadHint =
     mode === "extract_angle_scattered"
-      ? "输入须为**竖直甲片**（常见 2×5）；**A/B 均须恰好 10 枚**、**纯白底**、互不压住；**A** 保留甲型、**整组约 45° 倾斜**、间距均匀；**B** 保留甲型、**随机打散位置与角度**；并行 **2 张**择优"
+      ? "输入须为**竖直甲片**（常见 2×5）；**A/B 均须恰好 10 枚**、**纯白底**、互不压住；**A** 双图（你的产品图 + 内置斜拍参考排版），只学参考的位置与同列共线，**花色仍来自你的产品图**；**B** 随机打散；并行 **2 张**择优"
       : mode === "extract_ten_grid"
         ? "托盘、卡纸、实拍平铺等；只抠图中已出现的甲片，不补全款式；每次生成 **1 张**"
         : mode === "white_grid_rectify"
@@ -1584,7 +1584,7 @@ export default function Home() {
         >
           {loading
             ? mode === "multi_angle"
-              ? "正在依次生成 4 张真实感多角度上手图…"
+              ? "正在生成正视上手主图…"
               : mode === "packaging_mockup"
                 ? "正在生成包装手握图…"
                 : mode === "flat_to_3d_packaging"
@@ -1910,7 +1910,7 @@ export default function Home() {
               <p className="text-xs leading-relaxed text-zinc-600">
                 已并行生成 {filledResultSlotCount} 张，请对比
                 {modeIsVerticalToScatteredFlatLay(mode)
-                  ? "是否恰好 10 枚、底边是否纯白；A 是否明显约 45° 整组倾斜且间距均匀；B 是否 10 枚全部打散、非整齐 2×5"
+                  ? "是否恰好 10 枚、底边是否纯白；A 是否贴近内置参考排版（同列共线、约 45°）且花色来自你的产品图；B 是否 10 枚全部打散、非整齐 2×5"
                   : modeIsPhotoExtractToGrid(mode)
                     ? "抠图保真度与排版"
                     : "甲型保真度与竖直/间距"}
