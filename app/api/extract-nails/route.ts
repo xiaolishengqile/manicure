@@ -53,10 +53,9 @@ import {
 } from "@/lib/image-gateway-fields";
 import {
   buildOpenAiImagesEditParams,
-  getOpenAiImageApiKey,
-  getOpenAiImageBaseUrl,
   imagesEditViaGatewayMultipart,
   openAiImagesEditUsesMinimalParams,
+  resolveOpenAiImageCredentials,
 } from "@/lib/openai-image-gateway";
 import {
   getReplicateApiToken,
@@ -572,8 +571,6 @@ async function systemPromptWithDominantColor(
 export async function POST(request: Request) {
   const useReplicate = imageProviderIsReplicate();
   const replicateToken = getReplicateApiToken();
-  const apiKey = getOpenAiImageApiKey();
-  const openAiBaseURL = getOpenAiImageBaseUrl();
 
   if (useReplicate) {
     if (!replicateToken) {
@@ -585,30 +582,35 @@ export async function POST(request: Request) {
         { status: 500 },
       );
     }
-  } else if (!apiKey) {
-    return Response.json(
-      {
-        error:
-          "服务器未配置 API Key。请在 .env.local 中设置 T8STAR_API_KEY 或 OPENAI_API_KEY（贞贞工坊 https://ai.t8star.org 控制台获取）。",
-      },
-      { status: 500 },
-    );
   }
-
-  const imageCtx: ImageCtx = useReplicate
-    ? { provider: "replicate", token: replicateToken! }
-    : {
-        provider: "openai",
-        openai: new OpenAI({ apiKey: apiKey!, baseURL: openAiBaseURL }),
-        baseURL: openAiBaseURL,
-        apiKey: apiKey!,
-      };
 
   let formData: FormData;
   try {
     formData = await request.formData();
   } catch {
     return Response.json({ error: "无法解析上传内容。" }, { status: 400 });
+  }
+
+  let imageCtx: ImageCtx;
+  if (useReplicate) {
+    imageCtx = { provider: "replicate", token: replicateToken! };
+  } else {
+    const resolved = resolveOpenAiImageCredentials(formData);
+    if ("error" in resolved) {
+      return Response.json(
+        { error: resolved.error },
+        { status: resolved.status },
+      );
+    }
+    imageCtx = {
+      provider: "openai",
+      openai: new OpenAI({
+        apiKey: resolved.apiKey,
+        baseURL: resolved.baseURL,
+      }),
+      baseURL: resolved.baseURL,
+      apiKey: resolved.apiKey,
+    };
   }
 
   const mode: GenerationMode = parseGenerationMode(formData.get("mode"));

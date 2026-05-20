@@ -4,9 +4,55 @@ import {
   type ImageAspectRatioOption,
   type ImageSizeKOption,
 } from "@/lib/image-gateway-fields";
+import {
+  baseUrlForGatewayProvider,
+  DEFAULT_IMAGE_GATEWAY_PROVIDER,
+  isImageGatewayProviderId,
+} from "@/lib/image-gateway-providers";
 
 /** 贞贞 AI 工坊 OpenAI 兼容根路径（须以 /v1 结尾） */
-export const DEFAULT_OPENAI_IMAGE_BASE_URL = "https://ai.t8star.org/v1";
+export const DEFAULT_OPENAI_IMAGE_BASE_URL = baseUrlForGatewayProvider(
+  DEFAULT_IMAGE_GATEWAY_PROVIDER,
+);
+
+export type ResolvedOpenAiImageCredentials = {
+  apiKey: string;
+  baseURL: string;
+};
+
+/** 前台 gatewayApiKey / gatewayProvider，否则回退服务器环境变量 */
+export function resolveOpenAiImageCredentials(
+  formData: FormData,
+): ResolvedOpenAiImageCredentials | { error: string; status: number } {
+  const clientKeyRaw = formData.get("gatewayApiKey");
+  const clientKey =
+    typeof clientKeyRaw === "string" ? clientKeyRaw.trim() : "";
+  const providerRaw = formData.get("gatewayProvider");
+  const provider =
+    typeof providerRaw === "string" ? providerRaw.trim() : "";
+
+  const envKey = getOpenAiImageApiKey();
+  const apiKey = clientKey || envKey;
+  if (!apiKey) {
+    return {
+      error:
+        "未配置 API Key。请在本页「中转站」填写密钥，或在服务器 .env 中设置 T8STAR_API_KEY / OPENAI_API_KEY / LLM_GATEWAY_API_KEY。",
+      status: 400,
+    };
+  }
+
+  if (clientKey) {
+    const baseURL = isImageGatewayProviderId(provider)
+      ? baseUrlForGatewayProvider(provider)
+      : baseUrlForGatewayProvider(DEFAULT_IMAGE_GATEWAY_PROVIDER);
+    return { apiKey, baseURL };
+  }
+
+  return {
+    apiKey,
+    baseURL: getOpenAiImageBaseUrl(),
+  };
+}
 
 export function getOpenAiImageApiKey(): string | undefined {
   return (

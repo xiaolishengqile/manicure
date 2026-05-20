@@ -24,6 +24,10 @@ import {
   type PanelColorSource,
 } from "@/lib/panel-color";
 import {
+  buildResultDownloadFilename,
+  formatDownloadBatchStamp,
+} from "@/lib/download-filename";
+import {
   extFromContentType,
   extFromDataUrl,
   resultImageUrlToBlob,
@@ -96,6 +100,10 @@ import {
   DEFAULT_SOLO_IMAGE_PROMPT_PRESETS,
   DEFAULT_USER_PROMPT_PRESETS,
 } from "@/lib/prompt-presets-defaults";
+import {
+  GatewaySettings,
+  useGatewaySettingsFromStorage,
+} from "@/components/gateway-settings";
 import { SiteAccessLogout } from "@/components/site-access-logout";
 
 const LS_LAST_USER_NOTES = "manicure_last_user_extra_notes";
@@ -370,6 +378,13 @@ export default function Home() {
     number | null
   >(null);
 
+  const {
+    provider: gatewayProvider,
+    apiKey: gatewayApiKey,
+    setProvider: setGatewayProvider,
+    setApiKey: setGatewayApiKey,
+  } = useGatewaySettingsFromStorage();
+
   useEffect(() => {
     try {
       const t = localStorage.getItem(LS_LAST_USER_NOTES);
@@ -580,6 +595,8 @@ export default function Home() {
   const resultObjectUrlsRef = useRef<string[]>([]);
   /** 与 resultUrls 下标对齐：中转站原始 data/https，供下载/复制（展示可能是 blob:） */
   const resultExportUrlsRef = useRef<string[]>([]);
+  /** 每次点击生成时刷新，写入下载文件名以区分不同批次 */
+  const downloadBatchStampRef = useRef(formatDownloadBatchStamp());
 
   const revokeResultObjectUrls = useCallback(() => {
     for (const u of resultObjectUrlsRef.current) {
@@ -655,6 +672,7 @@ export default function Home() {
       displayUrl: string,
       index: number,
       exportUrlOverride?: string,
+      labelOverride?: string,
     ) => {
       const exportUrl = exportUrlOverride ?? resolveExportUrl(displayUrl, index);
       setDownloadBusyIndex(index);
@@ -667,9 +685,16 @@ export default function Home() {
           const blob = await resultImageUrlToBlob(exportUrl);
           ext = extFromContentType(blob.type);
         }
+        const label =
+          labelOverride ?? resultLabels[index] ?? `图 ${index + 1}`;
         await triggerDownloadFromResultUrl(
           exportUrl,
-          `美甲生成_${index + 1}.${ext}`,
+          buildResultDownloadFilename({
+            batchStamp: downloadBatchStampRef.current,
+            label,
+            index,
+            ext,
+          }),
           fetchRemoteResultBlob,
         );
       } catch (e) {
@@ -678,7 +703,7 @@ export default function Home() {
         setDownloadBusyIndex(null);
       }
     },
-    [fetchRemoteResultBlob, resolveExportUrl],
+    [fetchRemoteResultBlob, resolveExportUrl, resultLabels],
   );
 
   const copyResultToClipboard = useCallback(
@@ -732,9 +757,20 @@ export default function Home() {
           : mime.includes("jpeg") || mime.includes("jpg")
             ? "jpg"
             : "png";
-        const newFile = new File([blob], `投喂图_${index + 1}.${ext}`, {
-          type: mime.startsWith("image/") ? mime : "image/png",
-        });
+        const feedLabel = resultLabels[index] ?? `图 ${index + 1}`;
+        const newFile = new File(
+          [blob],
+          buildResultDownloadFilename({
+            batchStamp: downloadBatchStampRef.current,
+            label: feedLabel,
+            index,
+            ext,
+            prefix: "投喂图",
+          }),
+          {
+            type: mime.startsWith("image/") ? mime : "image/png",
+          },
+        );
         setPreviewUrl((prev) => {
           if (prev) URL.revokeObjectURL(prev);
           return URL.createObjectURL(newFile);
@@ -1018,6 +1054,7 @@ export default function Home() {
     setLoading(true);
     setError(null);
     clearResults();
+    downloadBatchStampRef.current = formatDownloadBatchStamp();
     try {
       const body = new FormData();
       body.set("mode", mode);
@@ -1084,6 +1121,10 @@ export default function Home() {
       }
       body.set("userExtraNotes", userExtraNotes);
       body.set("soloImageEditPrompt", soloImageEditPrompt);
+      body.set("gatewayProvider", gatewayProvider);
+      if (gatewayApiKey.trim()) {
+        body.set("gatewayApiKey", gatewayApiKey.trim());
+      }
       const jobStreamN = parallelStreamJobCount(mode);
       if (jobStreamN > 0) {
         body.set("streamResults", "1");
@@ -1233,6 +1274,8 @@ export default function Home() {
     colGutterSumPct,
     rowGutterPctDraft,
     prepareResultUrlForDisplay,
+    gatewayProvider,
+    gatewayApiKey,
   ]);
 
   const clearUserNotes = useCallback(() => {
@@ -1569,6 +1612,13 @@ export default function Home() {
           accept="image/*"
           className="hidden"
           onChange={onTenSlotFileChange}
+        />
+
+        <GatewaySettings
+          provider={gatewayProvider}
+          apiKey={gatewayApiKey}
+          onProviderChange={setGatewayProvider}
+          onApiKeyChange={setGatewayApiKey}
         />
 
         <div className="flex flex-col gap-2 rounded-xl border border-zinc-200 bg-white px-4 py-3 shadow-sm">
@@ -1956,7 +2006,12 @@ export default function Home() {
                           }
                           onClick={() => {
                             if (!slot) return;
-                            void downloadResult(slot.url, i, slot.exportUrl);
+                            void downloadResult(
+                              slot.url,
+                              i,
+                              slot.exportUrl,
+                              slot.label,
+                            );
                           }}
                           className="inline-flex h-9 min-w-[5.5rem] items-center justify-center rounded-lg border border-zinc-300 bg-white px-3 text-sm font-medium text-zinc-800 shadow-sm transition hover:border-rose-400 hover:bg-rose-50 hover:text-rose-900 disabled:cursor-not-allowed disabled:opacity-50"
                         >
