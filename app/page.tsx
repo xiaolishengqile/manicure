@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { GenerationModePicker } from "@/components/generation-mode-picker";
 import { ImageModelSelect } from "@/components/image-model-select";
+import { NailShapeProfilePicker } from "@/components/nail-shape-profile-picker";
 import { PanelColorPicker } from "@/components/panel-color-picker";
 import {
   getDualUploadKind,
@@ -17,6 +18,11 @@ import {
   type GenerationMode,
   type NailsInBoxArrangement,
 } from "@/lib/generation-modes";
+import {
+  DEFAULT_NAIL_SHAPE_PROFILE,
+  parseNailShapeProfile,
+  type NailShapeProfileId,
+} from "@/lib/nail-shape-profiles";
 import { extractDominantColorFromImageUrl } from "@/lib/panel-color-client";
 import {
   DEFAULT_PANEL_COLOR_HEX,
@@ -115,6 +121,7 @@ import { SiteAccessLogout } from "@/components/site-access-logout";
 const LS_LAST_USER_NOTES = "manicure_last_user_extra_notes";
 const LS_PROMPT_PRESETS = "manicure_user_prompt_presets";
 const LS_SOLO_PROMPT_PRESETS = "manicure_solo_image_prompt_presets";
+const LS_NAIL_SHAPE_PROFILE = "manicure_model_tryon_nail_shape_profile";
 const MAX_PRESETS = 40;
 const MAX_PRESET_LINE_CHARS = 200;
 
@@ -317,6 +324,8 @@ export default function Home() {
   const [imageModelChoice, setImageModelChoice] = useState("");
   const [nailBoxArrangement, setNailBoxArrangement] =
     useState<NailsInBoxArrangement>("vertical");
+  const [nailShapeProfile, setNailShapeProfile] =
+    useState<NailShapeProfileId>(DEFAULT_NAIL_SHAPE_PROFILE);
   /** 文本草稿：可删光再输入，提交时再解析成数字 */
   const [colWidthDrafts, setColWidthDrafts] = useState<string[]>(() => [
     ...DEFAULT_COL_WIDTH_DRAFTS,
@@ -407,6 +416,23 @@ export default function Home() {
       /* private mode */
     }
   }, []);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(LS_NAIL_SHAPE_PROFILE);
+      if (raw) setNailShapeProfile(parseNailShapeProfile(raw));
+    } catch {
+      /* private mode */
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(LS_NAIL_SHAPE_PROFILE, nailShapeProfile);
+    } catch {
+      /* private mode */
+    }
+  }, [nailShapeProfile]);
 
   useEffect(() => {
     try {
@@ -1163,6 +1189,7 @@ export default function Home() {
         body.set("image", file!);
         if (dualKind === "model" && secondFile) {
           body.set("modelImage", secondFile);
+          body.set("nailShapeProfile", nailShapeProfile);
         }
         if (dualKind === "accessory" && secondFile) {
           body.set("accessoryImage", secondFile);
@@ -1360,6 +1387,7 @@ export default function Home() {
     userExtraNotes,
     soloImageEditPrompt,
     nailBoxArrangement,
+    nailShapeProfile,
     colWidthDrafts,
     marginPctDraft,
     colGutterSumPct,
@@ -1757,6 +1785,13 @@ export default function Home() {
           <p className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
             {error}
           </p>
+        ) : null}
+
+        {mode === "model_tryon" ? (
+          <NailShapeProfilePicker
+            value={nailShapeProfile}
+            onChange={setNailShapeProfile}
+          />
         ) : null}
 
         <section className="flex flex-col gap-6 rounded-2xl border border-zinc-200 bg-white p-8 shadow-sm">

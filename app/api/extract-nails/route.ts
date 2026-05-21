@@ -1,7 +1,7 @@
 import OpenAI, { toFile } from "openai";
 import {
   ACCESSORY_TRYON_PROMPT,
-  MODEL_TRYON_PROMPT,
+  buildModelTryonPrompt,
   TEN_SINGLES_COLLAGE_REF_PROMPT,
   WHITE_GRID_RECTIFY_API_PREFIX,
   collapseIdenticalPromptJobs,
@@ -43,6 +43,7 @@ import {
   appendUserRefinementToPrompt,
   parseUserExtraNotes,
 } from "@/lib/extra-user-notes";
+import { parseNailShapeProfile } from "@/lib/nail-shape-profiles";
 import {
   buildFullSoloImageEditPrompt,
   parseSoloImageEditPrompt,
@@ -730,8 +731,14 @@ export async function POST(request: Request) {
       return Response.json({ error: sceneRes.error }, { status: 400 });
     }
 
+    const nailShapeProfile =
+      mode === "model_tryon"
+        ? parseNailShapeProfile(formData.get("nailShapeProfile"))
+        : null;
     const prompt = imageEditPrompt(
-      mode === "model_tryon" ? MODEL_TRYON_PROMPT : ACCESSORY_TRYON_PROMPT,
+      mode === "model_tryon"
+        ? buildModelTryonPrompt(nailShapeProfile!)
+        : ACCESSORY_TRYON_PROMPT,
     );
     const label =
       mode === "model_tryon" ? "试戴效果图" : "手模饰品试戴图";

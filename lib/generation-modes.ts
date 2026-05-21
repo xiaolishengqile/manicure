@@ -1,3 +1,8 @@
+import {
+  buildTryonNailShapePromptBlock,
+  type NailShapeProfileId,
+} from "@/lib/nail-shape-profiles";
+
 export type GenerationMode =
   | "extract_ten_grid"
   | "extract_angle_scattered"
@@ -109,7 +114,7 @@ export const GENERATION_MODE_OPTIONS: {
     shortLabel: "模特试戴",
     whenToUse: "产品图 + 模特图，换指甲款式",
     description:
-      "需同时上传「美甲产品图」与「模特图」。**美甲产品图约定：**每枚甲片**甲尖朝下**、每行**从左到右 = 大拇指 → 小指**；合成须**五指全覆盖**、**清除模特原甲**（勿叠影/漏指），**甲根朝指根、甲尖朝指尖**（浅尖/深尖均须在真实指尖），逐格还原款式。模特图建议素甲或浅甲；尽量保持姿态、肤色、光线与背景不变。",
+      "需同时上传「美甲产品图」与「模特图」。可选**上手甲型**（杏仁、短杏仁、短/中椭圆、新短方、中方等）约束轮廓；花色仍以产品图为准。**美甲产品图约定：**每枚甲片**甲尖朝下**、每行**从左到右 = 大拇指 → 小指**；合成须**五指全覆盖**、**清除模特原甲**（勿叠影/漏指），**甲根朝指根、甲尖朝指尖**，逐格还原款式。模特图建议素甲或浅甲；尽量保持姿态、肤色、光线与背景不变。",
   },
   {
     value: "accessory_tryon",
@@ -476,7 +481,7 @@ export const TRYON_NAIL_FULL_REPLACEMENT_EN = `TRY-ON COVERAGE — FULL REPLACE 
 - **One coherent design per hand:** if every product slot shares the same art, **every** finger wears that same art (perspective-adjusted). If slots differ, each finger wears **only** its mapped slot — never mix leftover FIRST-image nail art on any finger.
 - **Natural composite:** after full replacement, align cuticles believably and match scene lighting on the nail surface — but **never** keep FIRST-image nail motifs as a shortcut.`;
 
-export const MODEL_TRYON_PROMPT = `You receive TWO input images in this order:
+export const MODEL_TRYON_PROMPT_BASE = `You receive TWO input images in this order:
 1) FIRST image: the MODEL photograph — a person with **hands visible**, which may show **bare nails, natural nails, existing polish, or press-ons** that must be **fully replaced** (not preserved or blended). Keep pose, lighting, skin tone, clothing, jewelry, and background from this image.
 2) SECOND image: the NAIL PRODUCT reference — press-on / stick-on nails shown flat, on a card, or as a product shot, displaying the exact nail art (colors, patterns, 3D chrome, decals, shape) to apply.
 
@@ -495,6 +500,18 @@ TASK — photorealistic virtual try-on (image editing):
 ${NAIL_ON_HAND_SHEET_TO_FINGER_ORDER_EN}
 
 Output a single full-frame photorealistic image with the same composition and crop as the FIRST (model) image.`;
+
+/** 模特试戴完整提示词（含可选甲型轮廓约束） */
+export function buildModelTryonPrompt(
+  nailShapeProfile: NailShapeProfileId,
+): string {
+  const shapeBlock = buildTryonNailShapePromptBlock(nailShapeProfile);
+  if (!shapeBlock) return MODEL_TRYON_PROMPT_BASE;
+  return `${MODEL_TRYON_PROMPT_BASE}\n\n${shapeBlock}`;
+}
+
+/** @deprecated 请使用 buildModelTryonPrompt */
+export const MODEL_TRYON_PROMPT = MODEL_TRYON_PROMPT_BASE;
 
 export const ACCESSORY_TRYON_PROMPT = `You receive TWO input images in this order:
 1) FIRST image: ACCESSORY / jewelry PRODUCT references — typically rings (or bracelets) shown on a finger, on white, or as clean packshot crops. One image may contain MULTIPLE distinct pieces (e.g. two different gold rings on different fingers). It may also show a **hand holding packaging, a card, or a retail box** — treat that as valid context, not something to discard.
