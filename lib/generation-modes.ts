@@ -648,10 +648,10 @@ SHARED RULES (Variant A and B):
 
 /** 发往 API：中文硬性摘要置首（贞贞等中转站权重更高） */
 export const EXTRACT_ANGLE_SCATTERED_UNIFORM_TILT_API_PREFIX =
-  `【方案A·双图】图1=用户竖直2×5产品（只取10枚花色甲型）；图2=内置斜拍排版参考（只学位置/角度/同列共线，禁止抄图2款式）；上1与下6、上2与下7…各对须在同一条斜线上；每枚约45°且彼此平行；间距参照图2；纯白底；10枚全保留；禁止重叠。\n\n`;
+  `【方案A·双图】图1=用户竖直2×5产品（只取10枚花色甲型）；图2=内置斜拍排版参考（只学位置/角度/列对齐，禁止抄图2款式）；上1与下6、上2与下7…上5与下10五对必须像图2一样各自落在同一条斜直线上（禁止上下错位、禁止列不共线）；每枚倾斜角与图2一致且彼此平行；间距与整组斜向角度严格参照图2；纯白底；10枚全保留；禁止重叠。\n\n`;
 
 export const EXTRACT_ANGLE_SCATTERED_SCATTERED_API_PREFIX =
-  `【方案B】保留每枚甲型；10枚全部抠出；在白底上随机打散位置、每枚随机角度（禁止仍排成整齐2×5）；纯白底；禁止漏枚；禁止重叠。\n\n`;
+  `【方案B·硬性】输出必须且只能10枚美甲（与源图10格一一对应，禁止8/9枚或合并省略）；保留每枚甲型；全部抠出后在白底随机打散、每枚角度各异（禁止仍排成整齐2×5）；纯白底；禁止漏枚、禁止重叠、禁止用重复设计凑数。\n\n`;
 
 /** 方案 A 走双图：用户产品 + 内置排版参考 */
 export function extractAngleScatteredJobUsesPlanALayoutRef(label: string): boolean {
@@ -701,20 +701,25 @@ OUTPUT: One square photorealistic packshot. **No** text, watermarks, or UI. **No
 
 Return a single square product-ready image.`;
 
-/** 方案 B：保留甲型 + 随机排布 */
+/** 方案 B：保留甲型 + 随机排布（硬性 10 枚） */
 const EXTRACT_ANGLE_SCATTERED_SCATTERED_PROMPT = `${EXTRACT_ANGLE_SCATTERED_BASE_EN}
-VARIANT B — **RANDOM LAYOUT** (same 10 nails, **shuffled** on white):
+VARIANT B — **RANDOM LAYOUT** (**exactly 10** nails, **shuffled** on white):
+
+**COUNT LOCK (highest priority):**
+- When the input has **10** occupied slots, the output **must contain exactly 10** separate nail cutouts — **not 8, not 9, not 11**.
+- **One nail per source slot (1–10)** — map slot **N** in the output to slot **N** in the input; **no** dropping slots to “clean up” the frame.
+- **Count before finish:** mentally verify **10** distinct nails; if fewer, **add back** missing slots from the input — **never** ship an incomplete set.
 
 WHAT TO DO:
-- Cut out all **10** nails from the input. **Do not change** their shapes.
+- Cut out **all 10** nails from the input. **Do not change** their shapes, colours, or art.
 - **Shuffle** on white: **random X/Y positions** + **different rotation on each nail**.
-- Same 10 designs as the feed image — **only layout changes**.
+- Same **10** designs as the feed image — **only layout changes**.
 - Background **#FFFFFF**.
 
 LAYOUT:
 - **Scattered** — break the 2×5 grid completely. No neat rows or columns.
-- **All 10** must appear — **not 8, not 9**.
-- One instance per source slot; **no** invented designs.
+- **All 10** must be **fully visible** — **not 8, not 9**.
+- One instance per source slot; **no** invented designs; **no** duplicating one design to fake extra nails.
 
 ROTATION:
 - **Each nail its own angle** — angles should **vary** nail to nail.
@@ -724,11 +729,12 @@ SPACING:
 - Casual, uneven gaps are OK. **No overlap**, no stacking.
 
 FORBIDDEN FOR VARIANT B:
-- Omitting nails to simplify the picture.
+- Omitting, merging, or hiding nails to simplify the picture.
 - Keeping an upright or evenly tilted 2×5 grid.
-- Fewer than 10 nails when source has 10.
+- Fewer than **10** nails when source has **10**.
+- Replacing missing slots with blank space or background-only areas.
 
-OUTPUT: One square photorealistic packshot. No text.
+OUTPUT: One square photorealistic packshot with **exactly 10** nails. No text.
 
 Return a single square product-ready image.`;
 
