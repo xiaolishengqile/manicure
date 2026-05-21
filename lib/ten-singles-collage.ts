@@ -46,13 +46,15 @@ async function pngMeta(buf: Buffer): Promise<{ w: number; h: number }> {
   return { w: m.width ?? 1, h: m.height ?? 1 };
 }
 
-/** 格内甲片宽/高缩放（锁定纵横比时由界面保证两值同比例） */
+/** 格内甲片宽/高缩放（按列；锁定纵横比时由界面保证该列两值同比例） */
 async function applyNailScaleToInner(
   inner: Buffer,
   layout: TenSinglesGridLayout,
+  colIndex: number,
 ): Promise<Buffer> {
-  const wScale = layout.nailWidthScale;
-  const hScale = layout.nailHeightScale;
+  const c = colIndex % 5;
+  const wScale = layout.nailColWidthScale[c] ?? 1;
+  const hScale = layout.nailColHeightScale[c] ?? 1;
   if (
     Math.abs(wScale - 1) < 1e-6 &&
     Math.abs(hScale - 1) < 1e-6
@@ -211,6 +213,7 @@ export async function buildTenSinglesCollageReference(
         .png()
         .toBuffer(),
       layout,
+      c,
     );
     rowInners[r]!.push(inner);
   }
@@ -294,6 +297,7 @@ export async function buildScaledSingleNailGrid(
           .png()
           .toBuffer(),
         layout,
+        c,
       );
       rowInners[r]!.push(inner);
     }

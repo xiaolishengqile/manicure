@@ -43,12 +43,13 @@ import {
 import {
   COL_GUTTER_SUM_INNER_WIDTH_PCT_MAX,
   COL_GUTTER_SUM_QUICK_PRESET_PCTS,
-  DEFAULT_NAIL_SCALE_PCT,
+  DEFAULT_NAIL_SCALE_PCT_DRAFTS,
   DEFAULT_TEN_SINGLES_GRID_LAYOUT,
   nailScaleFromPctDraft,
   nailScalePctDraftAfterBlur,
   NAIL_SCALE_PCT_MAX,
   NAIL_SCALE_PCT_MIN,
+  serializeNailColScalePctDrafts,
 } from "@/lib/ten-singles-grid-layout";
 
 function clampColGutterSumPct(n: number): number {
@@ -323,14 +324,14 @@ export default function Home() {
   const [marginPctDraft, setMarginPctDraft] = useState("1.8");
   const [colGutterSumPct, setColGutterSumPct] = useState(0);
   const [rowGutterPctDraft, setRowGutterPctDraft] = useState("0");
-  const [nailWidthPctDraft, setNailWidthPctDraft] = useState(
-    String(DEFAULT_NAIL_SCALE_PCT),
-  );
-  const [nailHeightPctDraft, setNailHeightPctDraft] = useState(
-    String(DEFAULT_NAIL_SCALE_PCT),
-  );
+  const [nailWidthPctDrafts, setNailWidthPctDrafts] = useState<string[]>(() => [
+    ...DEFAULT_NAIL_SCALE_PCT_DRAFTS,
+  ]);
+  const [nailHeightPctDrafts, setNailHeightPctDrafts] = useState<string[]>(() => [
+    ...DEFAULT_NAIL_SCALE_PCT_DRAFTS,
+  ]);
   const [lockNailAspectRatio, setLockNailAspectRatio] = useState(true);
-  const nailAspectLockRatioRef = useRef(1);
+  const nailAspectLockRatioRef = useRef<number[]>([1, 1, 1, 1, 1]);
   const [gridPresets, setGridPresets] = useState<GridLayoutPreset[]>([]);
   const [gridPresetSelectedIndex, setGridPresetSelectedIndex] = useState<
     number | null
@@ -540,16 +541,17 @@ export default function Home() {
         );
       }
       setRowGutterPctDraft(p.rowGutterPctDraft);
-      setNailWidthPctDraft(p.nailWidthPctDraft ?? String(DEFAULT_NAIL_SCALE_PCT));
-      setNailHeightPctDraft(
-        p.nailHeightPctDraft ?? String(DEFAULT_NAIL_SCALE_PCT),
-      );
+      const wDrafts = p.nailWidthPctDrafts ?? [...DEFAULT_NAIL_SCALE_PCT_DRAFTS];
+      const hDrafts = p.nailHeightPctDrafts ?? [...DEFAULT_NAIL_SCALE_PCT_DRAFTS];
+      setNailWidthPctDrafts([...wDrafts]);
+      setNailHeightPctDrafts([...hDrafts]);
       const locked = p.lockNailAspectRatio ?? true;
       setLockNailAspectRatio(locked);
       if (locked) {
-        nailAspectLockRatioRef.current =
-          nailScaleFromPctDraft(p.nailHeightPctDraft ?? "") /
-          Math.max(1e-6, nailScaleFromPctDraft(p.nailWidthPctDraft ?? ""));
+        nailAspectLockRatioRef.current = wDrafts.map((w, i) =>
+          nailScaleFromPctDraft(hDrafts[i] ?? "") /
+          Math.max(1e-6, nailScaleFromPctDraft(w)),
+        );
       }
       setGridPresetSelectedIndex(index);
       setGridPresetNotice(null);
@@ -575,8 +577,8 @@ export default function Home() {
       marginPctDraft,
       colGutterSumPctDraft: String(colGutterSumPct),
       rowGutterPctDraft,
-      nailWidthPctDraft,
-      nailHeightPctDraft,
+      nailWidthPctDrafts: [...nailWidthPctDrafts],
+      nailHeightPctDrafts: [...nailHeightPctDrafts],
       lockNailAspectRatio,
     };
     const sel = gridPresetSelectedIndex;
@@ -615,36 +617,55 @@ export default function Home() {
     marginPctDraft,
     colGutterSumPct,
     rowGutterPctDraft,
-    nailWidthPctDraft,
-    nailHeightPctDraft,
+    nailWidthPctDrafts,
+    nailHeightPctDrafts,
     lockNailAspectRatio,
     gridPresetSelectedIndex,
     gridPresets.length,
   ]);
 
-  const syncNailHeightFromWidth = useCallback((widthDraft: string) => {
-    const w = nailScaleFromPctDraft(widthDraft);
-    const hPct = Math.round(
-      w * nailAspectLockRatioRef.current * 100,
-    );
-    const clamped = Math.min(
-      NAIL_SCALE_PCT_MAX,
-      Math.max(NAIL_SCALE_PCT_MIN, hPct),
-    );
-    setNailHeightPctDraft(String(clamped));
-  }, []);
+  const syncNailHeightFromWidthAt = useCallback(
+    (colIndex: number, widthDraft: string) => {
+      const w = nailScaleFromPctDraft(widthDraft);
+      const ratio = nailAspectLockRatioRef.current[colIndex] ?? 1;
+      const hPct = Math.round(w * ratio * 100);
+      const clamped = Math.min(
+        NAIL_SCALE_PCT_MAX,
+        Math.max(NAIL_SCALE_PCT_MIN, hPct),
+      );
+      setNailHeightPctDrafts((prev) => {
+        const next = [...prev];
+        next[colIndex] = String(clamped);
+        return next;
+      });
+    },
+    [],
+  );
 
-  const syncNailWidthFromHeight = useCallback((heightDraft: string) => {
-    const h = nailScaleFromPctDraft(heightDraft);
-    const wPct = Math.round(
-      h / Math.max(1e-6, nailAspectLockRatioRef.current) * 100,
+  const syncNailWidthFromHeightAt = useCallback(
+    (colIndex: number, heightDraft: string) => {
+      const h = nailScaleFromPctDraft(heightDraft);
+      const ratio = nailAspectLockRatioRef.current[colIndex] ?? 1;
+      const wPct = Math.round(h / Math.max(1e-6, ratio) * 100);
+      const clamped = Math.min(
+        NAIL_SCALE_PCT_MAX,
+        Math.max(NAIL_SCALE_PCT_MIN, wPct),
+      );
+      setNailWidthPctDrafts((prev) => {
+        const next = [...prev];
+        next[colIndex] = String(clamped);
+        return next;
+      });
+    },
+    [],
+  );
+
+  const refreshNailAspectLockRatios = useCallback(() => {
+    nailAspectLockRatioRef.current = nailWidthPctDrafts.map((w, i) =>
+      nailScaleFromPctDraft(nailHeightPctDrafts[i] ?? "") /
+      Math.max(1e-6, nailScaleFromPctDraft(w)),
     );
-    const clamped = Math.min(
-      NAIL_SCALE_PCT_MAX,
-      Math.max(NAIL_SCALE_PCT_MIN, wPct),
-    );
-    setNailWidthPctDraft(String(clamped));
-  }, []);
+  }, [nailWidthPctDrafts, nailHeightPctDrafts]);
 
   const resultObjectUrlsRef = useRef<string[]>([]);
   /** 与 resultUrls 下标对齐：中转站原始 data/https，供下载/复制（展示可能是 blob:） */
@@ -1131,12 +1152,12 @@ export default function Home() {
           String(parsePctInput(rowGutterPctDraft, 0, 12, 0)),
         );
         body.set(
-          "nailGridNailWidthPct",
-          String(Math.round(nailScaleFromPctDraft(nailWidthPctDraft) * 100)),
+          "nailGridNailColWidthsPct",
+          serializeNailColScalePctDrafts(nailWidthPctDrafts),
         );
         body.set(
-          "nailGridNailHeightPct",
-          String(Math.round(nailScaleFromPctDraft(nailHeightPctDraft) * 100)),
+          "nailGridNailColHeightsPct",
+          serializeNailColScalePctDrafts(nailHeightPctDrafts),
         );
       } else {
         body.set("image", file!);
@@ -1171,12 +1192,12 @@ export default function Home() {
             String(parsePctInput(rowGutterPctDraft, 0, 12, 0)),
           );
           body.set(
-            "nailGridNailWidthPct",
-            String(Math.round(nailScaleFromPctDraft(nailWidthPctDraft) * 100)),
+            "nailGridNailColWidthsPct",
+            serializeNailColScalePctDrafts(nailWidthPctDrafts),
           );
           body.set(
-            "nailGridNailHeightPct",
-            String(Math.round(nailScaleFromPctDraft(nailHeightPctDraft) * 100)),
+            "nailGridNailColHeightsPct",
+            serializeNailColScalePctDrafts(nailHeightPctDrafts),
           );
         }
       }
@@ -1343,8 +1364,8 @@ export default function Home() {
     marginPctDraft,
     colGutterSumPct,
     rowGutterPctDraft,
-    nailWidthPctDraft,
-    nailHeightPctDraft,
+    nailWidthPctDrafts,
+    nailHeightPctDrafts,
     prepareResultUrlForDisplay,
     gatewayProvider,
     gatewayApiKey,
@@ -2482,74 +2503,14 @@ export default function Home() {
                   </p>
                 </div>
                 <div className="min-w-0 space-y-3 border-t border-rose-100/80 pt-3">
-                  <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end">
-                    <div className="flex min-w-0 flex-1 flex-col gap-2 sm:max-w-xs">
-                      <label className="flex flex-col gap-1 text-xs text-zinc-700">
-                        <span className="inline-flex items-center gap-1.5 font-medium text-zinc-800">
-                          <span className="text-[10px] text-zinc-500" aria-hidden>
-                            ↕
-                          </span>
-                          高度（%）
-                        </span>
-                        <input
-                          type="text"
-                          inputMode="decimal"
-                          autoComplete="off"
-                          spellCheck={false}
-                          value={nailHeightPctDraft}
-                          onChange={(e) => {
-                            const t = e.target.value;
-                            setNailHeightPctDraft(t);
-                            if (lockNailAspectRatio) {
-                              syncNailWidthFromHeight(t);
-                            }
-                          }}
-                          onBlur={() => {
-                            const blurred = nailScalePctDraftAfterBlur(
-                              nailHeightPctDraft,
-                            );
-                            setNailHeightPctDraft(blurred);
-                            if (lockNailAspectRatio) {
-                              syncNailWidthFromHeight(blurred);
-                            }
-                          }}
-                          className="w-full rounded border border-zinc-300 bg-white px-2 py-1.5 text-sm tabular-nums outline-none ring-rose-500 focus:border-rose-500 focus:ring-1"
-                        />
-                      </label>
-                      <label className="flex flex-col gap-1 text-xs text-zinc-700">
-                        <span className="inline-flex items-center gap-1.5 font-medium text-zinc-800">
-                          <span className="text-[10px] text-zinc-500" aria-hidden>
-                            ↔
-                          </span>
-                          宽度（%）
-                        </span>
-                        <input
-                          type="text"
-                          inputMode="decimal"
-                          autoComplete="off"
-                          spellCheck={false}
-                          value={nailWidthPctDraft}
-                          onChange={(e) => {
-                            const t = e.target.value;
-                            setNailWidthPctDraft(t);
-                            if (lockNailAspectRatio) {
-                              syncNailHeightFromWidth(t);
-                            }
-                          }}
-                          onBlur={() => {
-                            const blurred = nailScalePctDraftAfterBlur(
-                              nailWidthPctDraft,
-                            );
-                            setNailWidthPctDraft(blurred);
-                            if (lockNailAspectRatio) {
-                              syncNailHeightFromWidth(blurred);
-                            }
-                          }}
-                          className="w-full rounded border border-zinc-300 bg-white px-2 py-1.5 text-sm tabular-nums outline-none ring-rose-500 focus:border-rose-500 focus:ring-1"
-                        />
-                      </label>
-                    </div>
-                    <div className="flex shrink-0 flex-col gap-2 pb-0.5 sm:pb-1">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+                    <p className="text-[11px] leading-snug text-zinc-500">
+                      五列相对宽度 + 每列格内甲片高/宽（%），100% 为默认。
+                      {mode === "white_grid_rectify"
+                        ? " 几何矫正由模型排版，格内高宽不生效。"
+                        : " 锁定纵横比时，改该列宽会联动该列高。"}
+                    </p>
+                    <div className="flex shrink-0 flex-wrap items-center gap-3">
                       <label className="flex cursor-pointer items-center gap-2 text-xs text-zinc-800">
                         <input
                           type="checkbox"
@@ -2557,15 +2518,7 @@ export default function Home() {
                           onChange={(e) => {
                             const on = e.target.checked;
                             setLockNailAspectRatio(on);
-                            if (on) {
-                              nailAspectLockRatioRef.current =
-                                nailScaleFromPctDraft(nailHeightPctDraft) /
-                                Math.max(
-                                  1e-6,
-                                  nailScaleFromPctDraft(nailWidthPctDraft),
-                                );
-                              syncNailHeightFromWidth(nailWidthPctDraft);
-                            }
+                            if (on) refreshNailAspectLockRatios();
                           }}
                           className="size-4 rounded border-zinc-300 text-rose-600 focus:ring-rose-500"
                         />
@@ -2574,53 +2527,128 @@ export default function Home() {
                       <button
                         type="button"
                         onClick={() => {
-                          setNailWidthPctDraft(String(DEFAULT_NAIL_SCALE_PCT));
-                          setNailHeightPctDraft(String(DEFAULT_NAIL_SCALE_PCT));
-                          nailAspectLockRatioRef.current = 1;
+                          setNailWidthPctDrafts([...DEFAULT_NAIL_SCALE_PCT_DRAFTS]);
+                          setNailHeightPctDrafts([...DEFAULT_NAIL_SCALE_PCT_DRAFTS]);
+                          nailAspectLockRatioRef.current = [1, 1, 1, 1, 1];
                         }}
-                        className="text-left text-xs font-medium text-rose-700 underline decoration-rose-300 underline-offset-2 hover:text-rose-900"
+                        className="text-xs font-medium text-rose-700 underline decoration-rose-300 underline-offset-2 hover:text-rose-900"
                       >
-                        重设大小
+                        重设各列大小
                       </button>
-                      <p className="max-w-[14rem] text-[11px] leading-snug text-zinc-500">
-                        相对拟合进格后的甲片尺寸，100% 为默认。锁定后改宽会联动高；取消锁定可单独拉宽或拉高。
-                        {mode === "white_grid_rectify"
-                          ? " 几何矫正模式由模型排版，此项不生效。"
-                          : null}
-                      </p>
                     </div>
                   </div>
                   <div className="grid grid-cols-2 gap-2 sm:grid-cols-5 sm:gap-x-3 sm:gap-y-2">
                     {(["拇", "食", "中", "无", "小"] as const).map((lab, i) => (
-                      <label
+                      <div
                         key={lab}
-                        className="flex flex-col gap-1 text-xs text-zinc-700"
+                        className="flex flex-col gap-1.5 rounded-md border border-zinc-200/80 bg-white/60 px-2 py-2"
                       >
-                        <span className="font-medium text-zinc-800">{lab}指列宽</span>
-                        <input
-                          type="text"
-                          inputMode="decimal"
-                          autoComplete="off"
-                          spellCheck={false}
-                          value={colWidthDrafts[i] ?? ""}
-                          onChange={(e) => {
-                            const t = e.target.value;
-                            setColWidthDrafts((prev) => {
-                              const next = [...prev];
-                              next[i] = t;
-                              return next;
-                            });
-                          }}
-                          onBlur={() => {
-                            setColWidthDrafts((prev) => {
-                              const next = [...prev];
-                              next[i] = colWidthDraftAfterBlur(prev[i] ?? "", i);
-                              return next;
-                            });
-                          }}
-                          className="w-full rounded border border-zinc-300 bg-white px-2 py-1.5 text-sm tabular-nums outline-none ring-rose-500 focus:border-rose-500 focus:ring-1"
-                        />
-                      </label>
+                        <span className="text-xs font-semibold text-zinc-800">
+                          {lab}指
+                        </span>
+                        <label className="flex flex-col gap-0.5 text-[11px] text-zinc-600">
+                          <span>列宽</span>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            autoComplete="off"
+                            spellCheck={false}
+                            value={colWidthDrafts[i] ?? ""}
+                            onChange={(e) => {
+                              const t = e.target.value;
+                              setColWidthDrafts((prev) => {
+                                const next = [...prev];
+                                next[i] = t;
+                                return next;
+                              });
+                            }}
+                            onBlur={() => {
+                              setColWidthDrafts((prev) => {
+                                const next = [...prev];
+                                next[i] = colWidthDraftAfterBlur(prev[i] ?? "", i);
+                                return next;
+                              });
+                            }}
+                            className="w-full rounded border border-zinc-300 bg-white px-2 py-1 text-sm tabular-nums outline-none ring-rose-500 focus:border-rose-500 focus:ring-1"
+                          />
+                        </label>
+                        <label className="flex flex-col gap-0.5 text-[11px] text-zinc-600">
+                          <span>高度 %</span>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            autoComplete="off"
+                            spellCheck={false}
+                            value={nailHeightPctDrafts[i] ?? ""}
+                            onChange={(e) => {
+                              const t = e.target.value;
+                              setNailHeightPctDrafts((prev) => {
+                                const next = [...prev];
+                                next[i] = t;
+                                return next;
+                              });
+                              if (lockNailAspectRatio) {
+                                syncNailWidthFromHeightAt(i, t);
+                              }
+                            }}
+                            onBlur={() => {
+                              const blurred = nailScalePctDraftAfterBlur(
+                                nailHeightPctDrafts[i] ?? "",
+                              );
+                              setNailHeightPctDrafts((prev) => {
+                                const next = [...prev];
+                                next[i] = blurred;
+                                return next;
+                              });
+                              if (lockNailAspectRatio) {
+                                syncNailWidthFromHeightAt(i, blurred);
+                              }
+                            }}
+                            className="w-full rounded border border-zinc-300 bg-white px-2 py-1 text-sm tabular-nums outline-none ring-rose-500 focus:border-rose-500 focus:ring-1"
+                          />
+                        </label>
+                        <label className="flex flex-col gap-0.5 text-[11px] text-zinc-600">
+                          <span>宽度 %</span>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            autoComplete="off"
+                            spellCheck={false}
+                            value={nailWidthPctDrafts[i] ?? ""}
+                            onChange={(e) => {
+                              const t = e.target.value;
+                              setNailWidthPctDrafts((prev) => {
+                                const next = [...prev];
+                                next[i] = t;
+                                return next;
+                              });
+                              if (lockNailAspectRatio) {
+                                syncNailHeightFromWidthAt(i, t);
+                              }
+                            }}
+                            onBlur={() => {
+                              const blurred = nailScalePctDraftAfterBlur(
+                                nailWidthPctDrafts[i] ?? "",
+                              );
+                              setNailWidthPctDrafts((prev) => {
+                                const next = [...prev];
+                                next[i] = blurred;
+                                return next;
+                              });
+                              if (lockNailAspectRatio) {
+                                syncNailHeightFromWidthAt(i, blurred);
+                              } else {
+                                nailAspectLockRatioRef.current[i] =
+                                  nailScaleFromPctDraft(
+                                    nailHeightPctDrafts[i] ?? "",
+                                  ) /
+                                  Math.max(1e-6, nailScaleFromPctDraft(blurred));
+                              }
+                            }}
+                            className="w-full rounded border border-zinc-300 bg-white px-2 py-1 text-sm tabular-nums outline-none ring-rose-500 focus:border-rose-500 focus:ring-1"
+                          />
+                        </label>
+                      </div>
                     ))}
                   </div>
                   <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 sm:gap-3">
@@ -2728,9 +2756,9 @@ export default function Home() {
                           setMarginPctDraft("1.8");
                           setColGutterSumPct(0);
                           setRowGutterPctDraft("0");
-                          setNailWidthPctDraft(String(DEFAULT_NAIL_SCALE_PCT));
-                          setNailHeightPctDraft(String(DEFAULT_NAIL_SCALE_PCT));
-                          nailAspectLockRatioRef.current = 1;
+                          setNailWidthPctDrafts([...DEFAULT_NAIL_SCALE_PCT_DRAFTS]);
+                          setNailHeightPctDrafts([...DEFAULT_NAIL_SCALE_PCT_DRAFTS]);
+                          nailAspectLockRatioRef.current = [1, 1, 1, 1, 1];
                           setGridPresetNotice(null);
                         }}
                         className="shrink-0 text-xs font-medium whitespace-nowrap text-rose-700 underline decoration-rose-300 underline-offset-2 hover:text-rose-900"

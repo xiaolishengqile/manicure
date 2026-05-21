@@ -15,7 +15,11 @@ export type GridLayoutPresetPayload = {
   /** 四条竖缝合计占内宽 %，0～COL_GUTTER_SUM_INNER_WIDTH_PCT_MAX */
   colGutterSumPctDraft: string;
   rowGutterPctDraft: string;
+  nailWidthPctDrafts?: string[];
+  nailHeightPctDrafts?: string[];
+  /** @deprecated 旧版全局宽 %，载入时展开为五列 */
   nailWidthPctDraft?: string;
+  /** @deprecated 旧版全局高 % */
   nailHeightPctDraft?: string;
   lockNailAspectRatio?: boolean;
 };
@@ -96,10 +100,23 @@ export function parseGridLayoutPresets(
       const rowGutterPctDraft =
         typeof o.rowGutterPctDraft === "string" ? o.rowGutterPctDraft : "0";
       const colGutterSumPctDraft = migrateColGutterSumPctDraft(o);
-      const nailWidthPctDraft =
-        typeof o.nailWidthPctDraft === "string" ? o.nailWidthPctDraft : "100";
-      const nailHeightPctDraft =
-        typeof o.nailHeightPctDraft === "string" ? o.nailHeightPctDraft : "100";
+      const defaultNailPct = ["100", "100", "100", "100", "100"];
+      const legacyW =
+        typeof o.nailWidthPctDraft === "string" ? o.nailWidthPctDraft : null;
+      const legacyH =
+        typeof o.nailHeightPctDraft === "string" ? o.nailHeightPctDraft : null;
+      const nailWidthPctDrafts =
+        Array.isArray(o.nailWidthPctDrafts) && o.nailWidthPctDrafts.length > 0
+          ? normalizeColDrafts(o.nailWidthPctDrafts, defaultNailPct)
+          : legacyW != null
+            ? [legacyW, legacyW, legacyW, legacyW, legacyW]
+            : [...defaultNailPct];
+      const nailHeightPctDrafts =
+        Array.isArray(o.nailHeightPctDrafts) && o.nailHeightPctDrafts.length > 0
+          ? normalizeColDrafts(o.nailHeightPctDrafts, defaultNailPct)
+          : legacyH != null
+            ? [legacyH, legacyH, legacyH, legacyH, legacyH]
+            : [...defaultNailPct];
       const lockNailAspectRatio =
         typeof o.lockNailAspectRatio === "boolean" ? o.lockNailAspectRatio : true;
       out.push({
@@ -108,8 +125,8 @@ export function parseGridLayoutPresets(
         marginPctDraft,
         colGutterSumPctDraft,
         rowGutterPctDraft,
-        nailWidthPctDraft,
-        nailHeightPctDraft,
+        nailWidthPctDrafts,
+        nailHeightPctDrafts,
         lockNailAspectRatio,
       });
       if (out.length >= MAX_GRID_LAYOUT_PRESETS) break;

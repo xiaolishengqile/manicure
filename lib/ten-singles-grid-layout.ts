@@ -63,10 +63,10 @@ export type TenSinglesGridLayout = {
   readonly colGutterSumFrac: number;
   /** 行与行之间缝高占「内高」的比例（仅一行缝），0–0.12 */
   readonly rowGutterSumFrac: number;
-  /** 格内甲片水平缩放（1 = 100%） */
-  readonly nailWidthScale: number;
-  /** 格内甲片垂直缩放（1 = 100%） */
-  readonly nailHeightScale: number;
+  /** 格内甲片水平缩放（拇→小，1 = 100%） */
+  readonly nailColWidthScale: readonly [number, number, number, number, number];
+  /** 格内甲片垂直缩放（拇→小，1 = 100%） */
+  readonly nailColHeightScale: readonly [number, number, number, number, number];
   /** 列缝相对列槽宽；缺省表示由旧版百分比字段解析 */
   readonly interNailColGapMode?: InterNailColGapMode | null;
 };
@@ -79,15 +79,33 @@ export const DEFAULT_COL_WIDTH_FRAC: readonly [number, number, number, number, n
   1, 0.91, 0.98, 0.91, 0.86,
 ];
 
+export const DEFAULT_NAIL_COL_SCALE: readonly [number, number, number, number, number] = [
+  1, 1, 1, 1, 1,
+];
+
 export const DEFAULT_TEN_SINGLES_GRID_LAYOUT: TenSinglesGridLayout = {
   colWidthFrac: DEFAULT_COL_WIDTH_FRAC,
   marginFrac: 0.018,
   colGutterSumFrac: 0,
   rowGutterSumFrac: 0,
-  nailWidthScale: 1,
-  nailHeightScale: 1,
+  nailColWidthScale: DEFAULT_NAIL_COL_SCALE,
+  nailColHeightScale: DEFAULT_NAIL_COL_SCALE,
   interNailColGapMode: "tight",
 };
+
+export const DEFAULT_NAIL_SCALE_PCT_DRAFTS: readonly [
+  string,
+  string,
+  string,
+  string,
+  string,
+] = DEFAULT_NAIL_COL_SCALE.map((n) => String(Math.round(n * 100))) as [
+  string,
+  string,
+  string,
+  string,
+  string,
+];
 
 /** 与页面「宽/高 %」输入一致，100 表示 1.0× */
 export function nailScaleFromPctDraft(draft: string): number {
@@ -104,6 +122,32 @@ export function nailScaleFromPctDraft(draft: string): number {
 export function nailScalePctDraftAfterBlur(raw: string): string {
   const pct = Math.round(nailScaleFromPctDraft(raw) * 100);
   return String(pct);
+}
+
+function nailColScaleTupleFromNumbers(
+  values: number[],
+): [number, number, number, number, number] {
+  const v = values.slice(0, 5).map((x) =>
+    clamp(x, NAIL_SCALE_PCT_MIN / 100, NAIL_SCALE_PCT_MAX / 100),
+  );
+  while (v.length < 5) v.push(1);
+  return [v[0]!, v[1]!, v[2]!, v[3]!, v[4]!];
+}
+
+function nailColScaleTupleFromUiDrafts(
+  drafts: readonly string[],
+): [number, number, number, number, number] {
+  const nums = drafts.map((s) => nailScaleFromPctDraft(s));
+  return nailColScaleTupleFromNumbers(nums);
+}
+
+/** 提交用：五列宽/高缩放 %，逗号分隔 */
+export function serializeNailColScalePctDrafts(drafts: readonly string[]): string {
+  const nums = drafts.map((s) =>
+    Math.round(nailScaleFromPctDraft(s) * 100),
+  );
+  while (nums.length < 5) nums.push(DEFAULT_NAIL_SCALE_PCT);
+  return nums.slice(0, 5).join(",");
 }
 
 /**
@@ -184,7 +228,8 @@ export function normalizeColFracs(values: number[]): [number, number, number, nu
  * - `nailGridColGapMode`: `tight` | `half` | `third` | `fifth`（相邻列缝宽 = k×列槽宽，优先）
  * - `nailGridColGutterPct`: 四条竖缝合计占「内宽」百分比（无 `nailGridColGapMode` 时使用），0–35，默认 0
  * - `nailGridRowGutterPct`: 行间缝占「内高」百分比，0–12，默认 0
- * - `nailGridNailWidthPct` / `nailGridNailHeightPct`: 格内甲片宽/高缩放 %，60–140，默认 100
+ * - `nailGridNailColWidthsPct` / `nailGridNailColHeightsPct`: 五列格内甲片宽/高缩放 %（拇→小），60–140，默认 100
+ * - `nailGridNailWidthPct` / `nailGridNailHeightPct`: 旧版全局缩放（五列同值，兼容）
  */
 export function parseTenSinglesGridLayoutFromFormData(
   formData: FormData,
@@ -234,34 +279,68 @@ export function parseTenSinglesGridLayoutFromFormData(
     ? clamp(rowGutterPct / 100, 0, 0.12)
     : DEFAULT_TEN_SINGLES_GRID_LAYOUT.rowGutterSumFrac;
 
-  const nailWidthPct = parseFloat(
-    String(formData.get("nailGridNailWidthPct") ?? "").trim(),
-  );
-  const nailHeightPct = parseFloat(
-    String(formData.get("nailGridNailHeightPct") ?? "").trim(),
-  );
-  const nailWidthScale = Number.isFinite(nailWidthPct)
-    ? clamp(
-        nailWidthPct / 100,
+  let nailColWidthScale: [number, number, number, number, number] = [
+    ...DEFAULT_NAIL_COL_SCALE,
+  ];
+  let nailColHeightScale: [number, number, number, number, number] = [
+    ...DEFAULT_NAIL_COL_SCALE,
+  ];
+  const rawNailWCols = formData.get("nailGridNailColWidthsPct");
+  const rawNailHCols = formData.get("nailGridNailColHeightsPct");
+  if (typeof rawNailWCols === "string" && rawNailWCols.trim()) {
+    const parts = rawNailWCols
+      .split(/[,，\s]+/)
+      .map((s) => parseFloat(s.trim()))
+      .filter((n) => !Number.isNaN(n));
+    if (parts.length >= 5) {
+      nailColWidthScale = nailColScaleTupleFromNumbers(
+        parts.map((p) => p / 100),
+      );
+    }
+  } else {
+    const legacyW = parseFloat(
+      String(formData.get("nailGridNailWidthPct") ?? "").trim(),
+    );
+    if (Number.isFinite(legacyW)) {
+      const s = clamp(
+        legacyW / 100,
         NAIL_SCALE_PCT_MIN / 100,
         NAIL_SCALE_PCT_MAX / 100,
-      )
-    : DEFAULT_TEN_SINGLES_GRID_LAYOUT.nailWidthScale;
-  const nailHeightScale = Number.isFinite(nailHeightPct)
-    ? clamp(
-        nailHeightPct / 100,
+      );
+      nailColWidthScale = [s, s, s, s, s];
+    }
+  }
+  if (typeof rawNailHCols === "string" && rawNailHCols.trim()) {
+    const parts = rawNailHCols
+      .split(/[,，\s]+/)
+      .map((s) => parseFloat(s.trim()))
+      .filter((n) => !Number.isNaN(n));
+    if (parts.length >= 5) {
+      nailColHeightScale = nailColScaleTupleFromNumbers(
+        parts.map((p) => p / 100),
+      );
+    }
+  } else {
+    const legacyH = parseFloat(
+      String(formData.get("nailGridNailHeightPct") ?? "").trim(),
+    );
+    if (Number.isFinite(legacyH)) {
+      const s = clamp(
+        legacyH / 100,
         NAIL_SCALE_PCT_MIN / 100,
         NAIL_SCALE_PCT_MAX / 100,
-      )
-    : DEFAULT_TEN_SINGLES_GRID_LAYOUT.nailHeightScale;
+      );
+      nailColHeightScale = [s, s, s, s, s];
+    }
+  }
 
   return {
     colWidthFrac,
     marginFrac,
     colGutterSumFrac,
     rowGutterSumFrac,
-    nailWidthScale,
-    nailHeightScale,
+    nailColWidthScale,
+    nailColHeightScale,
     interNailColGapMode,
   };
 }
@@ -309,8 +388,8 @@ export function buildTenSinglesGridLayoutFromUiDrafts(params: {
   readonly marginPctDraft: string;
   readonly colGutterSumPct: number;
   readonly rowGutterPctDraft: string;
-  readonly nailWidthPctDraft?: string;
-  readonly nailHeightPctDraft?: string;
+  readonly nailWidthPctDrafts?: readonly string[];
+  readonly nailHeightPctDrafts?: readonly string[];
 }): TenSinglesGridLayout {
   const drafts = [...params.colWidthDrafts];
   while (drafts.length < 5) drafts.push("");
@@ -323,8 +402,12 @@ export function buildTenSinglesGridLayoutFromUiDrafts(params: {
       COL_GUTTER_SUM_INNER_WIDTH_PCT_MAX / 100,
     ),
     rowGutterSumFrac: rowGutterFracFromUiDraft(params.rowGutterPctDraft),
-    nailWidthScale: nailScaleFromPctDraft(params.nailWidthPctDraft ?? ""),
-    nailHeightScale: nailScaleFromPctDraft(params.nailHeightPctDraft ?? ""),
+    nailColWidthScale: nailColScaleTupleFromUiDrafts(
+      params.nailWidthPctDrafts ?? DEFAULT_NAIL_SCALE_PCT_DRAFTS,
+    ),
+    nailColHeightScale: nailColScaleTupleFromUiDrafts(
+      params.nailHeightPctDrafts ?? DEFAULT_NAIL_SCALE_PCT_DRAFTS,
+    ),
     interNailColGapMode: null,
   };
 }
@@ -382,18 +465,20 @@ export function buildWhiteGridLayoutPromptAddendum(
   const colGutterPct = (layout.colGutterSumFrac * 100).toFixed(1);
   const colGutterEachPct = ((layout.colGutterSumFrac / 4) * 100).toFixed(1);
   const rowGutterPct = (layout.rowGutterSumFrac * 100).toFixed(2);
-  const nailWPct = (layout.nailWidthScale * 100).toFixed(0);
-  const nailHPct = (layout.nailHeightScale * 100).toFixed(0);
-  const nailScaleEn =
-    Math.abs(layout.nailWidthScale - 1) > 0.005 ||
-    Math.abs(layout.nailHeightScale - 1) > 0.005
-      ? `- **Per-nail non-uniform scale inside each cell** (after fitting to column slot): horizontal **${nailWPct}%**, vertical **${nailHPct}%** of the fitted cutout (100% = preserve fitted size; values may stretch or compress the plate silhouette).`
-      : "";
-  const nailScaleZh =
-    Math.abs(layout.nailWidthScale - 1) > 0.005 ||
-    Math.abs(layout.nailHeightScale - 1) > 0.005
-      ? `**格内甲片缩放**：宽 **${nailWPct}%**、高 **${nailHPct}%**（相对拟合进格后的尺寸）。`
-      : "";
+  const nailScalePairs = layout.nailColWidthScale.map((w, i) => {
+    const h = layout.nailColHeightScale[i] ?? 1;
+    return `W${(w * 100).toFixed(0)}%/H${(h * 100).toFixed(0)}%`;
+  });
+  const nailScaleAny = layout.nailColWidthScale.some(
+    (w, i) =>
+      Math.abs(w - 1) > 0.005 || Math.abs((layout.nailColHeightScale[i] ?? 1) - 1) > 0.005,
+  );
+  const nailScaleEn = nailScaleAny
+    ? `- **Per-column nail scale inside each cell** (thumb→pinky, after fitting to column slot): **${nailScalePairs.join(", ")}** (100% = preserve fitted size; may stretch/compress per column).`
+    : "";
+  const nailScaleZh = nailScaleAny
+    ? `**格内甲片缩放（拇→小）**：${nailScalePairs.join("、")}。`
+    : "";
   const gapRuleEn = `- **Horizontal spacing between adjacent nail columns:** the **combined width of the four vertical white gaps** between the five columns = **${colGutterPct}%** of the **inner width** (after outer margins), split evenly — each gap ≈ **${colGutterEachPct}%** of inner width. If 0%, columns abut horizontally except natural cell fit.`;
   const gapRuleZh = `**相邻列留白**：四条竖缝**合计**占「内区宽度」约 **${colGutterPct}%**，**每条竖缝**约 **${colGutterEachPct}%**（内区 = 去掉外留白后的中间区域）；`;
 
