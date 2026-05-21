@@ -46,6 +46,30 @@ async function pngMeta(buf: Buffer): Promise<{ w: number; h: number }> {
   return { w: m.width ?? 1, h: m.height ?? 1 };
 }
 
+/** 格内甲片宽/高缩放（锁定纵横比时由界面保证两值同比例） */
+async function applyNailScaleToInner(
+  inner: Buffer,
+  layout: TenSinglesGridLayout,
+): Promise<Buffer> {
+  const wScale = layout.nailWidthScale;
+  const hScale = layout.nailHeightScale;
+  if (
+    Math.abs(wScale - 1) < 1e-6 &&
+    Math.abs(hScale - 1) < 1e-6
+  ) {
+    return inner;
+  }
+  const { w, h } = await pngMeta(inner);
+  return sharp(inner)
+    .resize({
+      width: Math.max(1, Math.round(w * wScale)),
+      height: Math.max(1, Math.round(h * hScale)),
+      fit: "fill",
+    })
+    .png()
+    .toBuffer();
+}
+
 /** 相对原始 inner 等比缩放（用于整行放不下时） */
 async function resizeInnerProportional(inner: Buffer, scale: number): Promise<Buffer> {
   const { w } = await pngMeta(inner);
@@ -175,16 +199,19 @@ export async function buildTenSinglesCollageReference(
     const trimmed = await trimWhiteEdges(cellPngBuffers[i]!);
     const frac = layout.colWidthFrac[c] ?? 0.87;
     const maxW = Math.max(1, Math.round(cw * frac));
-    const inner = await sharp(trimmed)
-      .resize({
-        width: maxW,
-        height: ch,
-        fit: "contain",
-        position: "north",
-        background: { r: 255, g: 255, b: 255, alpha: 1 },
-      })
-      .png()
-      .toBuffer();
+    const inner = await applyNailScaleToInner(
+      await sharp(trimmed)
+        .resize({
+          width: maxW,
+          height: ch,
+          fit: "contain",
+          position: "north",
+          background: { r: 255, g: 255, b: 255, alpha: 1 },
+        })
+        .png()
+        .toBuffer(),
+      layout,
+    );
     rowInners[r]!.push(inner);
   }
 
@@ -261,10 +288,13 @@ export async function buildScaledSingleNailGrid(
     for (let c = 0; c < cols; c++) {
       const frac = layout.colWidthFrac[c] ?? 0.87;
       const targetW = Math.max(1, Math.round(targetBaseW * frac));
-      const inner = await sharp(trimmed)
-        .resize({ width: targetW, withoutEnlargement: false })
-        .png()
-        .toBuffer();
+      const inner = await applyNailScaleToInner(
+        await sharp(trimmed)
+          .resize({ width: targetW, withoutEnlargement: false })
+          .png()
+          .toBuffer(),
+        layout,
+      );
       rowInners[r]!.push(inner);
     }
   }

@@ -49,6 +49,11 @@ export const INTER_NAIL_COL_GAP_OPTIONS: {
   { value: "half", label: interNailColGapOptionLabel("half") },
 ];
 
+/** 格内甲片缩放百分比（界面 100 = 1.0×） */
+export const NAIL_SCALE_PCT_MIN = 60;
+export const NAIL_SCALE_PCT_MAX = 140;
+export const DEFAULT_NAIL_SCALE_PCT = 100;
+
 /** 五列相对宽度（拇→小），已归一化使最大值为 1 */
 export type TenSinglesGridLayout = {
   readonly colWidthFrac: readonly [number, number, number, number, number];
@@ -58,6 +63,10 @@ export type TenSinglesGridLayout = {
   readonly colGutterSumFrac: number;
   /** 行与行之间缝高占「内高」的比例（仅一行缝），0–0.12 */
   readonly rowGutterSumFrac: number;
+  /** 格内甲片水平缩放（1 = 100%） */
+  readonly nailWidthScale: number;
+  /** 格内甲片垂直缩放（1 = 100%） */
+  readonly nailHeightScale: number;
   /** 列缝相对列槽宽；缺省表示由旧版百分比字段解析 */
   readonly interNailColGapMode?: InterNailColGapMode | null;
 };
@@ -75,8 +84,27 @@ export const DEFAULT_TEN_SINGLES_GRID_LAYOUT: TenSinglesGridLayout = {
   marginFrac: 0.018,
   colGutterSumFrac: 0,
   rowGutterSumFrac: 0,
+  nailWidthScale: 1,
+  nailHeightScale: 1,
   interNailColGapMode: "tight",
 };
+
+/** 与页面「宽/高 %」输入一致，100 表示 1.0× */
+export function nailScaleFromPctDraft(draft: string): number {
+  const t = draft.trim().replace(/,/g, ".");
+  const v = t === "" ? DEFAULT_NAIL_SCALE_PCT : parseFloat(t);
+  const n = Number.isNaN(v) ? DEFAULT_NAIL_SCALE_PCT : v;
+  return clamp(
+    n / 100,
+    NAIL_SCALE_PCT_MIN / 100,
+    NAIL_SCALE_PCT_MAX / 100,
+  );
+}
+
+export function nailScalePctDraftAfterBlur(raw: string): string {
+  const pct = Math.round(nailScaleFromPctDraft(raw) * 100);
+  return String(pct);
+}
 
 /**
  * 列槽等宽划分：innerW = 5·cellW + 4·gap，且 gap = k·cellW ⇒ 四条缝占内宽比例 4k/(5+4k)。
@@ -156,6 +184,7 @@ export function normalizeColFracs(values: number[]): [number, number, number, nu
  * - `nailGridColGapMode`: `tight` | `half` | `third` | `fifth`（相邻列缝宽 = k×列槽宽，优先）
  * - `nailGridColGutterPct`: 四条竖缝合计占「内宽」百分比（无 `nailGridColGapMode` 时使用），0–35，默认 0
  * - `nailGridRowGutterPct`: 行间缝占「内高」百分比，0–12，默认 0
+ * - `nailGridNailWidthPct` / `nailGridNailHeightPct`: 格内甲片宽/高缩放 %，60–140，默认 100
  */
 export function parseTenSinglesGridLayoutFromFormData(
   formData: FormData,
@@ -205,11 +234,34 @@ export function parseTenSinglesGridLayoutFromFormData(
     ? clamp(rowGutterPct / 100, 0, 0.12)
     : DEFAULT_TEN_SINGLES_GRID_LAYOUT.rowGutterSumFrac;
 
+  const nailWidthPct = parseFloat(
+    String(formData.get("nailGridNailWidthPct") ?? "").trim(),
+  );
+  const nailHeightPct = parseFloat(
+    String(formData.get("nailGridNailHeightPct") ?? "").trim(),
+  );
+  const nailWidthScale = Number.isFinite(nailWidthPct)
+    ? clamp(
+        nailWidthPct / 100,
+        NAIL_SCALE_PCT_MIN / 100,
+        NAIL_SCALE_PCT_MAX / 100,
+      )
+    : DEFAULT_TEN_SINGLES_GRID_LAYOUT.nailWidthScale;
+  const nailHeightScale = Number.isFinite(nailHeightPct)
+    ? clamp(
+        nailHeightPct / 100,
+        NAIL_SCALE_PCT_MIN / 100,
+        NAIL_SCALE_PCT_MAX / 100,
+      )
+    : DEFAULT_TEN_SINGLES_GRID_LAYOUT.nailHeightScale;
+
   return {
     colWidthFrac,
     marginFrac,
     colGutterSumFrac,
     rowGutterSumFrac,
+    nailWidthScale,
+    nailHeightScale,
     interNailColGapMode,
   };
 }
@@ -257,6 +309,8 @@ export function buildTenSinglesGridLayoutFromUiDrafts(params: {
   readonly marginPctDraft: string;
   readonly colGutterSumPct: number;
   readonly rowGutterPctDraft: string;
+  readonly nailWidthPctDraft?: string;
+  readonly nailHeightPctDraft?: string;
 }): TenSinglesGridLayout {
   const drafts = [...params.colWidthDrafts];
   while (drafts.length < 5) drafts.push("");
@@ -269,6 +323,8 @@ export function buildTenSinglesGridLayoutFromUiDrafts(params: {
       COL_GUTTER_SUM_INNER_WIDTH_PCT_MAX / 100,
     ),
     rowGutterSumFrac: rowGutterFracFromUiDraft(params.rowGutterPctDraft),
+    nailWidthScale: nailScaleFromPctDraft(params.nailWidthPctDraft ?? ""),
+    nailHeightScale: nailScaleFromPctDraft(params.nailHeightPctDraft ?? ""),
     interNailColGapMode: null,
   };
 }
@@ -326,6 +382,18 @@ export function buildWhiteGridLayoutPromptAddendum(
   const colGutterPct = (layout.colGutterSumFrac * 100).toFixed(1);
   const colGutterEachPct = ((layout.colGutterSumFrac / 4) * 100).toFixed(1);
   const rowGutterPct = (layout.rowGutterSumFrac * 100).toFixed(2);
+  const nailWPct = (layout.nailWidthScale * 100).toFixed(0);
+  const nailHPct = (layout.nailHeightScale * 100).toFixed(0);
+  const nailScaleEn =
+    Math.abs(layout.nailWidthScale - 1) > 0.005 ||
+    Math.abs(layout.nailHeightScale - 1) > 0.005
+      ? `- **Per-nail non-uniform scale inside each cell** (after fitting to column slot): horizontal **${nailWPct}%**, vertical **${nailHPct}%** of the fitted cutout (100% = preserve fitted size; values may stretch or compress the plate silhouette).`
+      : "";
+  const nailScaleZh =
+    Math.abs(layout.nailWidthScale - 1) > 0.005 ||
+    Math.abs(layout.nailHeightScale - 1) > 0.005
+      ? `**格内甲片缩放**：宽 **${nailWPct}%**、高 **${nailHPct}%**（相对拟合进格后的尺寸）。`
+      : "";
   const gapRuleEn = `- **Horizontal spacing between adjacent nail columns:** the **combined width of the four vertical white gaps** between the five columns = **${colGutterPct}%** of the **inner width** (after outer margins), split evenly — each gap ≈ **${colGutterEachPct}%** of inner width. If 0%, columns abut horizontally except natural cell fit.`;
   const gapRuleZh = `**相邻列留白**：四条竖缝**合计**占「内区宽度」约 **${colGutterPct}%**，**每条竖缝**约 **${colGutterEachPct}%**（内区 = 去掉外留白后的中间区域）；`;
 
@@ -354,7 +422,8 @@ USER-SUPPLIED GRID LAYOUT (mandatory proportions — match this modular sheet ma
 - **Column width weights** (relative horizontal budget per column, already normalized so max = 1): **${c0}, ${c1}, ${c2}, ${c3}, ${c4}**. Each nail’s horizontal span in its cell should respect its column’s share vs neighbors.
 ${gapRuleEn}
 - **Single horizontal gutter between the two rows** = **${rowGutterPct}%** of the **inner height**. If 0, the two rows abut vertically within the inner area.
+${nailScaleEn}
 - Keep **cuticle / root tops** on one straight horizontal line per row; keep the finger-size ladder subtle and retail-realistic.
 
-（用户指定的白底栅格数值：**外留白**约 ${marginPct}% 边长；五列相对宽 ${c0}、${c1}、${c2}、${c3}、${c4}（已归一）；${gapRuleZh}**行间缝**占内高约 ${rowGutterPct}%。须按上述比例控制留白与列宽。）`;
+（用户指定的白底栅格数值：**外留白**约 ${marginPct}% 边长；五列相对宽 ${c0}、${c1}、${c2}、${c3}、${c4}（已归一）；${gapRuleZh}**行间缝**占内高约 ${rowGutterPct}%。${nailScaleZh}须按上述比例控制留白与列宽。）`;
 }

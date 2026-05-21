@@ -15,6 +15,9 @@ export type GridLayoutPresetPayload = {
   /** 四条竖缝合计占内宽 %，0～COL_GUTTER_SUM_INNER_WIDTH_PCT_MAX */
   colGutterSumPctDraft: string;
   rowGutterPctDraft: string;
+  nailWidthPctDraft?: string;
+  nailHeightPctDraft?: string;
+  lockNailAspectRatio?: boolean;
 };
 
 export type GridLayoutPreset = { id: string } & GridLayoutPresetPayload;
@@ -93,12 +96,21 @@ export function parseGridLayoutPresets(
       const rowGutterPctDraft =
         typeof o.rowGutterPctDraft === "string" ? o.rowGutterPctDraft : "0";
       const colGutterSumPctDraft = migrateColGutterSumPctDraft(o);
+      const nailWidthPctDraft =
+        typeof o.nailWidthPctDraft === "string" ? o.nailWidthPctDraft : "100";
+      const nailHeightPctDraft =
+        typeof o.nailHeightPctDraft === "string" ? o.nailHeightPctDraft : "100";
+      const lockNailAspectRatio =
+        typeof o.lockNailAspectRatio === "boolean" ? o.lockNailAspectRatio : true;
       out.push({
         id,
         colWidthDrafts,
         marginPctDraft,
         colGutterSumPctDraft,
         rowGutterPctDraft,
+        nailWidthPctDraft,
+        nailHeightPctDraft,
+        lockNailAspectRatio,
       });
       if (out.length >= MAX_GRID_LAYOUT_PRESETS) break;
     }
