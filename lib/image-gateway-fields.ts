@@ -1,6 +1,6 @@
 /**
- * 中转站 OpenAI 兼容 `/v1/images/edits` 扩展字段（Nano-banana-2 Pro 等）。
- * @see Apifox：Nano-banana-2(Pro)(Edits兼容) — aspect_ratio、image_size、response_format
+ * 中转站 OpenAI 兼容图像 API 字段（Edits / Generations）。
+ * @see Apifox：Nano-banana-2(Pro)(Edits兼容)、Flux（Dall-e 格式 Generations）
  */
 
 /** Nano-banana-2(Pro)(Edits兼容) 在网关上的 model 字段值 */
@@ -8,6 +8,50 @@ export const NANO_BANANA_2_IMAGE_MODEL = "nano-banana-2";
 
 /** @deprecated 请使用 NANO_BANANA_2_IMAGE_MODEL */
 export const NANO_BANANA_FLASH_IMAGE_MODEL = NANO_BANANA_2_IMAGE_MODEL;
+
+/** 贞贞等中转：Flux 文生图 POST /v1/images/generations */
+export const FLUX_IMAGE_MODELS = ["flux", "flux-dev", "flux-pro"] as const;
+
+export type FluxImageModel = (typeof FLUX_IMAGE_MODELS)[number];
+
+/** 文档列出的 size（WxH）；默认 1024x1024 */
+export const FLUX_GENERATION_SIZE_OPTIONS = [
+  "1024x1024",
+  "1024x512",
+  "1024x576",
+  "1024x768",
+  "512x1024",
+  "512x768",
+  "1280x960",
+  "960x1280",
+  "768x1366",
+  "768x512",
+  "1366x768",
+  "1344x576",
+] as const;
+
+export type FluxGenerationSizeOption =
+  (typeof FLUX_GENERATION_SIZE_OPTIONS)[number];
+
+export const DEFAULT_FLUX_GENERATION_SIZE: FluxGenerationSizeOption =
+  "1024x1024";
+
+const FLUX_SIZE_SET = new Set<string>(FLUX_GENERATION_SIZE_OPTIONS);
+
+export function imageModelUsesFluxGenerations(model: string): boolean {
+  const m = model.trim().toLowerCase();
+  return (FLUX_IMAGE_MODELS as readonly string[]).includes(m);
+}
+
+export function normalizeFluxGenerationSize(
+  raw: string | undefined,
+): FluxGenerationSizeOption {
+  const t = raw?.trim();
+  if (t && FLUX_SIZE_SET.has(t)) {
+    return t as FluxGenerationSizeOption;
+  }
+  return DEFAULT_FLUX_GENERATION_SIZE;
+}
 
 export const IMAGE_ASPECT_RATIO_OPTIONS = [
   "1:1",
@@ -50,6 +94,21 @@ export const IMAGE_MODEL_PRESET_OPTIONS: {
     label: "Nano-banana-2 Pro（Edits，nano-banana-2）",
     shortLabel: "Nano-banana-2",
   },
+  {
+    value: "flux",
+    label: "Flux（文生图 /v1/images/generations；有参考图时走 Edits 兼容）",
+    shortLabel: "Flux",
+  },
+  {
+    value: "flux-dev",
+    label: "Flux Dev（generations；有参考图时 Edits 兼容）",
+    shortLabel: "Flux-dev",
+  },
+  {
+    value: "flux-pro",
+    label: "Flux Pro（generations；有参考图时 Edits 兼容）",
+    shortLabel: "Flux-pro",
+  },
 ];
 
 const ASPECT_SET = new Set<string>(IMAGE_ASPECT_RATIO_OPTIONS);
@@ -62,6 +121,8 @@ export type ParsedGatewayEditFields = {
   model: string;
   aspectRatio?: ImageAspectRatioOption;
   imageSize?: ImageSizeKOption;
+  /** Flux：POST /v1/images/generations 的 size（WxH） */
+  fluxSize?: FluxGenerationSizeOption;
 };
 
 function trimStr(entry: FormDataEntryValue | null): string | undefined {
@@ -72,7 +133,7 @@ function trimStr(entry: FormDataEntryValue | null): string | undefined {
 }
 
 /**
- * 从 FormData 读取 `imageModel`、`imageAspectRatio`、`imageSize`；
+ * 从 FormData 读取 `imageModel`、`imageAspectRatio`、`imageSize`、`imageFluxSize`；
  * `imageModel` 空则回退 `defaultModel`（通常为环境变量）。
  */
 export function parseGatewayEditFieldsFromForm(
@@ -97,5 +158,9 @@ export function parseGatewayEditFieldsFromForm(
   const imageSize =
     szRaw && SIZE_SET.has(szRaw) ? (szRaw as ImageSizeKOption) : undefined;
 
-  return { model, aspectRatio, imageSize };
+  const fluxSize = imageModelUsesFluxGenerations(model)
+    ? normalizeFluxGenerationSize(trimStr(formData.get("imageFluxSize")))
+    : undefined;
+
+  return { model, aspectRatio, imageSize, fluxSize };
 }

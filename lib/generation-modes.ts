@@ -665,7 +665,7 @@ SHARED RULES (Variant A and B):
 
 /** 发往 API：中文硬性摘要置首（贞贞等中转站权重更高） */
 export const EXTRACT_ANGLE_SCATTERED_UNIFORM_TILT_API_PREFIX =
-  `【方案A·双图】图1=用户竖直2×5产品（只取10枚花色甲型）；图2=内置斜拍排版参考（只学位置/角度/列对齐，禁止抄图2款式）；上1与下6、上2与下7…上5与下10五对必须像图2一样各自落在同一条斜直线上（禁止上下错位、禁止列不共线）；每枚倾斜角与图2一致且彼此平行；间距与整组斜向角度严格参照图2；纯白底；10枚全保留；禁止重叠。\n\n`;
+  `【方案A·双图·甲型锁第一】图1=用户竖直2×5产品：每枚 slot N 的甲型、长短、宽度、tip 形状、花色**唯一**来自图1 同格 N；图2=内置斜拍排版参考，**只学**各枚中心点位置、倾斜角、列共线、行距与间距，**禁止**学图2 的甲长、甲宽、轮廓或 tip 形状；短方/方圆必须仍是短方/方圆，禁止变成长椭圆/杏仁/棺材甲；每枚 height:width 与图1 同格须在 ~3% 内；只允许刚性旋转+平移，禁止非均匀缩放、禁止纵向拉长、禁止 beautify 改甲型；排版冲突时**保甲型**、只调位置/角度/留白；上1与下6…上5与下10 五对须同列共线；整组 ~45° 且长轴平行；纯白底；10 枚全保留；禁止重叠。\n\n`;
 
 export const EXTRACT_ANGLE_SCATTERED_SCATTERED_API_PREFIX =
   `【方案B·硬性】输出必须且只能10枚美甲（与源图10格一一对应，禁止8/9枚或合并省略）；保留每枚甲型；全部抠出后在白底随机打散、每枚角度各异（禁止仍排成整齐2×5）；纯白底；禁止漏枚、禁止重叠、禁止用重复设计凑数。\n\n`;
@@ -688,33 +688,45 @@ export function composeExtractAngleScatteredEditPrompt(
   return prompt;
 }
 
-/** 方案 A：双图 — 产品抠图 + 内置排版参考（几何以 SECOND 为准） */
+/** 方案 A：双图 — 产品抠图 + 内置排版参考（几何以 SECOND 为准，甲型以 FIRST 为准） */
 const EXTRACT_ANGLE_SCATTERED_UNIFORM_TILT_PROMPT = `You edit a **press-on nail product photo** using **two input images** (API order).
 
-INPUT IMAGES:
-1) **FIRST — USER PRODUCT (art source of truth):** **10 nails** in **2 rows × 5 columns** on white (slots **1–5** top row, **6–10** bottom row, left→right). Each nail is **upright** (tip down). **Every** nail’s **shape, length, colour, and art** must come **only** from FIRST — map slot **N** in the output to slot **N** in FIRST.
-2) **SECOND — BUILT-IN LAYOUT REFERENCE (geometry only):** a finished **diagonal packshot** showing how the **10 nails must be placed**. **Authoritative** for **positions, ~45° tilt, parallel long axes, row spacing, column collinearity, and overall top-left → bottom-right cluster angle**. The nail **designs** in SECOND are **demo placeholders** — **forbidden** to copy SECOND’s colours, patterns, charms, or silhouettes into the output.
+PER-SLOT STAMP — **#1 HARD RULE** (any violation = failure; **overrides** layout matching):
+For **each slot N (1–10)**, output nail **N** must be the **same physical plate** as **FIRST** slot **N** — **same** outer contour, **same** plate **height** and **width** (within **~3%**), **same** tip family (short square / squoval / oval / almond / etc.), **same** art pixels and photo texture. **Forbidden:** redrawing, “beautifying,” stretching taller to match SECOND’s demo nails, slimming, or converging every nail toward SECOND’s **longer almond** demo silhouettes. **Short square stays short square.**
 
-TASK — **VARIANT A · SYNC TILT (match SECOND’s layout, FIRST’s art):**
-- Cut out all **10** nails from **FIRST**. **Do not** redesign or warp them.
-- Re-compose on flat **#FFFFFF** so the result **matches SECOND’s layout geometry** as closely as possible:
-  - **Per-nail tilt:** each plate **~45°** from upright (OK **40°–50°**), **same direction** on all 10; long axes **parallel** (within ~2°) like SECOND.
+INPUT IMAGES:
+1) **FIRST — USER PRODUCT (art + silhouette source of truth):** **10 nails** in **2 rows × 5 columns** on white (slots **1–5** top row, **6–10** bottom row, left→right). Each nail is **upright** (tip down). **Every** nail’s **shape, length, width, colour, and art** must come **only** from FIRST — map slot **N** in the output to slot **N** in FIRST.
+2) **SECOND — BUILT-IN LAYOUT REFERENCE (placement + tilt only):** a finished **diagonal packshot** showing **where** and **at what angle** the 10 nails sit. **Authoritative ONLY for:** nail **center positions**, **~45° cluster tilt**, **parallel long axes**, **row spacing**, **column collinearity**, and **overall top-left → bottom-right** group angle. **NOT authoritative for nail size, length class, width, tip shape, or silhouette** — SECOND’s nails are **demo placeholders**. **Forbidden** to copy SECOND’s colours, patterns, charms, **or silhouettes** into the output.
+
+TASK — **VARIANT A · SYNC TILT (SECOND’s placement/tilt, FIRST’s plates unchanged):**
+- Cut out all **10** nails from **FIRST** as **rigid layers**. **Do not** redesign, warp, or rescale them.
+- Re-compose on flat **#FFFFFF** so **placement geometry** matches SECOND as closely as possible **without changing any plate’s aspect ratio**:
+  - **Per-nail tilt:** each plate **~45°** from upright (OK **40°–50°**), **same direction** on all 10; long axes **parallel** (within ~2°) like SECOND — achieved by **rigid rotation only**, not by redrawing longer nails.
   - **Cluster:** two **parallel slanted rows**, whole group reads **top-left → bottom-right** like SECOND — **not** an upright 2×5 aligned to the square frame.
   - **Column collinearity (critical):** for **c = 1…5**, top slot **c** and bottom slot **c+5** must sit on **one straight line parallel to the nail long axis**, exactly as in SECOND — **forbidden** bottom nail **almost directly under** top nail (same X, only Y offset).
   - **Spacing:** neighbor gaps and row rhythm **match SECOND**; **no overlap**; all 10 fully visible.
 
+**CONFLICT RESOLUTION (mandatory):** if matching SECOND’s spacing/tilt would require **stretching, squishing, shearing, or lengthening** any nail vs FIRST slot **N**, **preserve FIRST’s silhouette** and adjust **only** rotation, translation, or **more white margin** — **never** sacrifice length/width fidelity for prettier layout.
+
 SHARED RULES:
 - **Exactly 10 nails** when FIRST has 10 — count before finish.
-- **Only** move and **rotate** cutouts from FIRST — no invented nails.
+- **Only** rigid **move** and **rotate** cutouts from FIRST — no invented nails, no non-uniform scale.
 - **Bottom of frame** white with margin below the lowest nail.
 
 FORBIDDEN:
-- Copying or blending nail **graphics** from SECOND.
+- Copying or blending nail **graphics or silhouettes** from SECOND.
+- Vertical elongation, “slenderizing,” or turning short/squoval plates into longer almond/coffin shapes to **fill** SECOND’s demo footprint.
+- Non-uniform scale, liquify, or warp for layout.
 - Random scatter or per-nail unrelated angles (that is Variant B).
 - Upright 2×5 or **frame-vertical** columns.
 - Fewer than 10 nails, overlap, non-white background.
 
-OUTPUT: One square photorealistic packshot. **No** text, watermarks, or UI. **No** visible trace of SECOND’s demo nail art — only FIRST’s SKU on SECOND’s geometry.
+SELF-CHECK (scan slots **1→10** before output):
+(1) Each slot **N** — **height:width** still matches FIRST **N** within ~3%; short nails did **not** become long.
+(2) Layout — slanted rows, column collinearity, and ~45° parallel tilt read like SECOND.
+(3) Art — colours/patterns come **only** from FIRST; no SECOND demo nail art visible.
+
+OUTPUT: One square photorealistic packshot. **No** text, watermarks, or UI. **No** visible trace of SECOND’s demo nail art — only FIRST’s SKU plates on SECOND’s **placement** geometry.
 
 Return a single square product-ready image.`;
 

@@ -1,6 +1,9 @@
 import type OpenAI from "openai";
 import {
+  DEFAULT_FLUX_GENERATION_SIZE,
+  imageModelUsesFluxGenerations,
   imageModelUsesNanoBananaEdits,
+  type FluxGenerationSizeOption,
   type ImageAspectRatioOption,
   type ImageSizeKOption,
 } from "@/lib/image-gateway-fields";
@@ -124,6 +127,48 @@ function firstUrlFromImagesEditJson(json: ImagesEditJson): string | null {
   return null;
 }
 
+/** Flux 文生图：POST /v1/images/generations（OpenAI Dall-e 兼容 JSON） */
+export async function imagesGenerationViaGateway(args: {
+  apiKey: string;
+  baseURL: string;
+  model: string;
+  prompt: string;
+  size?: FluxGenerationSizeOption | string;
+}): Promise<string | null> {
+  const root = args.baseURL.replace(/\/$/, "");
+  const res = await fetch(`${root}/images/generations`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${args.apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: args.model,
+      prompt: args.prompt,
+      size: args.size ?? DEFAULT_FLUX_GENERATION_SIZE,
+    }),
+    signal: AbortSignal.timeout(280_000),
+  });
+  const text = await res.text();
+  if (!res.ok) {
+    let detail = text.slice(0, 800);
+    try {
+      const errJson = JSON.parse(text) as ImagesEditJson & { message?: string };
+      detail = errJson.error?.message ?? errJson.message ?? detail;
+    } catch {
+      /* keep raw */
+    }
+    throw new Error(`图像生成接口 ${res.status}: ${detail}`);
+  }
+  let json: ImagesEditJson;
+  try {
+    json = JSON.parse(text) as ImagesEditJson;
+  } catch {
+    throw new Error("图像生成接口返回不是合法 JSON。");
+  }
+  return firstUrlFromImagesEditJson(json);
+}
+
 /**
  * 贞贞等逆向分组：用原生 multipart 只传文档字段，避免 OpenAI SDK 附加字段导致
  * `multipart: NextPart: EOF` 等网关解析失败。
@@ -141,6 +186,8 @@ export async function imagesEditViaGatewayMultipart(args: {
   aspectRatio?: ImageAspectRatioOption;
   /** Nano-banana-2(Pro)(Edits)：image_size */
   imageSize?: ImageSizeKOption;
+  /** Flux（Edits 兼容调用时的 size，WxH） */
+  fluxSize?: FluxGenerationSizeOption | string;
   responseFormat?: "url" | "b64_json";
 }): Promise<string | null> {
   if (args.images.length === 0) {
@@ -153,6 +200,7 @@ export async function imagesEditViaGatewayMultipart(args: {
   }
 
   const nanoBanana = imageModelUsesNanoBananaEdits(args.model);
+  const flux = imageModelUsesFluxGenerations(args.model);
   const root = args.baseURL.replace(/\/$/, "");
   const form = new FormData();
   form.append("model", args.model);
@@ -161,6 +209,8 @@ export async function imagesEditViaGatewayMultipart(args: {
     form.append("response_format", args.responseFormat ?? "url");
     if (args.aspectRatio) form.append("aspect_ratio", args.aspectRatio);
     if (args.imageSize) form.append("image_size", args.imageSize);
+  } else if (flux) {
+    form.append("size", args.fluxSize ?? args.size ?? DEFAULT_FLUX_GENERATION_SIZE);
   } else {
     form.append("size", args.size ?? "1024x1024");
     form.append("quality", args.quality ?? "high");
@@ -206,25 +256,30 @@ export async function imagesEditViaGatewayMultipart(args: {
 export function buildOpenAiImagesEditParams(
   baseURL: string,
   core: ImagesEditCore,
+  options?: { fluxSize?: string },
 ): OpenAI.Images.ImageEditParams {
-  const size = core.size ?? "1024x1024";
+  const flux = imageModelUsesFluxGenerations(core.model);
+  const size = (flux && options?.fluxSize
+    ? options.fluxSize
+    : (core.size ?? "1024x1024")) as OpenAI.Images.ImageEditParams["size"];
   const quality = core.quality ?? "high";
-  const common = {
+  const common: OpenAI.Images.ImageEditParams = {
     model: core.model,
     image: core.image,
     prompt: core.prompt,
     size,
-    quality,
-    n: 1 as const,
-    stream: false as const,
+    n: 1,
+    stream: false,
+    ...(flux ? {} : { quality }),
   };
-  if (openAiImagesEditUsesMinimalParams(baseURL)) {
+  if (openAiImagesEditUsesMinimalParams(baseURL) || flux) {
     return common;
   }
   return {
     ...common,
-    background: "opaque" as const,
-    output_format: "png" as const,
-    input_fidelity: "high" as const,
+    quality,
+    background: "opaque",
+    output_format: "png",
+    input_fidelity: "high",
   };
 }

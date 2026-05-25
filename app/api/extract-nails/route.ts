@@ -51,6 +51,7 @@ import {
   parseSoloImageEditPrompt,
 } from "@/lib/solo-image-edit-prompt";
 import {
+  imageModelUsesFluxGenerations,
   parseGatewayEditFieldsFromForm,
   type ParsedGatewayEditFields,
 } from "@/lib/image-gateway-fields";
@@ -395,14 +396,36 @@ async function editOnce(
   prompt: string,
   gateway: ParsedGatewayEditFields,
 ): Promise<string | null> {
-  const { model, aspectRatio, imageSize } = gateway;
+  const { model, aspectRatio, imageSize, fluxSize } = gateway;
+  const images = [{ buffer, mime, filename: `input.${ext}` }];
+  if (imageModelUsesFluxGenerations(model)) {
+    if (openAiImagesEditUsesMinimalParams(ctx.baseURL)) {
+      return imagesEditViaGatewayMultipart({
+        apiKey: ctx.apiKey,
+        baseURL: ctx.baseURL,
+        model,
+        prompt,
+        images,
+        fluxSize,
+      });
+    }
+    const uploadable = await toFile(buffer, `input.${ext}`, { type: mime });
+    const res = (await ctx.openai.images.edit(
+      buildOpenAiImagesEditParams(
+        ctx.baseURL,
+        { model, image: uploadable, prompt },
+        { fluxSize },
+      ),
+    )) as OpenAI.Images.ImagesResponse;
+    return firstImageUrl(res);
+  }
   if (openAiImagesEditUsesMinimalParams(ctx.baseURL)) {
     return imagesEditViaGatewayMultipart({
       apiKey: ctx.apiKey,
       baseURL: ctx.baseURL,
       model,
       prompt,
-      images: [{ buffer, mime, filename: `input.${ext}` }],
+      images,
       aspectRatio,
       imageSize,
     });
@@ -446,27 +469,54 @@ async function editDualSceneNails(
   prompt: string,
   gateway: ParsedGatewayEditFields,
 ): Promise<string | null> {
-  const { model, aspectRatio, imageSize } = gateway;
+  const { model, aspectRatio, imageSize, fluxSize } = gateway;
   const sceneExt = extFromMime(sceneMime);
   const nailsExt = extFromMime(nailsMime);
+  const images = [
+    {
+      buffer: sceneBuffer,
+      mime: sceneMime,
+      filename: `scene.${sceneExt}`,
+    },
+    {
+      buffer: nailsBuffer,
+      mime: nailsMime,
+      filename: `nails.${nailsExt}`,
+    },
+  ];
+  if (imageModelUsesFluxGenerations(model)) {
+    if (openAiImagesEditUsesMinimalParams(ctx.baseURL)) {
+      return imagesEditViaGatewayMultipart({
+        apiKey: ctx.apiKey,
+        baseURL: ctx.baseURL,
+        model,
+        prompt,
+        images,
+        fluxSize,
+      });
+    }
+    const sceneFile = await toFile(sceneBuffer, `scene.${sceneExt}`, {
+      type: sceneMime,
+    });
+    const nailsFile = await toFile(nailsBuffer, `nails.${nailsExt}`, {
+      type: nailsMime,
+    });
+    const res = (await ctx.openai.images.edit(
+      buildOpenAiImagesEditParams(
+        ctx.baseURL,
+        { model, image: [sceneFile, nailsFile], prompt },
+        { fluxSize },
+      ),
+    )) as OpenAI.Images.ImagesResponse;
+    return firstImageUrl(res);
+  }
   if (openAiImagesEditUsesMinimalParams(ctx.baseURL)) {
     return imagesEditViaGatewayMultipart({
       apiKey: ctx.apiKey,
       baseURL: ctx.baseURL,
       model,
       prompt,
-      images: [
-        {
-          buffer: sceneBuffer,
-          mime: sceneMime,
-          filename: `scene.${sceneExt}`,
-        },
-        {
-          buffer: nailsBuffer,
-          mime: nailsMime,
-          filename: `nails.${nailsExt}`,
-        },
-      ],
+      images,
       aspectRatio,
       imageSize,
     });
@@ -638,6 +688,19 @@ export async function POST(request: Request) {
     formData,
     getImageModel(),
   );
+
+  if (
+    useReplicate &&
+    imageModelUsesFluxGenerations(gatewayEdit.model)
+  ) {
+    return Response.json(
+      {
+        error:
+          "Flux 模型仅支持 OpenAI 兼容中转（/v1/images/generations 或 Edits）。请将 IMAGE_PROVIDER 设为 openai，或改用默认 / Nano-banana-2 模型。",
+      },
+      { status: 400 },
+    );
+  }
 
   const replAuth = replicateDownloadAuth(imageCtx);
 

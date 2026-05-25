@@ -325,6 +325,7 @@ export default function Home() {
   const [mode, setMode] = useState<GenerationMode>("extract_ten_grid");
   /** 空字符串：不传 imageModel，由服务器 OPENAI_IMAGE_MODEL 决定（未设置则为 gpt-image-2） */
   const [imageModelChoice, setImageModelChoice] = useState("");
+  const [imageFluxSize, setImageFluxSize] = useState("1024x1024");
   const [nailBoxArrangement, setNailBoxArrangement] =
     useState<NailsInBoxArrangement>("vertical");
   const [nailShapeProfile, setNailShapeProfile] =
@@ -1197,6 +1198,13 @@ export default function Home() {
       if (imageModelChoice.trim()) {
         body.set("imageModel", imageModelChoice.trim());
       }
+      if (
+        imageModelChoice.trim() &&
+        imageFluxSize.trim() &&
+        /^(flux|flux-dev|flux-pro)$/i.test(imageModelChoice.trim())
+      ) {
+        body.set("imageFluxSize", imageFluxSize.trim());
+      }
       if (tenMode) {
         for (let i = 0; i < 10; i++) {
           const f = tenSlots[i]!.file;
@@ -1455,6 +1463,7 @@ export default function Home() {
     secondFile,
     mode,
     imageModelChoice,
+    imageFluxSize,
     tenMode,
     tenSlots,
     panelColorHex,
@@ -1786,6 +1795,8 @@ export default function Home() {
                 setImageModelChoice(v);
                 clearResults();
               }}
+              fluxSize={imageFluxSize}
+              onFluxSizeChange={setImageFluxSize}
             />
           </div>
           <SiteAccessLogout />
