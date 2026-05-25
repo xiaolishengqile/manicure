@@ -12,6 +12,8 @@ import {
   parseGenerationMode,
   parseNailsInBoxArrangement,
   modeAllowsPartialDualVariants,
+  filterParallelImageJobs,
+  parseParallelVariantChoice,
   promptsForMode,
   type GenerationImageJob,
   type GenerationMode,
@@ -1122,7 +1124,27 @@ export async function POST(request: Request) {
             variant: "spacing_only",
           })
         : "";
-  const jobs = resolveImageEditJobs(mode, extractGridAddendum);
+  const variantChoice = parseParallelVariantChoice(
+    formData.get("parallelVariantChoice"),
+  );
+  const jobs = filterParallelImageJobs(
+    resolveImageEditJobs(mode, extractGridAddendum),
+    variantChoice,
+    mode,
+  );
+  if (jobs.length === 0) {
+    return Response.json(
+      {
+        error:
+          variantChoice === "a"
+            ? "未找到方案 A 生成任务。"
+            : variantChoice === "b"
+              ? "未找到方案 B 生成任务。"
+              : "没有可执行的生成任务。",
+      },
+      { status: 400 },
+    );
+  }
 
   let planALayoutRef: { buffer: Buffer; mime: string } | null = null;
   if (mode === "extract_angle_scattered") {

@@ -12,11 +12,14 @@ import {
   modeIsVerticalToScatteredFlatLay,
   modeShowsWhiteGridLayoutPanel,
   parallelImageJobCountForMode,
+  parallelVariantChoiceFromSlotIndex,
+  promptsForMode,
   modeUsesDominantColorExtraction,
   modeUsesWhiteGridFormFields,
   requiresTenSingleNails,
   type GenerationMode,
   type NailsInBoxArrangement,
+  type ParallelVariantChoice,
 } from "@/lib/generation-modes";
 import {
   DEFAULT_NAIL_SHAPE_PROFILE,
@@ -366,6 +369,9 @@ export default function Home() {
   const [feedFromResultBusyIndex, setFeedFromResultBusyIndex] = useState<
     number | null
   >(null);
+  const [regenerateBusyIndex, setRegenerateBusyIndex] = useState<number | null>(
+    null,
+  );
   /** 下标 0–9 即合成第 1–10 位顺序，与 FormData append 顺序一致 */
   const [tenSlots, setTenSlots] = useState<TenSlotCell[]>(() => emptyTenSlots());
 
@@ -1124,7 +1130,16 @@ export default function Home() {
     [clearResults],
   );
 
-  const onExtract = useCallback(async () => {
+  const onExtract = useCallback(async (opts?: {
+    variantChoice?: ParallelVariantChoice;
+    mergeSlotIndex?: number;
+  }) => {
+    const variantChoice = opts?.variantChoice ?? "all";
+    const mergeSlotIndex = opts?.mergeSlotIndex;
+    const isPartialRegen =
+      variantChoice !== "all" &&
+      mergeSlotIndex !== undefined &&
+      modeIsVerticalToScatteredFlatLay(mode);
     if (tenMode) {
       if (!tenSlots.every((s) => s.file)) {
         setError("请填满全部 10 个格子后再生成（可逐格添加或一次选 10 张）。");
@@ -1154,11 +1169,31 @@ export default function Home() {
 
     setLoading(true);
     setError(null);
-    clearResults();
-    downloadBatchStampRef.current = formatDownloadBatchStamp();
+    if (isPartialRegen) {
+      setRegenerateBusyIndex(mergeSlotIndex!);
+      const slotCount = parallelImageJobCountForMode(mode);
+      setStreamSlots(
+        Array.from({ length: slotCount }, (_, i) => {
+          if (i === mergeSlotIndex) return null;
+          const url = resultUrls[i];
+          if (!url) return null;
+          return {
+            url,
+            exportUrl: resultExportUrlsRef.current[i] ?? url,
+            label: resultLabels[i] ?? `图 ${i + 1}`,
+          };
+        }),
+      );
+    } else {
+      clearResults();
+      downloadBatchStampRef.current = formatDownloadBatchStamp();
+    }
     try {
       const body = new FormData();
       body.set("mode", mode);
+      if (variantChoice !== "all") {
+        body.set("parallelVariantChoice", variantChoice);
+      }
       if (imageModelChoice.trim()) {
         body.set("imageModel", imageModelChoice.trim());
       }
@@ -1243,7 +1278,10 @@ export default function Home() {
       if (gatewayApiKey.trim()) {
         body.set("gatewayApiKey", gatewayApiKey.trim());
       }
-      const jobStreamN = parallelStreamJobCount(mode);
+      const jobStreamN =
+        parallelStreamJobCount(mode) > 0 && variantChoice === "all"
+          ? parallelStreamJobCount(mode)
+          : 0;
       if (jobStreamN > 0) {
         body.set("streamResults", "1");
         setStreamSlots(Array.from({ length: jobStreamN }, () => null));
@@ -1338,12 +1376,30 @@ export default function Home() {
           throw new Error("未收到结果图片（流可能中断）。");
         }
         setStreamSlots(null);
-        commitResultUrls(
-          finalUrls,
-          finalLabels.length
-            ? finalLabels
-            : finalUrls.map((_, i) => `图 ${i + 1}`),
-        );
+        if (isPartialRegen && mergeSlotIndex !== undefined) {
+          const slotCount = parallelImageJobCountForMode(mode);
+          const defaultLabels = promptsForMode(mode).map((j) => j.label);
+          const mergedExports = [...resultExportUrlsRef.current];
+          const mergedLabels = [...resultLabels];
+          while (mergedExports.length < slotCount) mergedExports.push("");
+          while (mergedLabels.length < slotCount) {
+            mergedLabels.push(
+              defaultLabels[mergedLabels.length] ??
+                `图 ${mergedLabels.length + 1}`,
+            );
+          }
+          mergedExports[mergeSlotIndex] = finalUrls[0]!;
+          mergedLabels[mergeSlotIndex] =
+            finalLabels[0] ?? mergedLabels[mergeSlotIndex]!;
+          commitResultUrls(mergedExports, mergedLabels);
+        } else {
+          commitResultUrls(
+            finalUrls,
+            finalLabels.length
+              ? finalLabels
+              : finalUrls.map((_, i) => `图 ${i + 1}`),
+          );
+        }
       } else {
         const data = (await res.json()) as {
           imageUrls?: string[];
@@ -1363,13 +1419,32 @@ export default function Home() {
           throw new Error("未收到结果图片。");
         }
         setStreamSlots(null);
-        commitResultUrls(urls, data.labels ?? urls.map((_, i) => `图 ${i + 1}`));
+        if (isPartialRegen && mergeSlotIndex !== undefined) {
+          const slotCount = parallelImageJobCountForMode(mode);
+          const defaultLabels = promptsForMode(mode).map((j) => j.label);
+          const mergedExports = [...resultExportUrlsRef.current];
+          const mergedLabels = [...resultLabels];
+          while (mergedExports.length < slotCount) mergedExports.push("");
+          while (mergedLabels.length < slotCount) {
+            mergedLabels.push(
+              defaultLabels[mergedLabels.length] ??
+                `图 ${mergedLabels.length + 1}`,
+            );
+          }
+          mergedExports[mergeSlotIndex] = urls[0]!;
+          mergedLabels[mergeSlotIndex] =
+            (data.labels?.[0] ?? mergedLabels[mergeSlotIndex])!;
+          commitResultUrls(mergedExports, mergedLabels);
+        } else {
+          commitResultUrls(urls, data.labels ?? urls.map((_, i) => `图 ${i + 1}`));
+        }
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "处理失败");
       setStreamSlots(null);
     } finally {
       setStreamSlots(null);
+      setRegenerateBusyIndex(null);
       setLoading(false);
     }
   }, [
@@ -1397,7 +1472,18 @@ export default function Home() {
     prepareResultUrlForDisplay,
     gatewayProvider,
     gatewayApiKey,
+    resultUrls,
+    resultLabels,
   ]);
+
+  const onRegenerateVariant = useCallback(
+    (slotIndex: number) => {
+      const choice = parallelVariantChoiceFromSlotIndex(slotIndex);
+      if (!choice) return;
+      void onExtract({ variantChoice: choice, mergeSlotIndex: slotIndex });
+    },
+    [onExtract],
+  );
 
   const clearUserNotes = useCallback(() => {
     setUserExtraNotes("");
@@ -1750,7 +1836,7 @@ export default function Home() {
         <button
           type="button"
           disabled={!canSubmit}
-          onClick={onExtract}
+          onClick={() => void onExtract()}
           className="inline-flex h-14 w-full items-center justify-center rounded-xl bg-rose-600 text-base font-semibold text-white shadow-md transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:bg-zinc-300 disabled:text-zinc-500"
         >
           {loading
@@ -2092,7 +2178,7 @@ export default function Home() {
                   : modeIsPhotoExtractToGrid(mode)
                     ? "抠图保真度与排版"
                     : "甲型保真度与竖直/间距"}
-                ，选用更合适的一张；可点「转为投喂图片」继续处理。
+                ，选用更合适的一张；若只满意其中一张，可点该图下方「重新生成此方案」单独重跑，另一张会保留。
               </p>
             ) : null}
             <div className="min-h-[200px] rounded-xl border border-zinc-200 bg-zinc-50/50 p-4">
@@ -2180,6 +2266,27 @@ export default function Home() {
                             {feedFromResultBusyIndex === i
                               ? "处理中…"
                               : "转为投喂图片"}
+                          </button>
+                        ) : null}
+                        {modeIsVerticalToScatteredFlatLay(mode) &&
+                        parallelVariantChoiceFromSlotIndex(i) ? (
+                          <button
+                            type="button"
+                            disabled={
+                              loading ||
+                              !slot ||
+                              regenerateBusyIndex === i ||
+                              downloadBusyIndex === i ||
+                              copyBusyIndex === i ||
+                              feedFromResultBusyIndex === i
+                            }
+                            onClick={() => onRegenerateVariant(i)}
+                            title="仅重新生成当前方案（方案 A 或 B），另一张结果会保留"
+                            className="inline-flex h-9 min-w-[7.5rem] items-center justify-center rounded-lg border border-zinc-300 bg-white px-3 text-sm font-medium text-zinc-800 shadow-sm transition hover:border-rose-400 hover:bg-rose-50 hover:text-rose-900 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {regenerateBusyIndex === i
+                              ? "重新生成中…"
+                              : "重新生成此方案"}
                           </button>
                         ) : null}
                       </div>

@@ -1108,6 +1108,60 @@ export function modeAllowsPartialDualVariants(mode: GenerationMode): boolean {
   return parallelImageJobCountForMode(mode) > 1;
 }
 
+/** 斜拍散落等并行模式：全部 / 仅方案 A / 仅方案 B */
+export type ParallelVariantChoice = "all" | "a" | "b";
+
+export function parseParallelVariantChoice(
+  raw: FormDataEntryValue | null,
+): ParallelVariantChoice {
+  const s = typeof raw === "string" ? raw.trim().toLowerCase() : "";
+  if (s === "a" || s === "0" || s === "scheme_a") return "a";
+  if (s === "b" || s === "1" || s === "scheme_b") return "b";
+  return "all";
+}
+
+/** 方案 A/B 在并行结果中的固定下标（斜拍散落） */
+export function extractAngleScatteredVariantSlotIndex(
+  choice: Exclude<ParallelVariantChoice, "all">,
+): 0 | 1 {
+  return choice === "a" ? 0 : 1;
+}
+
+export function parallelVariantChoiceFromSlotIndex(
+  slotIndex: number,
+): Exclude<ParallelVariantChoice, "all"> | null {
+  if (slotIndex === 0) return "a";
+  if (slotIndex === 1) return "b";
+  return null;
+}
+
+function jobMatchesParallelVariantChoice(
+  label: string,
+  choice: Exclude<ParallelVariantChoice, "all">,
+): boolean {
+  if (choice === "a") {
+    return label.includes("方案 A") || label.includes("同步倾斜");
+  }
+  return label.includes("方案 B") || label.includes("散乱排布");
+}
+
+/** 按方案筛选并行任务；`all` 或未识别模式时原样返回 */
+export function filterParallelImageJobs(
+  jobs: ReadonlyArray<GenerationImageJob>,
+  choice: ParallelVariantChoice,
+  mode: GenerationMode,
+): GenerationImageJob[] {
+  if (choice === "all" || jobs.length <= 1) {
+    return jobs.map((j) => ({ ...j }));
+  }
+  if (mode !== "extract_angle_scattered") {
+    return jobs.map((j) => ({ ...j }));
+  }
+  return jobs
+    .filter((j) => jobMatchesParallelVariantChoice(j.label, choice))
+    .map((j) => ({ ...j }));
+}
+
 export function promptsForMode(mode: GenerationMode): { prompt: string; label: string }[] {
   switch (mode) {
     case "extract_ten_grid": {
