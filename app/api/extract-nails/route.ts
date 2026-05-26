@@ -9,6 +9,7 @@ import {
   extractAngleScatteredJobUsesPlanALayoutRef,
   buildNailsInBoxPackagingPrompt,
   modeUsesDominantColorExtraction,
+  generationModeOption,
   parseGenerationMode,
   parseNailsInBoxArrangement,
   modeAllowsPartialDualVariants,
@@ -22,6 +23,7 @@ import {
   buildScaledSingleNailGrid,
   buildTenSinglesCollageReference,
 } from "@/lib/ten-singles-collage";
+import { buildDuplicatedRowGridFromOneRow } from "@/lib/single-row-split";
 import {
   buildWhiteGridLayoutPromptAddendum,
   parseTenSinglesGridLayoutFromFormData,
@@ -1122,6 +1124,7 @@ export async function POST(request: Request) {
   let mime = nailsOnly.mime;
   if (
     mode === "complete_single_grid" ||
+    mode === "single_row_to_grid" ||
     mode === "extract_ten_grid" ||
     mode === "extract_angle_scattered" ||
     mode === "white_grid_rectify"
@@ -1132,6 +1135,64 @@ export async function POST(request: Request) {
     mime = pre.mime;
   }
   const ext = extFromMime(mime);
+
+  if (mode === "single_row_to_grid") {
+    const gridLayout = parseTenSinglesGridLayoutFromFormData(formData);
+    const skipRowModel = formData.get("skipRowModel") === "1";
+    const job = promptsForMode(mode)[0];
+
+    try {
+      let oneRowBuffer = buffer;
+      if (!skipRowModel) {
+        if (!job) {
+          return Response.json(
+            { error: "未找到单行复制成双行提示词。" },
+            { status: 500 },
+          );
+        }
+        const oneRowUrl = await editOnceRoute(
+          imageCtx,
+          buffer,
+          ext,
+          mime,
+          imageEditPrompt(job.prompt),
+          gatewayEdit,
+        );
+        if (!oneRowUrl) {
+          return Response.json(
+            { error: "模型未返回单行美甲图（既无 url 也无 b64_json）。" },
+            { status: 502 },
+          );
+        }
+        oneRowBuffer = await imageUrlToBuffer(oneRowUrl, {
+          replicateDownloadAuth: replAuth,
+        });
+      }
+
+      const gridBuffer = await buildDuplicatedRowGridFromOneRow(
+        oneRowBuffer,
+        gridLayout,
+      );
+      const gridUrl = `data:image/png;base64,${gridBuffer.toString("base64")}`;
+
+      const label = skipRowModel
+        ? "白底栅格 · 单行复制成双行（跳过模型）"
+        : job?.label ?? generationModeOption("single_row_to_grid").label;
+
+      return Response.json({
+        imageUrls: [gridUrl],
+        labels: [label],
+        imageUrl: gridUrl,
+        mode,
+      });
+    } catch (e) {
+      const message =
+        e instanceof Error
+          ? e.message
+          : "单行规整或服务端复制拼接失败";
+      return Response.json({ error: message }, { status: 502 });
+    }
+  }
 
   if (mode === "complete_single_grid") {
     const gridLayout = parseTenSinglesGridLayoutFromFormData(formData);

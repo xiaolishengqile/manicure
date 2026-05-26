@@ -8,6 +8,7 @@ export type GenerationMode =
   | "extract_angle_scattered"
   | "white_grid_rectify"
   | "complete_single_grid"
+  | "single_row_to_grid"
   | "multi_angle"
   | "packaging_mockup"
   | "flat_to_3d_packaging"
@@ -59,6 +60,14 @@ export const GENERATION_MODE_OPTIONS: {
     whenToUse: "一张图里 mainly 一枚代表款，要补满 10 格同款",
     description:
       "约定上传**甲尖朝下**的单枚（或含一枚主款）照片；服务端仅 **EXIF 转正**（不整图 180°）后送模型高清抠出一枚，再由服务端按五列**相对宽度**复制成 2×5 白底栅格以体现拇→小的尺码差。**可选**：「白底栅格排版」调节五列宽、外留白与列/行缝。",
+  },
+  {
+    value: "single_row_to_grid",
+    label: "白底栅格 · 单行复制成双行",
+    shortLabel: "一行五甲 · 复制成 2×5",
+    whenToUse: "已有一行五枚平铺（拇→小），要补成完整 2×5 背卡",
+    description:
+      "上传**一行五枚**商品甲片（甲尖朝下、左→右大拇指至小指）。默认由模型**抠出/规整这一行**（不改甲型长短；甲根齐线、甲尖阶梯）；也可勾选**跳过模型**直接裁切。服务端将**同一行复制一遍**上下拼成 2×5 成品（无角标、紧排）。**可选**：「白底栅格排版」调节列缝/行缝。",
   },
   {
     value: "ten_singles_grid",
@@ -141,6 +150,7 @@ export const GENERATION_MODE_GROUPS: {
       "extract_angle_scattered",
       "white_grid_rectify",
       "complete_single_grid",
+      "single_row_to_grid",
       "ten_singles_grid",
     ],
   },
@@ -173,6 +183,7 @@ export function generationModeOption(value: GenerationMode) {
 export function modeUsesWhiteGridFormFields(mode: GenerationMode): boolean {
   return (
     mode === "complete_single_grid" ||
+    mode === "single_row_to_grid" ||
     mode === "extract_ten_grid" ||
     mode === "white_grid_rectify"
   );
@@ -183,6 +194,7 @@ export function modeShowsWhiteGridLayoutPanel(mode: GenerationMode): boolean {
   return (
     mode === "ten_singles_grid" ||
     mode === "complete_single_grid" ||
+    mode === "single_row_to_grid" ||
     mode === "extract_ten_grid" ||
     mode === "white_grid_rectify"
   );
@@ -211,6 +223,7 @@ export function parseGenerationMode(raw: FormDataEntryValue | null): GenerationM
     s === "extract_angle_scattered" ||
     s === "white_grid_rectify" ||
     s === "complete_single_grid" ||
+    s === "single_row_to_grid" ||
     s === "multi_angle" ||
     s === "packaging_mockup" ||
     s === "flat_to_3d_packaging" ||
@@ -857,6 +870,42 @@ ${PACKSHOT_OUTPUT_COMPLIANCE_EN}
 
 Return **one** square, catalog-ready image.`;
 
+/** 单行五甲：模型只出一行；服务端原样复制该行拼 2×5（参考单甲补齐流程） */
+const SINGLE_ROW_EXTRACT_ONE_ROW_PROMPT = `You act as a **professional e-commerce product retoucher**.
+
+TASK — **one-row extraction and cleanup only** (not creative redesign, not a second row). The **server** will **duplicate this exact row** into top + bottom rows of a **2×5** sheet — your output must be **exactly ONE horizontal row of five nails**.
+
+${PACKSHOT_FIDELITY_CLEANUP_BG_EN}
+
+Edit the provided reference: **one horizontal row** of press-on / stick-on nails (or a photo where **five** nails in one row are clearly visible).
+
+PIPELINE / ORIENTATION (must match server):
+- **EXIF upright only** on upload — **no** global **180°** flip. User convention: **tips down / roots up** (free edge toward **bottom**, cuticle toward **top**).
+- **Left → right = thumb → index → middle → ring → pinky**. **Do not** mirror the row or swap column order.
+
+FIDELITY — SHAPE + LENGTH (hard; overrides “prettier” layout):
+- Each of the **five** nails must keep the **same silhouette, length, width, C-curve, and nail-art** as that nail in the source — **no** shortening, lengthening, reshaping, stretch, squish, or liquify to fit the frame.
+- **Aspect-ratio lock** per nail: placed height:width must match the source cutout within a few percent.
+- **Allowed:** **rigid in-plane rotation** to **yaw = 0°** + **rigid translation** for row alignment; **forbidden** non-uniform rescale that changes the sold SKU.
+
+ROW GEOMETRY (mandatory for all five nails in your **one** output row):
+${WHITE_BG_NAIL_GRID_TOP_BASELINE}
+${PACKSHOT_TIP_STAGGER_ROW_EN}
+- **Forbidden:** aligning all five **tips** on one horizontal line while roots step — retail **trapezoid / stair-step** free edges are required when the source row shows them.
+
+SERVER DUPLICATION (do not do the server's job):
+- **Forbidden:** outputting **two** rows, a **2×5** grid, ten nails, or a “preview” duplicate row. Output **one** row only — the server copies it verbatim for the bottom row.
+
+OUTPUT:
+- **Exactly five** nails, **one** horizontal row, pure **#FFFFFF** (or **#F7F7F7**) background.
+- Each nail **upright**, yaw **0°**, crisp cutout edges; soft even studio light.
+
+${WHITE_BG_NAIL_GRID_FINGER_LADDER}
+
+${PACKSHOT_OUTPUT_COMPLIANCE_EN}
+
+Return **one** wide catalog-ready image with **only one row of five nails**.`;
+
 /** 正视上手 — 甲型保真（不拉长、不改型、不偷换列位形状） */
 const MULTI_ANGLE_SHAPE_FIDELITY_EN = `1) NAIL SHAPE — DO NOT CHANGE (failure if violated):
 - Each worn press-on must match the **reference nail for that finger's column** in **length, width, C-curve, thickness, apex, and free-edge profile** (square / round / almond / coffin / stiletto, etc.).
@@ -1202,6 +1251,13 @@ export function promptsForMode(mode: GenerationMode): { prompt: string; label: s
         {
           prompt: COMPLETE_SINGLE_GRID_PROMPT,
           label: GENERATION_MODE_OPTIONS.find((o) => o.value === "complete_single_grid")!.label,
+        },
+      ];
+    case "single_row_to_grid":
+      return [
+        {
+          prompt: SINGLE_ROW_EXTRACT_ONE_ROW_PROMPT,
+          label: generationModeOption("single_row_to_grid").label,
         },
       ];
     case "multi_angle":

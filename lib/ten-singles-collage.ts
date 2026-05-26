@@ -331,3 +331,83 @@ export async function buildScaledSingleNailGrid(
     .png({ compressionLevel: 6 })
     .toBuffer();
 }
+
+/**
+ * 单行五枚（已裁切）→ 复制为上下两排 2×5 **成品图**。
+ * - 无角标（区别于 buildTenSinglesCollageReference）
+ * - 行高按内容收紧，两排纵向居中，避免半幅空格子
+ * - 仅用 colWidthFrac 作列宽上限，不强制拉高到整格（保甲型/长短与指尖阶梯）
+ */
+export async function buildDuplicatedFiveNailRowGrid(
+  fiveNailBuffers: Buffer[],
+  layout: TenSinglesGridLayout = DEFAULT_TEN_SINGLES_GRID_LAYOUT,
+): Promise<Buffer> {
+  if (fiveNailBuffers.length !== 5) {
+    throw new Error("buildDuplicatedFiveNailRowGrid requires exactly 5 buffers");
+  }
+
+  const W = COLLAGE_SIDE;
+  const H = COLLAGE_SIDE;
+  const margin = Math.round(W * layout.marginFrac);
+  const cols = 5;
+  const rows = 2;
+  const innerW = W - 2 * margin;
+  const innerH = H - 2 * margin;
+  const gutter =
+    cols > 1
+      ? Math.round((innerW * layout.colGutterSumFrac) / (cols - 1))
+      : 0;
+  const rowGutter =
+    rows > 1
+      ? Math.round((innerH * layout.rowGutterSumFrac) / (rows - 1))
+      : 0;
+  const cellW = (innerW - (cols - 1) * gutter) / cols;
+  const cellH = (innerH - (rows - 1) * rowGutter) / rows;
+  const cw = Math.round(cellW);
+  const chCap = Math.round(cellH);
+
+  const prepared: Buffer[] = [];
+  for (let c = 0; c < cols; c++) {
+    let buf = await trimWhiteEdges(fiveNailBuffers[c]!);
+    const maxW = Math.max(1, Math.round(cw * (layout.colWidthFrac[c] ?? 0.87)));
+    const { w } = await pngMeta(buf);
+    if (w > maxW) {
+      buf = await sharp(buf)
+        .resize({ width: maxW, withoutEnlargement: true })
+        .png()
+        .toBuffer();
+    }
+    prepared.push(await applyNailScaleToInner(buf, layout, c));
+  }
+
+  const heights = await Promise.all(prepared.map(async (b) => (await pngMeta(b)).h));
+  const maxH = Math.max(...heights);
+  const chRow = Math.max(1, Math.min(chCap, maxH + 6));
+
+  const rowCells = await placeRowWithAlignedRoots(prepared, cw, chRow);
+  const blockH = rows * chRow + (rows - 1) * rowGutter;
+  const blockTop = margin + Math.max(0, Math.round((innerH - blockH) / 2));
+
+  const composites: sharp.OverlayOptions[] = [];
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      composites.push({
+        input: rowCells[c]!,
+        left: Math.round(margin + c * (cellW + gutter)),
+        top: Math.round(blockTop + r * (chRow + rowGutter)),
+      });
+    }
+  }
+
+  return sharp({
+    create: {
+      width: W,
+      height: H,
+      channels: 3,
+      background: { r: 255, g: 255, b: 255 },
+    },
+  })
+    .composite(composites)
+    .png({ compressionLevel: 6 })
+    .toBuffer();
+}

@@ -344,6 +344,8 @@ export default function Home() {
     ...DEFAULT_NAIL_SCALE_PCT_DRAFTS,
   ]);
   const [lockNailAspectRatio, setLockNailAspectRatio] = useState(true);
+  /** 单行复制成双行：仅裁切+拼接，不调用模型规整 */
+  const [skipSingleRowModel, setSkipSingleRowModel] = useState(false);
   const nailAspectLockRatioRef = useRef<number[]>([1, 1, 1, 1, 1]);
   const [gridPresets, setGridPresets] = useState<GridLayoutPreset[]>([]);
   const [gridPresetSelectedIndex, setGridPresetSelectedIndex] = useState<
@@ -1250,6 +1252,9 @@ export default function Home() {
           body.set("packagingBoxImage", secondFile);
           body.set("nailArrangement", nailBoxArrangement);
         }
+        if (mode === "single_row_to_grid" && skipSingleRowModel) {
+          body.set("skipRowModel", "1");
+        }
         if (modeUsesWhiteGridFormFields(mode)) {
           body.set("nailGridColWidths", serializeColWidthDrafts(colWidthDrafts));
           body.set(
@@ -1656,7 +1661,9 @@ export default function Home() {
                     ? "产出（白底栅格 · 几何矫正 · 1张）"
                     : mode === "complete_single_grid"
                       ? "产出（白底栅格 · 单甲补齐10支）"
-                      : "产出";
+                      : mode === "single_row_to_grid"
+                        ? "产出（白底栅格 · 单行复制成双行 · 1张）"
+                        : "产出";
 
   const gridClass =
     parallelImageJobCountForMode(mode) > 1
@@ -1720,7 +1727,9 @@ export default function Home() {
         ? "点击选择已生成的 2×5 白底栅格图"
         : mode === "complete_single_grid"
           ? "点击选择单枚甲片照片"
-          : "点击选择美甲照片";
+          : mode === "single_row_to_grid"
+            ? "点击选择一行五枚甲片照片"
+            : "点击选择美甲照片";
   const singleUploadHint =
     mode === "extract_angle_scattered"
       ? "输入须为**竖直甲片**（常见 2×5）；**A/B 均须恰好 10 枚**、**纯白底**、互不压住；**A** 双图（你的产品图 + 内置斜拍参考排版），只学参考的位置与同列共线，**花色仍来自你的产品图**；**B** 随机打散；并行 **2 张**择优"
@@ -1730,7 +1739,9 @@ export default function Home() {
           ? "请上传 2×5 白底成品图。**不改甲型与长短**，仅刚性旋转摆正歪斜，用外留白/列缝/行间缝控距；每次生成 **1 张**"
           : mode === "complete_single_grid"
             ? "请上传甲尖朝下、甲根朝上的单枚（或含一枚主款）；仅做 EXIF 转正后由模型抠出一枚高清单甲，再由服务端按五列相对宽度复制成 10 格"
-            : "支持常见图片格式";
+            : mode === "single_row_to_grid"
+              ? "上传**一行五枚**平铺（左→右大拇指至小指，甲尖朝下）；模型只规整这一行（保甲型长短、甲根齐线、甲尖阶梯），服务端**原样复制一行**裁切后拼成 2×5"
+              : "支持常见图片格式";
 
   useEffect(() => {
     if (!showPanelColorPicker || !previewUrl || panelColorSource !== "auto") {
@@ -1869,7 +1880,9 @@ export default function Home() {
                           ? "正在合成十甲白底合集…"
                           : mode === "complete_single_grid"
                             ? "正在生成单甲并拼成 10 枚…"
-                            : mode === "extract_ten_grid"
+                            : mode === "single_row_to_grid"
+                              ? "正在规整单行并复制拼接 2×5…"
+                              : mode === "extract_ten_grid"
                               ? "正在抠图排版…"
                               : mode === "extract_angle_scattered"
                                 ? "正在生成散落实拍（2张）…"
@@ -2170,6 +2183,22 @@ export default function Home() {
                 <p className="text-xs text-zinc-500">
                   下方虚线区域点击后仅从文件夹选图；剪贴板粘贴请使用上方「粘贴区」。
                 </p>
+                {mode === "single_row_to_grid" ? (
+                  <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-zinc-200 bg-zinc-50/90 px-3 py-2.5 text-sm text-zinc-800">
+                    <input
+                      type="checkbox"
+                      className="mt-0.5"
+                      checked={skipSingleRowModel}
+                      onChange={(e) => setSkipSingleRowModel(e.target.checked)}
+                    />
+                    <span>
+                      <span className="font-medium">跳过模型，直接裁切拼接</span>
+                      <span className="mt-0.5 block text-xs font-normal text-zinc-500">
+                        上传已是清晰白底一行五甲时勾选，可最大程度保留甲型、长短与甲尖阶梯。
+                      </span>
+                    </span>
+                  </label>
+                ) : null}
               </>
             )}
           </div>
@@ -2643,7 +2672,9 @@ export default function Home() {
                         ? "几何矫正：**十格拆层整版重排**（非整图扶正），逐格锁定甲型与长短，每枚 **刚性旋转至竖直** + 平移；每次 **1 张**。附录：外留白/列缝/行间缝；「五列宽」无效。"
                       : mode === "complete_single_grid"
                         ? "单甲补齐：下列数值仅用于服务端把「一枚抠图甲片」按列宽复制成 10 格（体现拇→小尺码差），**不会**再次发给模型改甲型。"
-                        : "提交时服务端会按最大列归一；缝过大时可能自动缩小甲片以适配画布。"}
+                        : mode === "single_row_to_grid"
+                          ? "单行复制成双行：模型只出一行；服务端将**同一行**裁成 5 枚后复制为上下两排拼 2×5（不改甲型长短，行内甲根对齐）。"
+                          : "提交时服务端会按最大列归一；缝过大时可能自动缩小甲片以适配画布。"}
                   </p>
                   <p className="text-xs leading-relaxed text-rose-900/90">
                     <span className="font-medium">关于「缝」：</span>
