@@ -2,6 +2,7 @@ import sharp from "sharp";
 
 import type { TenSinglesGridLayout } from "@/lib/ten-singles-grid-layout";
 import { buildDuplicatedRowStripGrid } from "@/lib/ten-singles-collage";
+import { uprightHorizontalNailRow } from "@/lib/row-strip-upright";
 
 const EXPECTED_NAILS_PER_ROW = 5;
 
@@ -155,11 +156,17 @@ export async function splitHorizontalNailRow(
 }
 
 /**
- * 模型输出（或跳过模型时的上传图）→ 整行条带复制成双行 2×5（不裁 5 枚）。
+ * 模型输出（或跳过模型时的上传图）→ 逐枚竖直摆正 → 拼回单行 → 复制成双行 2×5。
  */
 export async function buildDuplicatedRowGridFromOneRow(
   oneRowBuffer: Buffer,
   layout: TenSinglesGridLayout,
 ): Promise<Buffer> {
-  return buildDuplicatedRowStripGrid(oneRowBuffer, layout);
+  let strip = oneRowBuffer;
+  try {
+    strip = await uprightHorizontalNailRow(oneRowBuffer);
+  } catch {
+    /* 分割失败时仍用原条带，避免整单失败 */
+  }
+  return buildDuplicatedRowStripGrid(strip, layout);
 }

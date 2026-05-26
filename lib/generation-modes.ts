@@ -888,6 +888,12 @@ FIDELITY — SHAPE + LENGTH (hard; overrides “prettier” layout):
 - **Aspect-ratio lock** per nail: placed height:width must match the source cutout within a few percent.
 - **Allowed:** **rigid in-plane rotation** to **yaw = 0°** + **rigid translation** for row alignment; **forbidden** non-uniform rescale that changes the sold SKU.
 
+PER-NAIL VERTICAL (mandatory — check all **five** nails separately):
+- **Every** nail’s long axis must be **parallel to the frame vertical** (**yaw = 0°**, tips down / roots up). **No** visible clockwise or counter-clockwise lean — **no** “almost vertical.”
+- Remove **all** source / camera slant using **only** rigid rotation per nail; **never** preserve tilt to “match” the photo.
+- **Row parity:** all five nails must look **equally upright** — **forbidden:** one nail straight and another canted.
+- **Rotation does not cancel tip stagger:** keep **staggered free-edge Y** from the source via **vertical translation only** after each nail is upright.
+
 ROW GEOMETRY (mandatory for all five nails in your **one** output row):
 ${WHITE_BG_NAIL_GRID_TOP_BASELINE}
 ${PACKSHOT_TIP_STAGGER_ROW_EN}
