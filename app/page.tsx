@@ -1740,7 +1740,7 @@ export default function Home() {
           : mode === "complete_single_grid"
             ? "请上传甲尖朝下、甲根朝上的单枚（或含一枚主款）；仅做 EXIF 转正后由模型抠出一枚高清单甲，再由服务端按五列相对宽度复制成 10 格"
             : mode === "single_row_to_grid"
-              ? "上传**一行五枚**平铺（左→右大拇指至小指，甲尖朝下）；模型只规整这一行（保甲型长短、甲根齐线、甲尖阶梯），服务端**原样复制一行**裁切后拼成 2×5"
+              ? "上传**一行五枚**平铺（左→右大拇指至小指，甲尖朝下）；模型可规整这一行（或勾选跳过模型）；服务端将**整行原样复制**为上下两排，不裁单枚，保留甲型与甲尖阶梯"
               : "支持常见图片格式";
 
   useEffect(() => {
@@ -2192,9 +2192,9 @@ export default function Home() {
                       onChange={(e) => setSkipSingleRowModel(e.target.checked)}
                     />
                     <span>
-                      <span className="font-medium">跳过模型，直接裁切拼接</span>
+                      <span className="font-medium">跳过模型，直接复制拼接</span>
                       <span className="mt-0.5 block text-xs font-normal text-zinc-500">
-                        上传已是清晰白底一行五甲时勾选，可最大程度保留甲型、长短与甲尖阶梯。
+                        上传已是清晰白底一行五甲时勾选，整行原样复制为两排，不经模型改图。
                       </span>
                     </span>
                   </label>
@@ -2673,7 +2673,7 @@ export default function Home() {
                       : mode === "complete_single_grid"
                         ? "单甲补齐：下列数值仅用于服务端把「一枚抠图甲片」按列宽复制成 10 格（体现拇→小尺码差），**不会**再次发给模型改甲型。"
                         : mode === "single_row_to_grid"
-                          ? "单行复制成双行：模型只出一行；服务端将**同一行**裁成 5 枚后复制为上下两排拼 2×5（不改甲型长短，行内甲根对齐）。"
+                          ? "单行复制成双行：服务端将**整行条带**等比缩放后复制为上下两排（不裁 5 枚）；「五列相对宽度」对本模式不生效，可调节外留白与行间缝。"
                           : "提交时服务端会按最大列归一；缝过大时可能自动缩小甲片以适配画布。"}
                   </p>
                   <p className="text-xs leading-relaxed text-rose-900/90">

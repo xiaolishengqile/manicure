@@ -411,3 +411,56 @@ export async function buildDuplicatedFiveNailRowGrid(
     .png({ compressionLevel: 6 })
     .toBuffer();
 }
+
+/**
+ * 整行条带 → 原样复制为上下两排 2×5 成品（不裁成 5 枚，避免高光竖条误判甲缝）。
+ * 条带等比缩放到内区宽度，两行纵向居中；拇→小比例与甲尖阶梯均保留自源图。
+ */
+export async function buildDuplicatedRowStripGrid(
+  oneRowBuffer: Buffer,
+  layout: TenSinglesGridLayout = DEFAULT_TEN_SINGLES_GRID_LAYOUT,
+): Promise<Buffer> {
+  const W = COLLAGE_SIDE;
+  const H = COLLAGE_SIDE;
+  const margin = Math.round(W * layout.marginFrac);
+  const rows = 2;
+  const innerW = W - 2 * margin;
+  const innerH = H - 2 * margin;
+  const rowGutter =
+    rows > 1
+      ? Math.round((innerH * layout.rowGutterSumFrac) / (rows - 1))
+      : 0;
+  const maxRowH = Math.max(1, (innerH - rowGutter) / rows);
+
+  let strip = await trimWhiteEdges(oneRowBuffer);
+  const { w, h } = await pngMeta(strip);
+  if (w < 8 || h < 8) {
+    throw new Error("单行图尺寸过小，无法拼成 2×5。");
+  }
+
+  const scale = Math.min(innerW / w, maxRowH / h);
+  const nw = Math.max(1, Math.round(w * scale));
+  const nh = Math.max(1, Math.round(h * scale));
+  strip = await sharp(strip).resize({ width: nw, height: nh }).png().toBuffer();
+
+  const blockH = rows * nh + (rows - 1) * rowGutter;
+  const blockTop = margin + Math.max(0, Math.round((innerH - blockH) / 2));
+  const left = margin + Math.max(0, Math.round((innerW - nw) / 2));
+
+  const composites: sharp.OverlayOptions[] = [
+    { input: strip, left, top: blockTop },
+    { input: strip, left, top: Math.round(blockTop + nh + rowGutter) },
+  ];
+
+  return sharp({
+    create: {
+      width: W,
+      height: H,
+      channels: 3,
+      background: { r: 255, g: 255, b: 255 },
+    },
+  })
+    .composite(composites)
+    .png({ compressionLevel: 6 })
+    .toBuffer();
+}

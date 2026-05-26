@@ -1,7 +1,7 @@
 import sharp from "sharp";
 
 import type { TenSinglesGridLayout } from "@/lib/ten-singles-grid-layout";
-import { buildDuplicatedFiveNailRowGrid } from "@/lib/ten-singles-collage";
+import { buildDuplicatedRowStripGrid } from "@/lib/ten-singles-collage";
 
 const EXPECTED_NAILS_PER_ROW = 5;
 
@@ -155,15 +155,11 @@ export async function splitHorizontalNailRow(
 }
 
 /**
- * 模型输出（或跳过模型时的上传图）→ 裁 5 枚 → 复制成双行 2×5 成品（无角标、紧排）。
+ * 模型输出（或跳过模型时的上传图）→ 整行条带复制成双行 2×5（不裁 5 枚）。
  */
 export async function buildDuplicatedRowGridFromOneRow(
   oneRowBuffer: Buffer,
   layout: TenSinglesGridLayout,
 ): Promise<Buffer> {
-  const row = await splitHorizontalNailRow(oneRowBuffer);
-  if (row.length !== EXPECTED_NAILS_PER_ROW) {
-    throw new Error("裁切后甲片数量不是 5 枚。");
-  }
-  return buildDuplicatedFiveNailRowGrid(row, layout);
+  return buildDuplicatedRowStripGrid(oneRowBuffer, layout);
 }
