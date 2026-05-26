@@ -1764,6 +1764,9 @@ export default function Home() {
       setPanelColorSource("auto");
       setPanelAutoHex(null);
     }
+    if (next === "single_row_to_grid" && marginPctDraft.trim() === "1.8") {
+      setMarginPctDraft("6");
+    }
     if (next === "ten_singles_grid") {
       setFile(null);
       setPreviewUrl((prev) => {
@@ -2673,7 +2676,7 @@ export default function Home() {
                       : mode === "complete_single_grid"
                         ? "单甲补齐：下列数值仅用于服务端把「一枚抠图甲片」按列宽复制成 10 格（体现拇→小尺码差），**不会**再次发给模型改甲型。"
                         : mode === "single_row_to_grid"
-                          ? "单行复制成双行：服务端将**整行条带**等比缩放后复制为上下两排（不裁 5 枚）；「五列相对宽度」对本模式不生效，可调节外留白与行间缝。"
+                          ? "单行复制成双行：条带默认约占画布内区 **68%**（四周留白更大）；可调**外留白（占边长 %）**继续缩小甲片占比（建议 5–8）；「五列相对宽度」不生效。"
                           : "提交时服务端会按最大列归一；缝过大时可能自动缩小甲片以适配画布。"}
                   </p>
                   <p className="text-xs leading-relaxed text-rose-900/90">

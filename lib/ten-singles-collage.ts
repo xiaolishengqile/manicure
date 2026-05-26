@@ -6,6 +6,10 @@ import { DEFAULT_TEN_SINGLES_GRID_LAYOUT } from "@/lib/ten-singles-grid-layout";
 /** 白底参考拼图边长；与常见 image edit 上限兼容，单格仍有足够细节 */
 const COLLAGE_SIDE = 1600;
 
+function clampInnerFillFrac(frac: number): number {
+  return Math.min(0.92, Math.max(0.45, frac));
+}
+
 /** 去掉近似白边 */
 async function trimWhiteEdges(input: Buffer): Promise<Buffer> {
   try {
@@ -412,14 +416,19 @@ export async function buildDuplicatedFiveNailRowGrid(
     .toBuffer();
 }
 
+/** 单行复制成双行：条带最多占内区宽/高的比例（其余为四周与块间白边） */
+export const SINGLE_ROW_STRIP_MAX_INNER_FILL = 0.68;
+
 /**
  * 整行条带 → 原样复制为上下两排 2×5 成品（不裁成 5 枚，避免高光竖条误判甲缝）。
- * 条带等比缩放到内区宽度，两行纵向居中；拇→小比例与甲尖阶梯均保留自源图。
+ * 条带等比缩放，默认最多约占内区 68%，两行块在内区居中；拇→小比例与甲尖阶梯保留自源图。
  */
 export async function buildDuplicatedRowStripGrid(
   oneRowBuffer: Buffer,
   layout: TenSinglesGridLayout = DEFAULT_TEN_SINGLES_GRID_LAYOUT,
+  options?: { maxInnerFillFrac?: number },
 ): Promise<Buffer> {
+  const fill = clampInnerFillFrac(options?.maxInnerFillFrac ?? SINGLE_ROW_STRIP_MAX_INNER_FILL);
   const W = COLLAGE_SIDE;
   const H = COLLAGE_SIDE;
   const margin = Math.round(W * layout.marginFrac);
@@ -431,6 +440,8 @@ export async function buildDuplicatedRowStripGrid(
       ? Math.round((innerH * layout.rowGutterSumFrac) / (rows - 1))
       : 0;
   const maxRowH = Math.max(1, (innerH - rowGutter) / rows);
+  const targetW = innerW * fill;
+  const targetRowH = maxRowH * fill;
 
   let strip = await trimWhiteEdges(oneRowBuffer);
   const { w, h } = await pngMeta(strip);
@@ -438,7 +449,7 @@ export async function buildDuplicatedRowStripGrid(
     throw new Error("单行图尺寸过小，无法拼成 2×5。");
   }
 
-  const scale = Math.min(innerW / w, maxRowH / h);
+  const scale = Math.min(targetW / w, targetRowH / h);
   const nw = Math.max(1, Math.round(w * scale));
   const nh = Math.max(1, Math.round(h * scale));
   strip = await sharp(strip).resize({ width: nw, height: nh }).png().toBuffer();
