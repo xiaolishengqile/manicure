@@ -3,6 +3,7 @@ import {
   ACCESSORY_TRYON_PROMPT,
   buildModelTryonPrompt,
   TEN_SINGLES_COLLAGE_REF_PROMPT,
+  EXTRACT_TEN_GRID_API_PREFIX,
   WHITE_GRID_RECTIFY_API_PREFIX,
   collapseIdenticalPromptJobs,
   composeExtractAngleScatteredEditPrompt,
@@ -83,7 +84,7 @@ function composeImageEditPrompt(
   extractGridAddendum: string,
 ): string {
   if (mode === "extract_ten_grid") {
-    return `${prompt}${extractGridAddendum}`;
+    return `${EXTRACT_TEN_GRID_API_PREFIX}${prompt}${extractGridAddendum}`;
   }
   if (mode === "white_grid_rectify") {
     return `${WHITE_GRID_RECTIFY_API_PREFIX}${prompt}${extractGridAddendum}`;
@@ -1251,10 +1252,12 @@ export async function POST(request: Request) {
     mode === "extract_ten_grid"
       ? buildWhiteGridLayoutPromptAddendum(gridLayoutParsed, {
           variant: "spacing_only",
+          spacingContext: "extract",
         })
       : mode === "white_grid_rectify"
         ? buildWhiteGridLayoutPromptAddendum(gridLayoutParsed, {
             variant: "spacing_only",
+            spacingContext: "rectify",
           })
         : "";
   const variantChoice = parseParallelVariantChoice(

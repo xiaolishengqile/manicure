@@ -482,9 +482,14 @@ export function whiteGrid2x5CellRects(
  */
 export function buildWhiteGridLayoutPromptAddendum(
   layout: TenSinglesGridLayout,
-  opts?: { variant?: "full" | "spacing_only" },
+  opts?: {
+    variant?: "full" | "spacing_only";
+    /** 附录文案微调：抠图排版 vs 几何矫正 */
+    spacingContext?: "extract" | "rectify";
+  },
 ): string {
   const variant = opts?.variant ?? "full";
+  const spacingContext = opts?.spacingContext ?? "rectify";
   const [c0, c1, c2, c3, c4] = layout.colWidthFrac;
   const marginPct = (layout.marginFrac * 100).toFixed(2);
   const colGutterPct = (layout.colGutterSumFrac * 100).toFixed(1);
@@ -508,11 +513,21 @@ export function buildWhiteGridLayoutPromptAddendum(
   const gapRuleZh = `**相邻列留白**：四条竖缝**合计**占「内区宽度」约 **${colGutterPct}%**，**每条竖缝**约 **${colGutterEachPct}%**（内区 = 去掉外留白后的中间区域）；`;
 
   if (variant === "spacing_only") {
+    const relayoutLeadEn =
+      spacingContext === "extract"
+        ? `- **Per-slot transfer first:** output slot **N** = input slot **N** cutout only; **every** occupied nail **yaw = 0°**; **do not** rebuild a fresh “equal-height” 2×5 sheet — **do not** deskew the input as one bitmap.`
+        : `- **Full re-layout first:** **decompose** all ten slots, **re-compose** on a fresh 2×5 with **every** occupied nail at **yaw = 0°** before applying the spacing numbers below — **do not** deskew the input as one bitmap.`;
+    const relayoutLeadZh =
+      spacingContext === "extract"
+        ? "先**逐格搬运同槽位甲片**、每枚竖直；禁止重画等高模板；"
+        : "先**十格拆层整版重排**、每枚**竖直 yaw=0°**；";
+
     return `
 
 USER-SUPPLIED GRID SPACING (mandatory — **white space only**, do **not** use these numbers to resize or resculpt nail plates):
-- **Full re-layout first:** **decompose** all ten slots, **re-compose** on a fresh 2×5 with **every** occupied nail at **yaw = 0°** before applying the spacing numbers below — **do not** deskew the input as one bitmap.
+${relayoutLeadEn}
 - **Per-slot size lock:** spacing math must **never** change any nail’s **height, width, or outline** vs its **input** slot — gutters are **only** backdrop white + translation.
+- If obeying margin/gutter percentages below would require **any** nail to change **height or width**, **ignore those numbers** and keep nail size — use **smaller margins** instead.
 - **Outer margin / quiet border:** **${marginPct}%** of the **canvas side length** on all four sides (uniform white band).
 - **Inner area** = canvas minus that margin. Within the inner rectangle, keep **2 rows × 5 columns** (columns 1→5 = thumb → index → middle → ring → pinky, left to right). **Do not** treat column-width weights as a reason to **scale** individual nails — spacing is controlled by **margins and gutters** below.
 ${gapRuleEn}
@@ -521,7 +536,7 @@ ${gapRuleEn}
 - **Column centerline lock:** for each **k = 1…5**, the **horizontal midpoint** of the nail in **column k top row** must match the **horizontal midpoint** of the nail in **column k bottom row** (same vertical axis through the sheet; slots **k** and **k+5** aligned).
 - **Single horizontal gutter between the two rows** = **${rowGutterPct}%** of the **inner height**. If 0, the two rows abut vertically within the inner area.
 
-（几何矫正专用：先**十格拆层整版重排**、每枚**竖直 yaw=0°**；**外留白**约 ${marginPct}% 边长；${gapRuleZh}**行间缝**占内高约 ${rowGutterPct}%。**仅**留白+平移控距；**禁止**整图扶正或缩放弯曲甲片；列缝均匀；**上下同列**共竖轴；保留**指尖阶梯**。）`;
+（${relayoutLeadZh}**外留白**约 ${marginPct}% 边长；${gapRuleZh}**行间缝**占内高约 ${rowGutterPct}%。**仅**留白+平移控距；**禁止**整图扶正或缩放弯曲甲片；列缝均匀；**上下同列**共竖轴；保留**指尖阶梯**；宁可缩小留白也不改甲片尺寸。）`;
   }
 
   return `
