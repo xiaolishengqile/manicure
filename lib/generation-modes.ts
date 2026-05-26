@@ -115,7 +115,7 @@ export const GENERATION_MODE_OPTIONS: {
     shortLabel: "款式 + 盒型 · 入盒",
     whenToUse: "款式图 + 包装盒参考，窗内替换为你的甲片",
     description:
-      "双图：① 美甲款式/甲片产品图（窗内**只**用这一套；**甲型与图案逐枚保真**）；② 包装盒参考（**盒比例、Logo 与盒面文字须与②一致**，勿改样式）。窗内**同一行左右紧挨**、**上下两排之间也无空隙**（勿把参考里两排之间的字标当成留白）；若参考开窗里已是别的甲片，**成品整窗替换为①**。可选**竖向双列**或**横向 2×5**。**每次提交生成 1 张**（两路方案提示一致，合并为单次请求）。",
+      "双图：① 美甲款式/甲片产品图（窗内**只**用这一套；**甲型与图案逐枚保真**）；② 包装盒参考（**外盒比例、开窗、Logo 位置/字体/颜色、盒面文字均与②一致**；两排之间的品牌字**保留原位**，勿挪到窗顶或改成镭射字；**禁止**因①竖长而把整盒拉高）。窗内甲片**整组缩小并居中**；同行紧挨、两排之间无**空白带**（品牌 Logo 除外）。若参考开窗里已是别的甲片，**成品整窗替换为①**。可选**竖向双列**或**横向 2×5**。**每次提交生成 1 张**。",
   },
   {
     value: "model_tryon",
@@ -371,7 +371,7 @@ const NAILS_IN_BOX_VERTICAL_LAYOUT_EN = `**ARRANGEMENT — VERTICAL two-column w
 
 const NAILS_IN_BOX_HORIZONTAL_LAYOUT_EN = `**ARRANGEMENT — HORIZONTAL 2×5 grid inside window (user-selected; mandatory):**
 - Inside the window show **two horizontal rows × five columns** (classic press-on sheet). **Top row:** left→right = thumb→pinky; **bottom row:** left→right = same column semantics for the second row of the FIRST reference. **Never** mirror the row or shuffle columns.
-- **Row-to-row (critical):** the **bottom** of the **top row’s nail plates** and the **top** of the **bottom row’s nail plates** form **one contiguous vertical stack** — **zero** wide horizontal **backing strip**, **zero** “logo / wordmark ribbon”, and **zero** empty **row gutter** **between** the two rows inside the aperture. If the SECOND reference shows a brand line **between** the two nail rows, **relocate** it to **above** the top row, **below** the bottom row, or onto the **opaque frame / sleeve outside** the nail cluster — **do not** preserve it as a spacer lane that separates the rows.
+- **Row-to-row + between-row brand mark:** remove only **empty** pale backing **gutters** or unrelated **slogan ribbons** that act as fake spacing — **not** the **SECOND** reference’s primary **logotype between the two nail rows** (e.g. script brand name centered on the backing card). **Keep that mark** in the **same place**, **same lettering**, **same color/finish** as **SECOND** (flat white stays flat white; **no** holographic / foil / emboss upgrade unless **SECOND** already has it). The top and bottom nail rows sit **close above and below** the mark as in the reference — the mark is **part of** the layout, **not** a forbidden “spacer lane.” **Forbidden:** moving the brand mark to the **top** of the window, shrinking it, or re-drawing it in a different font.
 - On the backing card inside the window, nails follow **tips generally toward the bottom** of each cell; **cuticle/root tops** share a **straight horizontal baseline per row**.
 ${WHITE_BG_NAIL_GRID_FINGER_LADDER}
 
@@ -380,16 +380,47 @@ ${WHITE_BG_NAIL_GRID_TOP_BASELINE}
 
 /** 开窗盒装·甲片入盒：盒体比例与盒面印刷（含 Logo/字）锁定参考图；窗内甲片紧排且款式保真 */
 const NAILS_IN_BOX_BOX_GEOMETRY_AND_PRINT_LOCK_EN = `**BOX GEOMETRY + OUTER PRINT — LOCK TO SECOND (mandatory; failure if violated):**
-- **Proportions & shell:** match the **SECOND** reference’s **overall carton aspect ratio**, **panel / lid / base proportions**, **edge breaks**, and **clear window shape + size + placement** on the face — only believable **3D perspective + lighting** vs the photo. **Forbidden:** fattening/squashing the whole box vs the reference, swapping a tall sleeve for a short cube, or noticeably rescaling the window relative to the printed face beyond mild lens correction.
+- **Proportions & shell — SECOND only:** the **outer cardboard silhouette** (front-face **height ÷ width**) must match the **SECOND** reference within **~3%** — same **panel / lid / base** breaks, **clear window shape + size + placement** on the face; only believable **3D perspective + lighting** vs the photo.
+- **FIRST must NOT resize the box:** the **FIRST** nail sheet may be tall (2×5 grid) or wide — that layout applies **only inside the window**. **Forbidden:** elongating, thickening, or “towering” the **carton shell** so the window grows taller to fit nail art; **forbidden** swapping a **low, wide** retail window box from SECOND for a **needle-tall** narrow carton unless SECOND already is tall.
+- **Square / hero frame vs physical box:** if the output canvas is square, fill unused area with **white studio margin** — **never** stretch the **physical box** taller or wider to fill the frame.
+- **Typical press-on window carton:** front face is usually **modestly wide** (landscape or near-square) — **not** an exaggerated vertical tower. When SECOND shows a **short, wide** pack, keep it **short and wide**.
 - **Print fidelity:** carry over **every** visible exterior graphic from the **SECOND** image **verbatim** — **logos, logotype geometry, wordmarks, legal/micro copy, barcodes, icons, color bands** — same spelling and lockup; **forbidden** re-typesetting, inventing substitute slogans, replacing real marks with generic filler, or “cleaning up” the reference layout. **Forbidden:** stealing **unrelated** third-party trademarks from outside the user’s SECOND image.
-（中文：**盒子长宽比与轮廓、开窗形状与位置**须与第二张一致，**不得改比例**；**盒面 Logo 与所有文字**须原样保留，禁止改写或换成占位内容。）`;
+- **Brand mark lock (window + frame):** any **logotype / wordmark** visible on **SECOND** (including **between** the two nail rows or on the opaque frame) must keep **identical** spelling, **position on the box face**, **font personality** (thin script vs bold sans), **scale**, and **ink color/finish** — **forbidden:** “premium” re-draws (bubbly 3D, holographic silver, embossed foil) when **SECOND** shows flat print; **forbidden:** inventing new legal lines or kit copy not on **SECOND**.
+（中文：**外盒轮廓高宽比只学第二张**；**Logo/字标**位置、字体、颜色与第二张**一致**（两排之间的品牌字**保留原位**，禁止挪到窗顶或改成镭射字）；禁止臆造底部文案。）`;
 
-const NAILS_IN_BOX_WINDOW_TIGHT_AND_NAIL_FIDELITY_EN = `**WINDOW INTERIOR — NO GAPS BETWEEN NAILS (within rows AND between rows) + SKU FIDELITY (mandatory):**
+/**
+ * 根据包装盒参考图像素尺寸生成 API 前缀，约束成品外盒高宽比（仅 SECOND）。
+ */
+export function buildNailsInBoxBoxAspectApiPrefix(
+  boxImageWidth: number,
+  boxImageHeight: number,
+): string {
+  const w = Math.max(1, Math.round(boxImageWidth));
+  const h = Math.max(1, Math.round(boxImageHeight));
+  const ratio = w / h;
+  if (ratio >= 1.12) {
+    return `【盒参考 ${w}×${h}px，正面约 ${ratio.toFixed(2)}:1 横长】成品外盒正面轮廓须保持**同等偏横向**比例；窗内甲片过大则**只缩小甲片**，**禁止**把整盒拉高变塔。\n\n`;
+  }
+  if (ratio <= 0.88) {
+    return `【盒参考 ${w}×${h}px，正面约 1:${(h / w).toFixed(2)} 竖长】成品外盒正面轮廓须保持**同等偏竖向**比例；**禁止**压扁成扁盒（除非参考本就是扁盒）。\n\n`;
+  }
+  return `【盒参考 ${w}×${h}px，正面约 1:1】成品外盒正面轮廓须与参考一致；方形画幅用白边，**禁止**为填满画幅拉高或拉宽盒体。\n\n`;
+}
+
+const NAILS_IN_BOX_WINDOW_SCALE_AND_CENTER_EN = `**WINDOW FIT — SCALE DOWN + CENTER THE CLUSTER (mandatory; failure if violated):**
+- Treat all window nails as **one rigid group**: apply **one uniform scale** to the entire cluster, then translate — **never** scale nails individually to “fill” the aperture.
+- **Breathing room inside the clear window:** leave a **balanced inset** on **all four sides** between the nail cluster and the window frame — typically **~10–16%** of the window width on left/right and **~10–16%** of the window height on top/bottom (the cluster should occupy roughly **~70–84%** of the window area, **not** edge-to-edge). **Forbidden:** plates touching or nearly touching the plastic/cardboard window border; **forbidden** “maximize nail size” hero crops that look cramped.
+- **Optical centering:** the cluster’s bounding box must sit **centered** in the aperture — **equal or nearly equal** margin left vs right and top vs bottom. **Forbidden:** pushing the sheet toward the top, bottom, or either side of the window.
+- **SECOND reference scale cue:** when the **SECOND** image already shows demo nails in its window, match their **relative size vs the window frame** (or slightly smaller) — **do not** scale the user’s nails **larger** than that reference proportion.
+（中文：窗内**整组甲片统一缩小**，四周留**均衡留白**（约一成边距），**水平+垂直居中**；禁止贴边放大；有盒参考时甲片相对开窗的大小**不超过参考**。）`;
+
+const NAILS_IN_BOX_WINDOW_TIGHT_AND_NAIL_FIDELITY_EN = `**WINDOW INTERIOR — TIGHT **between** nails (not vs frame) + SKU FIDELITY (mandatory):**
+- **“Tight” means neighbor-to-neighbor only** — **not** filling the window edge-to-edge (see WINDOW FIT block above for frame inset + centering).
 - **Horizontal 2×5 — within each row:** the five plates **abut left-to-right** — **no** intentional **white/pink card gutters**, thick spacer strips, or empty bands **between** adjacent nails in that row (micro shadows / anti-alias only).
-- **Horizontal 2×5 — between the two rows:** treat the **10 nails as one tight sheet**: **no** vertical **empty lane** between the upper and lower row — **forbidden** a centered logo block, slogan band, or pale backing **gap** that visually splits the two rows (even when the SECOND reference did this). **Priority:** rows **touch or nearly touch** as a single retail sheet; relocate any inner-window branding so it does **not** act as row spacing.
-- **Vertical two-column:** in **each** column, the five stacked nails **abut top-to-bottom** — **no** stacked spacer blocks between neighbors; keep the two columns **tight** to the reference tray unless the **SECOND** image clearly shows a wide median strip.
+- **Horizontal 2×5 — between the two rows:** **no empty pale gutter** between rows. If **SECOND** shows a **brand logotype between rows**, **keep it** there (see BRAND MARK rules) — only **replace the nail plates** with **FIRST** art; **do not** delete or relocate the **SECOND** wordmark. **Forbidden:** treating the **SECOND** brand mark as disposable spacing to remove.
+- **Vertical two-column:** in **each** column, the five stacked nails **abut top-to-bottom** — **no** stacked spacer blocks between neighbors; keep the two columns **tight** to each other unless the **SECOND** image clearly shows a wide median strip.
 - **Art + silhouette from FIRST only:** for every mapped slot, keep the **same nail outline** (length class, tip family, sidewalls, C-curve read) and **same surface art** as that slot in the **FIRST** image. **Forbidden:** non-uniform stretch/squash/shear, trimming tips to “fit,” beauty-filter redraw, or swapping motifs between slots. **Allowed:** **uniform** per-nail scale plus **small rigid** rotation/translation for natural perspective on the tray — never warp that changes pattern or shape identity.
-（中文：**同一行**左右甲片紧挨；**上下两排之间也不得留空带**（不要把参考图里两排之间的 Logo 带当成留白分隔）；**美甲图案与甲型**与第一张**逐枚一致**。）`;
+（中文：**同一行**左右甲片紧挨；**上下两排之间不留空白带**，但**第二张里两排之间的品牌 Logo 必须保留原位、原字体原色**；**美甲图案**与第一张**逐枚一致**。）`;
 
 /**
  * 双图「款式图 + 盒样式」→ 甲片陈列于开窗盒内（竖向双列或横向 2×5）。与 API 传入顺序一致：FIRST=美甲款式，SECOND=包装盒参考。
@@ -413,19 +444,21 @@ export function buildNailsInBoxPackagingPrompt(
 
 ${NAILS_IN_BOX_BOX_GEOMETRY_AND_PRINT_LOCK_EN}
 
+${NAILS_IN_BOX_WINDOW_SCALE_AND_CENTER_EN}
+
 ${NAILS_IN_BOX_WINDOW_TIGHT_AND_NAIL_FIDELITY_EN}
 
 ${arrangementBlock}
 
 TASK — one photorealistic **windowed press-on retail pack** hero (finished “nails in box” like a polished e-commerce main image):
 - Output **one** new **3D-correct** slim rectangular carton whose **design language matches the SECOND reference** (re-light and re-render; do not simply flatten-image paste unless the reference is already a perfect neutral mockup).
-- **Window interior:** every nail must **match the FIRST reference** for its mapped slot — same motifs, micro-detail, gloss. **Perspective** and soft shadows on curved nails are allowed; **2D motif layout** must stay recognizable per slot.
-- For **horizontal 2×5**, the **two rows inside the window** must read as **one gapless sheet** — **no** horizontal **empty band or logo strip between rows** that separates them.
+- **Window interior:** every nail must **match the FIRST reference** for its mapped slot — same motifs, micro-detail, gloss. **Perspective** and soft shadows on curved nails are allowed; **2D motif layout** must stay recognizable per slot. Place the full cluster **smaller than the aperture with even margins and centered** (see WINDOW FIT block) — premium retail, not cramped overscale.
+- For **horizontal 2×5**, the **two nail rows** abut the **SECOND** between-row **brand mark** when present — **no empty band**; **do not** remove or move that **brand mark** (see BRAND MARK lock above).
 - **Scene:** seamless **#FFFFFF** or very light neutral studio; soft commercial lighting; crisp edges; believable cardboard thickness; optional faint ground shadow.
 - **No human hands** unless the SECOND reference explicitly demands a holding crop — default **product-only**.
 - If the FIRST image has **fewer than 10** distinct nails, show only those in a **compact tight layout** without invented nails — **still** no fake filler plates and **no** wide decorative gaps between the real ones.
 
-Return **one** square high-resolution photograph only.`;
+Return **one** high-resolution product photograph (square canvas OK for e-commerce). The **cardboard shell’s front-face height:width** must **match the SECOND reference** — pad with **white studio margins** for unused frame area; **never** stretch the box taller to fill a square frame.`;
 }
 
 /**

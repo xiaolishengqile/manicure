@@ -1,4 +1,5 @@
 import OpenAI, { toFile } from "openai";
+import sharp from "sharp";
 import {
   ACCESSORY_TRYON_PROMPT,
   buildModelTryonPrompt,
@@ -8,6 +9,7 @@ import {
   collapseIdenticalPromptJobs,
   composeExtractAngleScatteredEditPrompt,
   extractAngleScatteredJobUsesPlanALayoutRef,
+  buildNailsInBoxBoxAspectApiPrefix,
   buildNailsInBoxPackagingPrompt,
   modeUsesDominantColorExtraction,
   generationModeOption,
@@ -862,7 +864,14 @@ export async function POST(request: Request) {
     const arrangement = parseNailsInBoxArrangement(
       formData.get("nailArrangement"),
     );
-    const basePrompt = imageEditPrompt(buildNailsInBoxPackagingPrompt(arrangement));
+    const boxMeta = await sharp(boxRes.buffer).metadata();
+    const aspectPrefix = buildNailsInBoxBoxAspectApiPrefix(
+      boxMeta.width ?? 1,
+      boxMeta.height ?? 1,
+    );
+    const basePrompt = imageEditPrompt(
+      aspectPrefix + buildNailsInBoxPackagingPrompt(arrangement),
+    );
     const jobs = collapseIdenticalPromptJobs([
       {
         prompt: basePrompt,
