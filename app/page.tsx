@@ -1734,13 +1734,13 @@ export default function Home() {
     mode === "extract_angle_scattered"
       ? "输入须为**竖直甲片**（常见 2×5）；**A/B 均须恰好 10 枚**、**纯白底**、互不压住；**A** 双图（你的产品图 + 内置斜拍参考排版），只学参考的位置与同列共线，**花色仍来自你的产品图**；**B** 随机打散；并行 **2 张**择优"
       : mode === "extract_ten_grid"
-        ? "托盘、卡纸、实拍平铺等；只抠图中已出现的甲片，不补全款式；每次生成 **1 张**"
+        ? "托盘、卡纸、实拍平铺等；只抠已出现的甲片，**锁定每枚长短与甲型**，每行甲根齐平、指尖随长短自然阶梯；每次 **1 张**"
         : mode === "white_grid_rectify"
           ? "请上传 2×5 白底成品图。**不改甲型与长短**，仅刚性旋转摆正歪斜，用外留白/列缝/行间缝控距；每次生成 **1 张**"
           : mode === "complete_single_grid"
             ? "请上传甲尖朝下、甲根朝上的单枚（或含一枚主款）；仅做 EXIF 转正后由模型抠出一枚高清单甲，再由服务端按五列相对宽度复制成 10 格"
             : mode === "single_row_to_grid"
-              ? "上传**一行五枚**平铺（左→右大拇指至小指，甲尖朝下）；模型会规整并**逐枚竖直摆正**（或勾选跳过模型由服务端摆正）；再整行复制为上下两排"
+              ? "上传一行五枚（拇→小，甲尖朝下）。**默认**：模型出带白缝的一行，服务端**整行复制**成双排；「同一行相邻美甲间距」主要约束模型。勾选**跳过模型**时，服务端才可能按枚裁切+列缝拼图"
               : "支持常见图片格式";
 
   useEffect(() => {
@@ -1764,8 +1764,11 @@ export default function Home() {
       setPanelColorSource("auto");
       setPanelAutoHex(null);
     }
-    if (next === "single_row_to_grid" && marginPctDraft.trim() === "1.8") {
-      setMarginPctDraft("6");
+    if (next === "single_row_to_grid") {
+      if (marginPctDraft.trim() === "1.8") {
+        setMarginPctDraft("6");
+      }
+      setColGutterSumPct((prev) => (prev < 14 ? 14 : prev));
     }
     if (next === "ten_singles_grid") {
       setFile(null);
@@ -2670,7 +2673,7 @@ export default function Home() {
                   <p className="text-xs leading-relaxed text-zinc-600">
                     五列相对宽度对应上排左→右拇→小（下排同列再重复一遍）。
                     {mode === "extract_ten_grid"
-                      ? "本模式由模型按下列数值排版；每次 **1 张**；数值含义与十枚单甲/单甲补齐的服务端拼图一致。"
+                      ? "抠图排版：**锁定甲片尺寸**，仅调外留白/列缝/行间缝（**五列相对宽度不生效**，不会按列缩放甲片）；每次 **1 张**。"
                       : mode === "white_grid_rectify"
                         ? "几何矫正：**十格拆层整版重排**（非整图扶正），逐格锁定甲型与长短，每枚 **刚性旋转至竖直** + 平移；每次 **1 张**。附录：外留白/列缝/行间缝；「五列宽」无效。"
                       : mode === "complete_single_grid"
@@ -2893,15 +2896,20 @@ export default function Home() {
                       <p className="text-[11px] leading-snug text-zinc-600">
                         合计约 {colGutterSumPct.toFixed(1)}% 内宽 · 每条约{" "}
                         {(colGutterSumPct / 4).toFixed(1)}% 内宽
+                        {mode === "single_row_to_grid"
+                          ? " · 走模型时主要约束模型列缝；跳过模型时服务端列缝下限约 14%"
+                          : null}
                       </p>
                       <div className="flex flex-wrap gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => setColGutterSumPct(0)}
-                          className="rounded border border-zinc-200 bg-white px-2 py-0.5 text-[11px] font-medium text-zinc-700 hover:border-rose-300 hover:bg-rose-50"
-                        >
-                          无
-                        </button>
+                        {mode !== "single_row_to_grid" ? (
+                          <button
+                            type="button"
+                            onClick={() => setColGutterSumPct(0)}
+                            className="rounded border border-zinc-200 bg-white px-2 py-0.5 text-[11px] font-medium text-zinc-700 hover:border-rose-300 hover:bg-rose-50"
+                          >
+                            无
+                          </button>
+                        ) : null}
                         {COL_GUTTER_SUM_QUICK_PRESET_PCTS.map((pct) => (
                           <button
                             key={pct}

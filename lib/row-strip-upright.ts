@@ -245,11 +245,15 @@ async function extractFiveNailCrops(trimmed: Buffer): Promise<Buffer[]> {
   return crops;
 }
 
-async function composeUprightRow(nails: Buffer[]): Promise<Buffer> {
+async function composeUprightRow(
+  nails: Buffer[],
+  opts?: { interNailGapFracOfHeight?: number },
+): Promise<Buffer> {
   const metas = await Promise.all(nails.map((b) => pngMeta(b)));
   const heights = metas.map((m) => m.h);
   const maxH = Math.max(...heights);
-  const gap = Math.max(6, Math.round(maxH * 0.06));
+  const gapFrac = Math.max(0.08, opts?.interNailGapFracOfHeight ?? 0.06);
+  const gap = Math.max(6, Math.round(maxH * gapFrac));
   const totalW = metas.reduce((s, m) => s + m.w, 0) + gap * (nails.length - 1);
   const rootYs = await Promise.all(nails.map((b) => firstContentRowYFromTop(b)));
   const R = Math.max(...rootYs);
@@ -277,11 +281,41 @@ async function composeUprightRow(nails: Buffer[]): Promise<Buffer> {
 }
 
 /**
- * 将一行五甲逐枚刚性旋转至竖直（yaw≈0°），再拼回单行条带。
- * 失败时抛出，由调用方决定是否回退原图。
+ * 将已分出的五枚甲片逐枚竖直摆正，再按甲根顶边对齐拼成单行条带。
  */
-export async function uprightHorizontalNailRow(oneRowBuffer: Buffer): Promise<Buffer> {
+export async function alignHorizontalRowFromNailPads(
+  pads: Buffer[],
+  opts?: { interNailGapFracOfHeight?: number },
+): Promise<Buffer> {
+  if (pads.length !== EXPECTED_NAILS) {
+    throw new Error(`alignHorizontalRowFromNailPads requires exactly ${EXPECTED_NAILS} buffers`);
+  }
+  const upright = await Promise.all(pads.map((p) => uprightNailCrop(p)));
+  return composeUprightRow(upright, opts);
+}
+
+/** 分出五枚并逐枚竖直摆正（不拼条带） */
+export async function uprightHorizontalNailRowCrops(oneRowBuffer: Buffer): Promise<Buffer[]> {
+  const trimmed = await trimWhiteEdges(oneRowBuffer);
+  return extractFiveNailCrops(trimmed);
+}
+
+export async function uprightNailPads(pads: Buffer[]): Promise<Buffer[]> {
+  if (pads.length !== EXPECTED_NAILS) {
+    throw new Error(`uprightNailPads requires exactly ${EXPECTED_NAILS} buffers`);
+  }
+  return Promise.all(pads.map((p) => uprightNailCrop(p)));
+}
+
+/**
+ * 将一行五甲逐枚刚性旋转至竖直（yaw≈0°），再拼回单行条带（甲根顶共线，指尖自然阶梯）。
+ * 失败时抛出，由调用方决定是否回退原图或改用列缝裁切。
+ */
+export async function uprightHorizontalNailRow(
+  oneRowBuffer: Buffer,
+  opts?: { interNailGapFracOfHeight?: number },
+): Promise<Buffer> {
   const trimmed = await trimWhiteEdges(oneRowBuffer);
   const crops = await extractFiveNailCrops(trimmed);
-  return composeUprightRow(crops);
+  return composeUprightRow(crops, opts);
 }

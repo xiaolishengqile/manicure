@@ -35,7 +35,7 @@ export const GENERATION_MODE_OPTIONS: {
     shortLabel: "规整实拍 · 抠图排版",
     whenToUse: "背卡、托盘、较正的 2×5 或平铺，甲片大致对齐",
     description:
-      "从实拍/背卡识别并抠出已出现的甲片，摆成 2×5 白底；不补款。优先**保持每枚甲片的甲型与长短大小**与源图一致，仅做竖直摆正（yaw=0°）与栅格留白；可选完整「白底栅格排版」（含五列相对宽）写入提示词。每次生成 **1 张**。仅 EXIF 转正，不整图强制 180°。",
+      "从实拍/背卡识别并抠出已出现的甲片，摆成 2×5 白底；不补款。**锁定**每枚的长度、宽度与甲型；每行**甲根顶线齐平**，指尖随真实长短**自然形成阶梯**。仅竖直摆正（yaw=0°）与留白/列缝；附录**不**按列宽缩放甲片。每次生成 **1 张**。仅 EXIF 转正，不整图强制 180°。",
   },
   {
     value: "extract_angle_scattered",
@@ -67,7 +67,7 @@ export const GENERATION_MODE_OPTIONS: {
     shortLabel: "一行五甲 · 复制成 2×5",
     whenToUse: "已有一行五枚平铺（拇→小），要补成完整 2×5 背卡",
     description:
-      "上传**一行五枚**商品甲片（甲尖朝下、左→右大拇指至小指）。默认由模型**抠出/规整这一行**；也可勾选**跳过模型**。服务端将**整行条带原样复制**为上下两排（不裁成 5 枚，避免亮面高光被误判为甲缝），等比缩放进 2×5。**可选**：外留白、行间缝。",
+      "上传**一行五枚**商品甲片（甲尖朝下、左→右大拇指至小指）。**默认**：模型抠出**一行五甲（列间须有白缝）**，服务端**整行复制**为上下两排，不再切成五列。勾选**跳过模型**时，可对清晰白底图按枚裁切并用排版面板列缝拼 2×5。**可选**：外留白、列缝（主要作用于跳过模型路径）、行间缝。",
   },
   {
     value: "ten_singles_grid",
@@ -586,11 +586,39 @@ FINAL CHECK:
 
 Return **ONE** square high-resolution product-ready image.`;
 
-/** 抠图专用：先钉死「不拉长、不改比例」，再展开长段保真说明，减轻被后面「阶梯指尖」等词带偏 */
-const EXTRACT_TEN_GRID_PRIORITY_LEDE_EN = `EXECUTION ORDER (read first — wins over any later “retail / stagger / ladder” wording):
-1) **Cut out** each visible press-on as a **rigid layer** — **same** length, width, and **2D silhouette** as that nail in the photo (CAD-like), **same aspect ratio** within a few percent — **forbidden:** vertical-only stretch, “slenderizing,” or redrawing a longer almond/stiletto to “fit” the cell.
-2) **Rigid in-plane rotation** to **yaw = 0°** (tips down / roots up), then **rigid translation** into the **2×5** cells and gutters — **no** warp, shear, liquify, or non-uniform scale for layout.
-3) Only then apply the **neutral cleanup** rules in the long **DESIGN & SHAPE FIDELITY** block below — cleanup must **never** change outlines or nail length class.
+/** 抠图专用：尺寸/甲型锁定 + 甲根齐线 + 指尖自然阶梯（不套用「五列强制缩放」零售 ladder） */
+const EXTRACT_TEN_GRID_SIZE_LOCK_EN = `SIZE, WIDTH & SHAPE LOCK (hard — highest priority in this mode):
+- Each placed nail keeps the **exact** **length**, **width**, **2D outline / nail shape family**, and **surface art** from its source cutout — **no** shortening, lengthening, widening, narrowing, squaring, ovalizing, or “hero” redraw.
+- **Aspect-ratio lock:** placed **height:width** must match the source cutout within a few percent — **forbidden:** vertical-only stretch, “slenderizing,” or resizing to match column slots.
+- Layout may use **only** **rigid in-plane rotation** (→ **yaw = 0°**) and **rigid translation** — **forbidden:** uniform scale, non-uniform scale, stretch, squish, shear, liquify, or perspective warp for grid fit.
+（每枚甲片的长度、宽度、甲型与源图一致；只允许刚性旋转与平移，禁止为排版缩放或改轮廓。）`;
+
+const EXTRACT_TEN_GRID_ROW_LAYOUT_EN = `ROW LAYOUT — shared tops, natural tip stair-step:
+- **One horizontal top line per row:** in **each** horizontal row, every occupied nail’s **cuticle / root / proximal TOP** edge sits on **one shared straight horizontal baseline** — like a ruler across the tops. **Forbidden:** stair-step along the **tops**; **forbidden:** aligning all **tips** to one line while tops step unevenly.
+- **Tips follow locked length:** because **length is not changed**, once tops share a line, **free edges (tips)** will **naturally** sit at **different Y** — longer plates extend **lower**, shorter end **higher** — a **retail stair-step along the bottom**. This stagger is **emergent** from real lengths, **not** a template to paint in.
+- **Forbidden:** stretching, compressing, or redrawing any nail so all tips lie on one horizontal “flat tabletop” line when source lengths differ.
+- **Forbidden:** inventing thumb→pinky size steps or exaggerating length differences **not** present in the source — preserve what each nail already shows.
+- Achieve row alignment with **vertical translation** after **yaw = 0°** only — **never** by changing drawn plate length or tilting nails.
+（每行甲根顶线齐平；指尖因长短不同自然形成下缘阶梯，禁止为齐指尖而拉长/压扁甲片。）`;
+
+const EXTRACT_TEN_GRID_VERTICAL_EN = `CANVAS-VERTICAL (every occupied slot):
+- **yaw = 0°** — each nail’s long axis parallel to the frame vertical (tips down / roots up); remove source slant with **per-nail** rigid rotation — **forbidden** rotating the whole canvas as one block.
+- **Column rails:** for column **k = 1…5**, top slot **k** and bottom slot **k+5** (when both occupied) share one **vertical centerline**.
+- After rotation, use **translation** for **shared top baseline** and gutters — **tip stagger comes from locked length**, not from rescaling or canted rotation.`;
+
+const EXTRACT_TEN_GRID_FAILSAFE_EN = `CONFLICT PRIORITY (extract_ten_grid):
+1) **Size / width / shape lock** — never stretch, scale, or redraw a nail for grid, ladder, column-width numbers, or “neat” tips.
+2) **yaw = 0°** per nail (mandatory rigid rotation; not whole-image deskew).
+3) **Shared top baseline** per row — align **roots** with vertical translation only; **do not** change visible plate length.
+4) **Natural bottom stair-step** follows from (1)+(3) — **forbidden** flattening all tips to one line when source lengths differ.
+5) User spacing appendix = **white gutters only** — **never** resize nails to match column-width weights.`;
+
+/** 抠图专用：先钉死尺寸，再摆正，再排版 */
+const EXTRACT_TEN_GRID_PRIORITY_LEDE_EN = `EXECUTION ORDER (read first — wins over any later retail / ladder / column-width wording):
+1) **Cut out** each visible press-on as a **rigid layer** — **same length, same width, same nail shape** as in the photo.
+2) **Rigid rotation** to **yaw = 0°**, then **rigid translation** into **2×5** cells — **no** scaling for layout.
+3) Per row: align **all tops** on one horizontal line; let **tips** fall where **true length** places them (natural stair-step at the bottom).
+4) Apply **neutral cleanup** only — must **not** change outlines or length class.
 
 `;
 
@@ -606,8 +634,7 @@ Edit the provided reference photo of press-on / stick-on nails (display card, tr
 
 GOAL — **Extraction only:** cut out every **clearly visible** artificial nail from the source and place them on a clean **2×5** white grid. This is **NOT** a “fill to 10 with invented nails” task and **NOT** a design refresh.
 
-FIDELITY FIRST (hard — overrides decorative layout goals):
-- Each placed nail must keep the **same** **silhouette, length, width, and nail-art** as that nail in the source — **no** shortening, lengthening, or reshaping to “fit” the grid. **Aspect-ratio lock:** the placed nail’s **height:width** in the cell must match the **source** cutout within a few percent — **forbidden:** stretching taller to look “e-commerce long.” **Allowed:** **rigid in-plane rotation** to **yaw = 0°** and **rigid translation** for gutters / row alignment; **forbidden:** stretch, squish, uniform or non-uniform rescale, or liquify that changes the sold SKU.
+${EXTRACT_TEN_GRID_SIZE_LOCK_EN}
 
 IMAGE EDITING TASK:
 1) Identify every **individual** nail tip that is **unambiguously** visible. Ignore skin, fingers, printed text, logos, packaging, and environment.
@@ -629,32 +656,26 @@ RECTIFY GEOMETRY — DO NOT COPY CASUAL TILT FROM THE SOURCE:
 
 ${PACKSHOT_GRID_DECOMPOSE_RELAYOUT_EN}
 
-${PACKSHOT_GRID_VERTICAL_QA_EN}
+${EXTRACT_TEN_GRID_VERTICAL_EN}
+
+${EXTRACT_TEN_GRID_ROW_LAYOUT_EN}
 
 UNIFORM MODULAR GRID + COLUMN ALIGNMENT:
-- **2 rows × 5 columns**; columns align across rows; **minimal** gutters and slim outer margins (tight SKU look).
+- **2 rows × 5 columns**; columns align across rows; gutters and outer margins follow the **user spacing appendix** (white space only — **do not** resize nails to match column-width weights).
 
-CELL PLACEMENT — **verticality + gutters + natural tips:**
-- **yaw = 0°** for every occupied nail (see CANVAS-VERTICAL). Prefer **FREE-EDGE STAGGER** via **vertical translation** only when it **does not** require changing any nail’s **length or silhouette** vs the source; if a stagger template would conflict with fidelity, **preserve** the source nail and **white spacing** from the appended grid block carries the layout.
+CELL PLACEMENT:
+- **Horizontal:** center each nail in its column slot unless the source clearly used a deliberate offset; keep **gutter widths visually even** across columns.
+- **Empty cells:** solid flat backdrop **only**, matching the canvas colour (**#FFFFFF** or **#F7F7F7**).
 
-${PACKSHOT_TIP_STAGGER_ROW_EN}
-- **Do NOT** vertically **re-pack** nails in a way that **changes** their **visible length** vs the input just to align roots or tips; use **translation** and **backdrop gutters** first.
-
-- **Horizontal:** center each nail in its column slot unless the source clearly used a deliberate offset; keep **gutter widths visually even** across columns — **forbidden** one column gap obviously wider than its neighbours.
-- **Empty cells:** solid flat backdrop **only**, matching the canvas colour (**#FFFFFF** or **#F7F7F7** — same as the chosen background above).
-
-WHITE-GRID PRODUCT RULES (apply to **every occupied** nail when the output is a retail-style **2×5** on white; columns 1→5 = thumb → index → middle → ring → pinky):
-${WHITE_BG_NAIL_GRID_FINGER_LADDER}
-
-${WHITE_BG_NAIL_GRID_TOP_BASELINE}
-
-${PACKSHOT_FAILSAFE_GRID_EN}
+${EXTRACT_TEN_GRID_FAILSAFE_EN}
 
 LIGHTING — packshot finish:
 - Soft even **e-commerce studio** light on the nail pieces; preserve sparkle/chrome fidelity from the originals; **no** heavy contrast pushes or global colour re-grade beyond neutral cleanup above.
 
 FINAL QA SWEEP (internal — before output):
-- Every **occupied** slot: **yaw = 0°** (CANVAS-VERTICAL); **aspect ratio** vs source cutout within a few percent — **no** vertical elongation. Each **full row of five** occupied nails: tips **not** all on one flat line when source lengths differ; **never** sacrifice source **length or silhouette** for stagger. **Defringe** on white: no obvious light halos along cutout edges.
+- Every **occupied** slot: **yaw = 0°**; **length, width, and shape** match source; **aspect ratio** within a few percent — **no** elongation or column-fit scaling.
+- Each row: **tops** on one line; **tips** at natural stagger when lengths differ — **not** one flat tip line, **not** fabricated size ladder.
+- **Defringe** on white: no obvious light halos along cutout edges.
 
 ${PACKSHOT_OUTPUT_COMPLIANCE_EN}
 
@@ -870,7 +891,14 @@ ${PACKSHOT_OUTPUT_COMPLIANCE_EN}
 
 Return **one** square, catalog-ready image.`;
 
-/** 单行五甲：模型只出一行；服务端原样复制该行拼 2×5（参考单甲补齐流程） */
+/** 单行五甲：相邻甲片之间必须有可见白缝（与 2×5 列缝语义一致） */
+const SINGLE_ROW_INTER_NAIL_GAP_EN = `INTER-NAIL GAPS (mandatory — all five nails in your **one** row):
+- **Visible white space** between **every** adjacent pair of nails — **forbidden** silhouettes touching, overlapping, or sharing a common edge (micro anti-alias / soft shadow only).
+- Gaps must be **pure #FFFFFF** or **#F7F7F7** — **even** width across the four gaps (within ~15%); **no** pink card strips, thick spacer bands, or decorative gutters.
+- **Forbidden:** a single continuous “plate” where five designs merge with **zero** horizontal separation.
+（五枚甲片之间**必须**有清晰白色空隙，禁止贴边或叠压。）`;
+
+/** 单行五甲：模型只出一行；服务端按列缝拼 2×5（参考单甲补齐流程） */
 const SINGLE_ROW_EXTRACT_ONE_ROW_PROMPT = `You act as a **professional e-commerce product retoucher**.
 
 TASK — **one-row extraction and cleanup only** (not creative redesign, not a second row). The **server** will **duplicate this exact row** into top + bottom rows of a **2×5** sheet — your output must be **exactly ONE horizontal row of five nails**.
@@ -895,6 +923,7 @@ PER-NAIL VERTICAL (mandatory — check all **five** nails separately):
 - **Rotation does not cancel tip stagger:** keep **staggered free-edge Y** from the source via **vertical translation only** after each nail is upright.
 
 ROW GEOMETRY (mandatory for all five nails in your **one** output row):
+${SINGLE_ROW_INTER_NAIL_GAP_EN}
 ${WHITE_BG_NAIL_GRID_TOP_BASELINE}
 ${PACKSHOT_TIP_STAGGER_ROW_EN}
 - **Forbidden:** aligning all five **tips** on one horizontal line while roots step — retail **trapezoid / stair-step** free edges are required when the source row shows them.

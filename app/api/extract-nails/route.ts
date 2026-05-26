@@ -25,7 +25,9 @@ import {
 } from "@/lib/ten-singles-collage";
 import { buildDuplicatedRowGridFromOneRow } from "@/lib/single-row-split";
 import {
+  buildSingleRowModelSpacingPromptAddendum,
   buildWhiteGridLayoutPromptAddendum,
+  layoutWithMinColGutterForSingleRow,
   parseTenSinglesGridLayoutFromFormData,
 } from "@/lib/ten-singles-grid-layout";
 import { loadExtractAngleScatteredPlanALayoutRef } from "@/lib/extract-angle-scattered-plan-a-ref";
@@ -1137,7 +1139,9 @@ export async function POST(request: Request) {
   const ext = extFromMime(mime);
 
   if (mode === "single_row_to_grid") {
-    const gridLayout = parseTenSinglesGridLayoutFromFormData(formData);
+    const gridLayout = layoutWithMinColGutterForSingleRow(
+      parseTenSinglesGridLayoutFromFormData(formData),
+    );
     const skipRowModel = formData.get("skipRowModel") === "1";
     const job = promptsForMode(mode)[0];
 
@@ -1150,12 +1154,14 @@ export async function POST(request: Request) {
             { status: 500 },
           );
         }
+        const rowModelPrompt =
+          job.prompt + buildSingleRowModelSpacingPromptAddendum(gridLayout);
         const oneRowUrl = await editOnceRoute(
           imageCtx,
           buffer,
           ext,
           mime,
-          imageEditPrompt(job.prompt),
+          imageEditPrompt(rowModelPrompt),
           gatewayEdit,
         );
         if (!oneRowUrl) {
@@ -1172,6 +1178,7 @@ export async function POST(request: Request) {
       const gridBuffer = await buildDuplicatedRowGridFromOneRow(
         oneRowBuffer,
         gridLayout,
+        { skipRowModel },
       );
       const gridUrl = `data:image/png;base64,${gridBuffer.toString("base64")}`;
 
@@ -1242,7 +1249,9 @@ export async function POST(request: Request) {
   const gridLayoutParsed = parseTenSinglesGridLayoutFromFormData(formData);
   const extractGridAddendum =
     mode === "extract_ten_grid"
-      ? buildWhiteGridLayoutPromptAddendum(gridLayoutParsed)
+      ? buildWhiteGridLayoutPromptAddendum(gridLayoutParsed, {
+          variant: "spacing_only",
+        })
       : mode === "white_grid_rectify"
         ? buildWhiteGridLayoutPromptAddendum(gridLayoutParsed, {
             variant: "spacing_only",

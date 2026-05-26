@@ -168,6 +168,31 @@ export function colGutterSumFracFromInterNailMode(
   return (4 * k) / (5 + 4 * k);
 }
 
+/** 一行五甲：四条列缝合计占内宽的下限（≈「缝宽 = 列槽 1/5」档，保证相邻甲片之间必有可见留白） */
+export const SINGLE_ROW_MIN_COL_GUTTER_SUM_FRAC =
+  colGutterSumFracFromInterNailMode("fifth");
+
+export function layoutWithMinColGutterForSingleRow(
+  layout: TenSinglesGridLayout,
+): TenSinglesGridLayout {
+  const min = SINGLE_ROW_MIN_COL_GUTTER_SUM_FRAC;
+  if (layout.colGutterSumFrac >= min) return layout;
+  return { ...layout, colGutterSumFrac: min, interNailColGapMode: null };
+}
+
+/** 追加到单行五甲模型提示词：列缝目标（与用户排版面板一致） */
+export function buildSingleRowModelSpacingPromptAddendum(
+  layout: TenSinglesGridLayout,
+): string {
+  const colGutterPct = (layout.colGutterSumFrac * 100).toFixed(1);
+  const colGutterEachPct = ((layout.colGutterSumFrac / 4) * 100).toFixed(1);
+  return `
+
+USER ROW SPACING (mandatory for your **one** horizontal row of five):
+- The **four** white gaps between adjacent nails (left→right) should total about **${colGutterPct}%** of the row’s inner nail band width — each gap roughly **${colGutterEachPct}%** (even splits).
+- **Forbidden:** zero-gap touching plates; keep clear #FFFFFF / #F7F7F7 between every neighbor.`;
+}
+
 function parseInterNailColGapModeRaw(
   raw: FormDataEntryValue | null,
 ): InterNailColGapMode | null {
