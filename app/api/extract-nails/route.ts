@@ -7,8 +7,8 @@ import {
   EXTRACT_TEN_GRID_API_PREFIX,
   WHITE_GRID_RECTIFY_API_PREFIX,
   collapseIdenticalPromptJobs,
-  composeExtractAngleScatteredEditPrompt,
-  extractAngleScatteredJobUsesPlanALayoutRef,
+  composeScatteredGridEditPrompt,
+  EXTRACT_DIAGONAL_ROW_API_PREFIX,
   buildNailsInBoxBoxAspectApiPrefix,
   buildNailsInBoxPackagingPrompt,
   modeUsesDominantColorExtraction,
@@ -33,7 +33,7 @@ import {
   layoutWithMinColGutterForSingleRow,
   parseTenSinglesGridLayoutFromFormData,
 } from "@/lib/ten-singles-grid-layout";
-import { loadExtractAngleScatteredPlanALayoutRef } from "@/lib/extract-angle-scattered-plan-a-ref";
+import { applyDiagonalPackshotRotation } from "@/lib/diagonal-flatlay";
 import {
   exifUprightToPng,
   normalizeTenSingleNailForCollageCell,
@@ -91,8 +91,11 @@ function composeImageEditPrompt(
   if (mode === "white_grid_rectify") {
     return `${WHITE_GRID_RECTIFY_API_PREFIX}${prompt}${extractGridAddendum}`;
   }
-  if (mode === "extract_angle_scattered") {
-    return composeExtractAngleScatteredEditPrompt(prompt, label);
+  if (mode === "extract_scattered_grid") {
+    return composeScatteredGridEditPrompt(prompt);
+  }
+  if (mode === "extract_diagonal_row") {
+    return `${EXTRACT_DIAGONAL_ROW_API_PREFIX}${prompt}`;
   }
   return prompt;
 }
@@ -1137,8 +1140,9 @@ export async function POST(request: Request) {
   if (
     mode === "complete_single_grid" ||
     mode === "single_row_to_grid" ||
+    mode === "extract_diagonal_row" ||
     mode === "extract_ten_grid" ||
-    mode === "extract_angle_scattered" ||
+    mode === "extract_scattered_grid" ||
     mode === "white_grid_rectify"
   ) {
     /** 单甲补齐：用户约定甲尖朝下，仅 EXIF 转正。抠多枚：仅 EXIF 转正，不整图 180°。 */
@@ -1148,30 +1152,41 @@ export async function POST(request: Request) {
   }
   const ext = extFromMime(mime);
 
-  if (mode === "single_row_to_grid") {
+  if (mode === "single_row_to_grid" || mode === "extract_diagonal_row") {
     const gridLayout = layoutWithMinColGutterForSingleRow(
       parseTenSinglesGridLayoutFromFormData(formData),
     );
     const skipRowModel = formData.get("skipRowModel") === "1";
     const job = promptsForMode(mode)[0];
+    const isDiagonal = mode === "extract_diagonal_row";
 
     try {
       let oneRowBuffer = buffer;
       if (!skipRowModel) {
         if (!job) {
           return Response.json(
-            { error: "未找到单行复制成双行提示词。" },
+            {
+              error: isDiagonal
+                ? "未找到斜排（一行五甲）提示词。"
+                : "未找到单行复制成双行提示词。",
+            },
             { status: 500 },
           );
         }
         const rowModelPrompt =
           job.prompt + buildSingleRowModelSpacingPromptAddendum(gridLayout);
+        const composedRowPrompt = composeImageEditPrompt(
+          mode,
+          rowModelPrompt,
+          job.label ?? "",
+          "",
+        );
         const oneRowUrl = await editOnceRoute(
           imageCtx,
           buffer,
           ext,
           mime,
-          imageEditPrompt(rowModelPrompt),
+          imageEditPrompt(composedRowPrompt),
           gatewayEdit,
         );
         if (!oneRowUrl) {
@@ -1185,16 +1200,23 @@ export async function POST(request: Request) {
         });
       }
 
-      const gridBuffer = await buildDuplicatedRowGridFromOneRow(
+      const stripFill = isDiagonal ? 0.84 : undefined;
+      let gridBuffer = await buildDuplicatedRowGridFromOneRow(
         oneRowBuffer,
         gridLayout,
-        { skipRowModel },
+        { skipRowModel, maxInnerFillFrac: stripFill },
       );
+      if (isDiagonal) {
+        gridBuffer = await applyDiagonalPackshotRotation(gridBuffer);
+      }
       const gridUrl = `data:image/png;base64,${gridBuffer.toString("base64")}`;
 
+      const defaultLabel = generationModeOption(mode).label;
       const label = skipRowModel
-        ? "白底栅格 · 单行复制成双行（跳过模型）"
-        : job?.label ?? generationModeOption("single_row_to_grid").label;
+        ? isDiagonal
+          ? `${defaultLabel}（跳过模型）`
+          : "白底栅格 · 单行复制成双行（跳过模型）"
+        : job?.label ?? defaultLabel;
 
       return Response.json({
         imageUrls: [gridUrl],
@@ -1206,7 +1228,9 @@ export async function POST(request: Request) {
       const message =
         e instanceof Error
           ? e.message
-          : "单行规整或服务端复制拼接失败";
+          : isDiagonal
+            ? "斜排（一行抠图、复制、旋转）失败"
+            : "单行规整或服务端复制拼接失败";
       return Response.json({ error: message }, { status: 502 });
     }
   }
@@ -1291,38 +1315,11 @@ export async function POST(request: Request) {
     );
   }
 
-  let planALayoutRef: { buffer: Buffer; mime: string } | null = null;
-  if (mode === "extract_angle_scattered") {
-    try {
-      planALayoutRef = await loadExtractAngleScatteredPlanALayoutRef();
-    } catch {
-      return Response.json(
-        { error: "内置方案 A 排版参考图缺失，请确认 public/references/ 已部署。" },
-        { status: 500 },
-      );
-    }
-  }
-
   const editResolvedExtractJob = async (job: {
     prompt: string;
     label: string;
   }) => {
     const prompt = imageEditPrompt(job.prompt);
-    if (
-      mode === "extract_angle_scattered" &&
-      planALayoutRef &&
-      extractAngleScatteredJobUsesPlanALayoutRef(job.label)
-    ) {
-      return editDualSceneNailsRoute(
-        imageCtx,
-        buffer,
-        mime,
-        planALayoutRef.buffer,
-        planALayoutRef.mime,
-        prompt,
-        gatewayEdit,
-      );
-    }
     return editOnceRoute(
       imageCtx,
       buffer,

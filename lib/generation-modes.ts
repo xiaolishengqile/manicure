@@ -5,7 +5,8 @@ import {
 
 export type GenerationMode =
   | "extract_ten_grid"
-  | "extract_angle_scattered"
+  | "extract_diagonal_row"
+  | "extract_scattered_grid"
   | "white_grid_rectify"
   | "complete_single_grid"
   | "single_row_to_grid"
@@ -38,12 +39,20 @@ export const GENERATION_MODE_OPTIONS: {
       "从实拍/背卡识别并抠出已出现的甲片，摆成 2×5 白底；不补款。**锁定**每枚的长度、宽度与甲型；每行**甲根顶线齐平**，指尖随真实长短**自然形成阶梯**。仅竖直摆正（yaw=0°）与留白/列缝；附录**不**按列宽缩放甲片。每次生成 **1 张**。仅 EXIF 转正，不整图强制 180°。",
   },
   {
-    value: "extract_angle_scattered",
-    label: "白底实拍 · 斜拍散落排版",
-    shortLabel: "斜拍 / 散落 · 抠图排版",
-    whenToUse: "已是竖直 2×5 白底商品图，要白底散落实拍风",
+    value: "extract_diagonal_row",
+    label: "白底实拍 · 斜排（一行五甲）",
+    shortLabel: "斜排 · 一行复制 + 旋转",
+    whenToUse: "已有一行五枚平铺，要斜拍 2×5 背卡成片",
     description:
-      "竖直 2×5 投喂图。**A**：双图（产品图 + 内置斜拍排版参考），按参考图的位置与同列共线摆放，保留甲型。**B**：随机打散位置与角度。均纯白底、10 枚、不重叠。并行 **2 张**择优。",
+      "上传**一行五枚**（拇→小，甲尖朝下）。**锁定**每枚甲型与长短宽窄；服务端**整行等比复制**成双排后**刚性旋转**成斜排（不改轮廓）。勾选**跳过模型**时不经 AI 改图，保真最高。走模型时只抠一行。每次 **1 张**。",
+  },
+  {
+    value: "extract_scattered_grid",
+    label: "白底实拍 · 散落排版",
+    shortLabel: "散落 · 2×5 打散",
+    whenToUse: "已是竖直 2×5 白底商品图，要随机散落实拍风",
+    description:
+      "上传**竖直 2×5** 白底商品图（上排 1–5、下排 6–10）。模型抠出 **10 枚**后在白底**随机位置与角度**打散，保留每格甲型与花色，禁止仍排成整齐栅格。纯白底、10 枚、不重叠。每次 **1 张**。",
   },
   {
     value: "white_grid_rectify",
@@ -147,7 +156,8 @@ export const GENERATION_MODE_GROUPS: {
     subtitle: "抠图、排版、十枚合集",
     modes: [
       "extract_ten_grid",
-      "extract_angle_scattered",
+      "extract_diagonal_row",
+      "extract_scattered_grid",
       "white_grid_rectify",
       "complete_single_grid",
       "single_row_to_grid",
@@ -184,6 +194,7 @@ export function modeUsesWhiteGridFormFields(mode: GenerationMode): boolean {
   return (
     mode === "complete_single_grid" ||
     mode === "single_row_to_grid" ||
+    mode === "extract_diagonal_row" ||
     mode === "extract_ten_grid" ||
     mode === "white_grid_rectify"
   );
@@ -195,6 +206,7 @@ export function modeShowsWhiteGridLayoutPanel(mode: GenerationMode): boolean {
     mode === "ten_singles_grid" ||
     mode === "complete_single_grid" ||
     mode === "single_row_to_grid" ||
+    mode === "extract_diagonal_row" ||
     mode === "extract_ten_grid" ||
     mode === "white_grid_rectify"
   );
@@ -210,9 +222,24 @@ export function modeIsPhotoExtractToGrid(mode: GenerationMode): boolean {
   return mode === "extract_ten_grid";
 }
 
-/** 竖直源图 → 白底散落实拍（同步倾斜 / 散乱，并行 A/B） */
+/** 一行五甲 → 服务端复制成双行 + 斜排旋转（不经模型做斜拍排版） */
+export function modeIsDiagonalRowFlatlay(mode: GenerationMode): boolean {
+  return mode === "extract_diagonal_row";
+}
+
+/** 与 single_row_to_grid 相同的上传约定（一行五枚） */
+export function modeUsesSingleRowUpload(mode: GenerationMode): boolean {
+  return mode === "single_row_to_grid" || mode === "extract_diagonal_row";
+}
+
+/** 竖直 2×5 → 模型打散排布 */
+export function modeIsScatteredGridFlatlay(mode: GenerationMode): boolean {
+  return mode === "extract_scattered_grid";
+}
+
+/** @deprecated 使用 modeIsScatteredGridFlatlay */
 export function modeIsVerticalToScatteredFlatLay(mode: GenerationMode): boolean {
-  return mode === "extract_angle_scattered";
+  return modeIsScatteredGridFlatlay(mode);
 }
 
 export function parseGenerationMode(raw: FormDataEntryValue | null): GenerationMode {
@@ -220,6 +247,8 @@ export function parseGenerationMode(raw: FormDataEntryValue | null): GenerationM
   if (s === "complete_grid") return "complete_single_grid";
   if (
     s === "extract_ten_grid" ||
+    s === "extract_diagonal_row" ||
+    s === "extract_scattered_grid" ||
     s === "extract_angle_scattered" ||
     s === "white_grid_rectify" ||
     s === "complete_single_grid" ||
@@ -235,6 +264,7 @@ export function parseGenerationMode(raw: FormDataEntryValue | null): GenerationM
     s === "food_tryon"
   ) {
     if (s === "food_tryon") return "accessory_tryon";
+    if (s === "extract_angle_scattered") return "extract_scattered_grid";
     return s;
   }
   return "extract_ten_grid";
@@ -763,23 +793,28 @@ SHARED RULES (Variant A and B):
 export const EXTRACT_ANGLE_SCATTERED_UNIFORM_TILT_API_PREFIX =
   `【方案A·双图·甲型锁第一】图1=用户竖直2×5产品：每枚 slot N 的甲型、长短、宽度、tip 形状、花色**唯一**来自图1 同格 N；图2=内置斜拍排版参考，**只学**各枚中心点位置、倾斜角、列共线、行距与间距，**禁止**学图2 的甲长、甲宽、轮廓或 tip 形状；短方/方圆必须仍是短方/方圆，禁止变成长椭圆/杏仁/棺材甲；每枚 height:width 与图1 同格须在 ~3% 内；只允许刚性旋转+平移，禁止非均匀缩放、禁止纵向拉长、禁止 beautify 改甲型；排版冲突时**保甲型**、只调位置/角度/留白；上1与下6…上5与下10 五对须同列共线；整组 ~45° 且长轴平行；纯白底；10 枚全保留；禁止重叠。\n\n`;
 
-export const EXTRACT_ANGLE_SCATTERED_SCATTERED_API_PREFIX =
-  `【方案B·硬性】输出必须且只能10枚美甲（与源图10格一一对应，禁止8/9枚或合并省略）；保留每枚甲型；全部抠出后在白底随机打散、每枚角度各异（禁止仍排成整齐2×5）；纯白底；禁止漏枚、禁止重叠、禁止用重复设计凑数。\n\n`;
+export const EXTRACT_SCATTERED_GRID_API_PREFIX =
+  `【散落·甲型锁第一】输入竖直2×5；输出必须且只能10枚（slot N 仅来自输入 slot N）；每枚**同轮廓、同长短、同宽窄**（高约±3%），禁止拉长压扁或改甲型；只允许刚性旋转+平移后随机打散；禁止整齐2×5；纯白底；禁止漏枚、重叠、凑数。\n\n`;
 
-/** 方案 A 走双图：用户产品 + 内置排版参考 */
-export function extractAngleScatteredJobUsesPlanALayoutRef(label: string): boolean {
-  return label.includes("方案 A") || label.includes("同步倾斜");
+/** 斜排（一行五甲）：发往 API 时拼在 prompt 最前 */
+export const EXTRACT_DIAGONAL_ROW_API_PREFIX =
+  `【斜排·甲型锁第一】五枚须与上传**逐枚同甲型、同长短、同宽窄**（高约±3%）；拇→小的**高矮胖瘦阶梯**只能来自源图，禁止拉成五枚等高/等宽或改轮廓；只允许每枚刚性旋转至竖直+平移；禁止非均匀缩放；你只输出**一行五甲+列间白缝**；服务端整行复制成双排再旋转，禁止你在图里预排两行或预倾斜。\n\n`;
+
+/** @deprecated 使用 EXTRACT_SCATTERED_GRID_API_PREFIX */
+export const EXTRACT_ANGLE_SCATTERED_SCATTERED_API_PREFIX =
+  EXTRACT_SCATTERED_GRID_API_PREFIX;
+
+export function composeScatteredGridEditPrompt(prompt: string): string {
+  return `${EXTRACT_SCATTERED_GRID_API_PREFIX}${prompt}`;
 }
 
+/** @deprecated 使用 composeScatteredGridEditPrompt */
 export function composeExtractAngleScatteredEditPrompt(
   prompt: string,
   label: string,
 ): string {
-  if (label.includes("方案 A") || label.includes("同步倾斜")) {
-    return `${EXTRACT_ANGLE_SCATTERED_UNIFORM_TILT_API_PREFIX}${prompt}`;
-  }
   if (label.includes("方案 B") || label.includes("散乱排布")) {
-    return `${EXTRACT_ANGLE_SCATTERED_SCATTERED_API_PREFIX}${prompt}`;
+    return composeScatteredGridEditPrompt(prompt);
   }
   return prompt;
 }
@@ -826,9 +861,11 @@ OUTPUT: One square photorealistic packshot. **No** text, watermarks, or UI. **No
 
 Return a single square product-ready image.`;
 
-/** 方案 B：保留甲型 + 随机排布（硬性 10 枚） */
-const EXTRACT_ANGLE_SCATTERED_SCATTERED_PROMPT = `${EXTRACT_ANGLE_SCATTERED_BASE_EN}
-VARIANT B — **RANDOM LAYOUT** (**exactly 10** nails, **shuffled** on white):
+/** 散落排版：竖直 2×5 输入 → 随机打散 */
+const EXTRACT_SCATTERED_GRID_PROMPT = `${EXTRACT_ANGLE_SCATTERED_BASE_EN}
+${EXTRACT_TEN_GRID_SIZE_LOCK_EN}
+
+**RANDOM LAYOUT** (**exactly 10** nails, **shuffled** on white):
 
 **COUNT LOCK (highest priority):**
 - When the input has **10** occupied slots, the output **must contain exactly 10** separate nail cutouts — **not 8, not 9, not 11**.
@@ -848,12 +885,12 @@ LAYOUT:
 
 ROTATION:
 - **Each nail its own angle** — angles should **vary** nail to nail.
-- **Forbidden:** all nails sharing one global tilt (~45° together) — that is Variant A.
+- **Forbidden:** all nails sharing one global ~45° cluster tilt (that is the separate diagonal-row product path).
 
 SPACING:
 - Casual, uneven gaps are OK. **No overlap**, no stacking.
 
-FORBIDDEN FOR VARIANT B:
+FORBIDDEN:
 - Omitting, merging, or hiding nails to simplify the picture.
 - Keeping an upright or evenly tilted 2×5 grid.
 - Fewer than **10** nails when source has **10**.
@@ -1002,6 +1039,22 @@ ${WHITE_BG_NAIL_GRID_FINGER_LADDER}
 ${PACKSHOT_OUTPUT_COMPLIANCE_EN}
 
 Return **one** wide catalog-ready image with **only one row of five nails**.`;
+
+/** 斜排专用：在单行抠图 prompt 上叠加栅格级尺寸锁 + 服务端旋转说明 */
+const EXTRACT_DIAGONAL_ROW_ONE_ROW_PROMPT = `${SINGLE_ROW_EXTRACT_ONE_ROW_PROMPT}
+
+${EXTRACT_TEN_GRID_SIZE_LOCK_EN}
+
+DIAGONAL PACKSHOT — SERVER ONLY (forbidden in your output):
+- Output **one** upright horizontal row only — **yaw = 0°** on every nail.
+- The server **duplicates** your row into top + bottom, then **rigidly rotates** the whole sheet ~45° — **forbidden:** pre-tilting nails, drawing two rows, or a 2×5 preview in one image.
+- The server does **not** invent per-column size scaling.
+
+LADDER OVERRIDE (overrides any generic finger-size ladder above):
+- **Upload row is truth:** each column’s **height, width, and outline** must match that nail in the **upload** (within ~3%) — preserve the photo’s **高矮胖瘦** ladder, whether subtle or strong.
+- **Forbidden:** rebalancing all five to a catalogue template, equalizing heights, or exaggerating thumb vs pinky beyond the source.
+
+`;
 
 /** 正视上手 — 甲型保真（不拉长、不改型、不偷换列位形状） */
 const MULTI_ANGLE_SHAPE_FIDELITY_EN = `1) NAIL SHAPE — DO NOT CHANGE (failure if violated):
@@ -1312,12 +1365,7 @@ export function filterParallelImageJobs(
   if (choice === "all" || jobs.length <= 1) {
     return jobs.map((j) => ({ ...j }));
   }
-  if (mode !== "extract_angle_scattered") {
-    return jobs.map((j) => ({ ...j }));
-  }
-  return jobs
-    .filter((j) => jobMatchesParallelVariantChoice(j.label, choice))
-    .map((j) => ({ ...j }));
+  return jobs.map((j) => ({ ...j }));
 }
 
 export function promptsForMode(mode: GenerationMode): { prompt: string; label: string }[] {
@@ -1326,19 +1374,20 @@ export function promptsForMode(mode: GenerationMode): { prompt: string; label: s
       const baseLabel = generationModeOption("extract_ten_grid").label;
       return buildWhiteGridDualVariantJobs(baseLabel, EXTRACT_TEN_GRID_PROMPT);
     }
-    case "extract_angle_scattered": {
-      const baseLabel = generationModeOption("extract_angle_scattered").label;
+    case "extract_scattered_grid":
       return [
         {
-          prompt: EXTRACT_ANGLE_SCATTERED_UNIFORM_TILT_PROMPT,
-          label: `${baseLabel} · 方案 A · 同步倾斜`,
-        },
-        {
-          prompt: EXTRACT_ANGLE_SCATTERED_SCATTERED_PROMPT,
-          label: `${baseLabel} · 方案 B · 散乱排布`,
+          prompt: EXTRACT_SCATTERED_GRID_PROMPT,
+          label: generationModeOption("extract_scattered_grid").label,
         },
       ];
-    }
+    case "extract_diagonal_row":
+      return [
+        {
+          prompt: EXTRACT_DIAGONAL_ROW_ONE_ROW_PROMPT,
+          label: generationModeOption("extract_diagonal_row").label,
+        },
+      ];
     case "white_grid_rectify": {
       const baseLabel = generationModeOption("white_grid_rectify").label;
       return buildWhiteGridDualVariantJobs(baseLabel, WHITE_GRID_RECTIFY_PROMPT);

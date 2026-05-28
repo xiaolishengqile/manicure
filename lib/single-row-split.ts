@@ -4,48 +4,9 @@ import {
   layoutWithMinColGutterForSingleRow,
   type TenSinglesGridLayout,
 } from "@/lib/ten-singles-grid-layout";
-import {
-  buildDuplicatedFiveNailRowGrid,
-  buildDuplicatedRowStripGrid,
-} from "@/lib/ten-singles-collage";
-import {
-  uprightHorizontalNailRowCrops,
-  uprightNailPads,
-} from "@/lib/row-strip-upright";
+import { buildDuplicatedRowStripGrid } from "@/lib/ten-singles-collage";
 
 const EXPECTED_NAILS_PER_ROW = 5;
-
-async function pngMeta(buf: Buffer): Promise<{ w: number; h: number }> {
-  const m = await sharp(buf).metadata();
-  return { w: m.width ?? 1, h: m.height ?? 1 };
-}
-
-/**
- * 连通域/列缝裁切有时会误把一行甲片切成多根竖条（蕾丝底纹、甲面高光竖带等）。
- * 若列宽过窄或五列悬殊，则放弃按枚拼图，改走整行条带复制。
- */
-async function fiveNailCropsLookLikeWholeNails(
-  crops: Buffer[],
-  rowBuffer: Buffer,
-): Promise<boolean> {
-  if (crops.length !== EXPECTED_NAILS_PER_ROW) return false;
-  const trimmed = await trimWhiteEdges(rowBuffer);
-  const row = await pngMeta(trimmed);
-  const metas = await Promise.all(crops.map((b) => pngMeta(b)));
-  const widths = metas.map((m) => m.w);
-  const minW = Math.min(...widths);
-  const maxW = Math.max(...widths);
-  const rowW = Math.max(row.w, widths.reduce((s, w) => s + w, 0));
-
-  if (minW < rowW * 0.1) return false;
-  if (minW < maxW * 0.42) return false;
-
-  for (const { w, h } of metas) {
-    if (h < w * 1.08) return false;
-    if (w > h * 0.72) return false;
-  }
-  return true;
-}
 
 async function trimWhiteEdges(input: Buffer): Promise<Buffer> {
   try {
@@ -197,13 +158,14 @@ export async function splitHorizontalNailRow(
 }
 
 export type BuildDuplicatedRowGridOptions = {
-  /** 未走模型：可对上传图尝试按枚裁切+排版面板列缝；默认 false = 模型已出带缝一行，仅整行复制 */
+  /** 未走模型：整行条带复制成双排（保甲型/高矮胖瘦）；默认 false = 模型已出带缝一行，同样整行复制 */
   skipRowModel?: boolean;
+  /** 条带在内区的最大占比（等比缩放上限，默认见 SINGLE_ROW_STRIP_MAX_INNER_FILL） */
+  maxInnerFillFrac?: number;
 };
 
 /**
- * - **默认（走模型）**：模型输出「一行五甲 + 列间白缝」→ 服务端**整行条带**复制为上下两排（不再切成五列，避免竖条碎裂）。
- * - **跳过模型**：在白底清晰时可按枚摆正并用排版面板的列缝拼 2×5；否则仍整行复制。
+ * 模型出图或跳过模型时均**整行条带**等比缩放后复制成双排，保留源图五枚相对长短宽窄；不按枚裁切进格。
  */
 export async function buildDuplicatedRowGridFromOneRow(
   oneRowBuffer: Buffer,
@@ -212,29 +174,14 @@ export async function buildDuplicatedRowGridFromOneRow(
 ): Promise<Buffer> {
   const layoutEff = layoutWithMinColGutterForSingleRow(layout);
   const trimmed = await trimWhiteEdges(oneRowBuffer);
+  const stripOpts = options?.maxInnerFillFrac
+    ? { maxInnerFillFrac: options.maxInnerFillFrac }
+    : undefined;
 
   if (!options?.skipRowModel) {
-    return buildDuplicatedRowStripGrid(trimmed, layoutEff);
+    return buildDuplicatedRowStripGrid(trimmed, layoutEff, stripOpts);
   }
 
-  let fiveCrops: Buffer[] | null = null;
-  try {
-    fiveCrops = await uprightHorizontalNailRowCrops(trimmed);
-  } catch {
-    try {
-      const pads = await splitHorizontalNailRow(trimmed);
-      fiveCrops = await uprightNailPads(pads);
-    } catch {
-      /* 裁切失败时整行复制 */
-    }
-  }
-
-  if (
-    fiveCrops?.length === EXPECTED_NAILS_PER_ROW &&
-    (await fiveNailCropsLookLikeWholeNails(fiveCrops, trimmed))
-  ) {
-    return buildDuplicatedFiveNailRowGrid(fiveCrops, layoutEff);
-  }
-
-  return buildDuplicatedRowStripGrid(trimmed, layoutEff);
+  /** 跳过模型：只整行条带等比缩放后复制两行，保留源图拇→小比例与甲尖阶梯，不按枚重拼进格（避免格内拉伸改甲型）。 */
+  return buildDuplicatedRowStripGrid(trimmed, layoutEff, stripOpts);
 }

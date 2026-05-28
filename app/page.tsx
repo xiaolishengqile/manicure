@@ -8,9 +8,11 @@ import { NailShapeProfilePicker } from "@/components/nail-shape-profile-picker";
 import { PanelColorPicker } from "@/components/panel-color-picker";
 import {
   getDualUploadKind,
+  modeIsDiagonalRowFlatlay,
   modeIsPhotoExtractToGrid,
-  modeIsVerticalToScatteredFlatLay,
+  modeIsScatteredGridFlatlay,
   modeShowsWhiteGridLayoutPanel,
+  modeUsesSingleRowUpload,
   parallelImageJobCountForMode,
   parallelVariantChoiceFromSlotIndex,
   promptsForMode,
@@ -957,9 +959,11 @@ export default function Home() {
               : "2D 包装平面稿请选择图片文件。"
             : mode === "nails_in_box"
               ? "美甲款式图请选择图片文件。"
-              : mode === "extract_angle_scattered"
-                ? "竖直白底商品图请选择图片文件。"
-                : "美甲产品图请选择图片文件。",
+              : modeIsScatteredGridFlatlay(mode)
+                ? "竖直 2×5 白底商品图请选择图片文件。"
+                : modeIsDiagonalRowFlatlay(mode)
+                  ? "一行五甲照片请选择图片文件。"
+                  : "美甲产品图请选择图片文件。",
         );
         setFile(null);
         setPreviewUrl((prev) => {
@@ -1142,7 +1146,7 @@ export default function Home() {
     const isPartialRegen =
       variantChoice !== "all" &&
       mergeSlotIndex !== undefined &&
-      modeIsVerticalToScatteredFlatLay(mode);
+      parallelImageJobCountForMode(mode) > 1;
     if (tenMode) {
       if (!tenSlots.every((s) => s.file)) {
         setError("请填满全部 10 个格子后再生成（可逐格添加或一次选 10 张）。");
@@ -1252,7 +1256,7 @@ export default function Home() {
           body.set("packagingBoxImage", secondFile);
           body.set("nailArrangement", nailBoxArrangement);
         }
-        if (mode === "single_row_to_grid" && skipSingleRowModel) {
+        if (modeUsesSingleRowUpload(mode) && skipSingleRowModel) {
           body.set("skipRowModel", "1");
         }
         if (modeUsesWhiteGridFormFields(mode)) {
@@ -1655,8 +1659,10 @@ export default function Home() {
                 ? "产出（十枚单甲 · 一张合集）"
                 : mode === "extract_ten_grid"
                   ? "产出（白底栅格 · 仅抠图 · 1张）"
-                  : mode === "extract_angle_scattered"
-                    ? "产出（散落实拍 · A 内置排版参考 + B 随机排布 · 2张）"
+                  : mode === "extract_diagonal_row"
+                    ? "产出（斜排 · 一行五甲 · 1张）"
+                    : mode === "extract_scattered_grid"
+                      ? "产出（散落排版 · 2×5 打散 · 1张）"
                     : mode === "white_grid_rectify"
                     ? "产出（白底栅格 · 几何矫正 · 1张）"
                     : mode === "complete_single_grid"
@@ -1719,20 +1725,22 @@ export default function Home() {
             : "平铺、卡纸、白底商品图均可";
 
   const singleUploadTitle =
-    mode === "extract_angle_scattered"
-      ? "点击选择竖直 2×5 白底商品图（或规整竖直甲片）"
+    modeIsScatteredGridFlatlay(mode)
+      ? "点击选择竖直 2×5 白底商品图"
       : mode === "extract_ten_grid"
         ? "点击选择含多枚甲片的照片"
         : mode === "white_grid_rectify"
         ? "点击选择已生成的 2×5 白底栅格图"
         : mode === "complete_single_grid"
           ? "点击选择单枚甲片照片"
-          : mode === "single_row_to_grid"
+          : modeUsesSingleRowUpload(mode)
             ? "点击选择一行五枚甲片照片"
             : "点击选择美甲照片";
   const singleUploadHint =
-    mode === "extract_angle_scattered"
-      ? "输入须为**竖直甲片**（常见 2×5）；**A/B 均须恰好 10 枚**、**纯白底**、互不压住；**A** 双图（你的产品图 + 内置斜拍参考排版），只学参考的位置与同列共线，**花色仍来自你的产品图**；**B** 随机打散；并行 **2 张**择优"
+    modeIsScatteredGridFlatlay(mode)
+      ? "上传**竖直 2×5**（上排 1–5、下排 6–10）；输出 **10 枚**在白底**随机位置与角度**打散，保留每格甲型与花色，禁止仍排成整齐栅格；每次 **1 张**"
+      : modeIsDiagonalRowFlatlay(mode)
+        ? "上传**一行五枚**（拇→小，甲尖朝下）。**完全保留**源图五枚的甲型与高矮胖瘦；服务端**整行等比复制**后旋转成斜排。**强烈建议**清晰白底时勾选「跳过模型」以免 AI 改轮廓；走模型时只抠一行、列间留白缝"
       : mode === "extract_ten_grid"
         ? "托盘、卡纸、实拍平铺等；只抠已出现的甲片，**锁定每枚长短与甲型**，每行甲根齐平、指尖随长短自然阶梯；每次 **1 张**"
         : mode === "white_grid_rectify"
@@ -1764,7 +1772,7 @@ export default function Home() {
       setPanelColorSource("auto");
       setPanelAutoHex(null);
     }
-    if (next === "single_row_to_grid") {
+    if (next === "single_row_to_grid" || next === "extract_diagonal_row") {
       if (marginPctDraft.trim() === "1.8") {
         setMarginPctDraft("6");
       }
@@ -1890,8 +1898,10 @@ export default function Home() {
                               ? "正在规整单行并复制拼接 2×5…"
                               : mode === "extract_ten_grid"
                               ? "正在抠图排版…"
-                              : mode === "extract_angle_scattered"
-                                ? "正在生成散落实拍（2张）…"
+                              : mode === "extract_diagonal_row"
+                                ? "正在生成斜排（一行抠图、复制、旋转）…"
+                                : mode === "extract_scattered_grid"
+                                  ? "正在生成散落排版…"
                                 : mode === "white_grid_rectify"
                                 ? "正在几何矫正…"
                                 : "正在生成…"
@@ -2189,7 +2199,7 @@ export default function Home() {
                 <p className="text-xs text-zinc-500">
                   下方虚线区域点击后仅从文件夹选图；剪贴板粘贴请使用上方「粘贴区」。
                 </p>
-                {mode === "single_row_to_grid" ? (
+                {modeUsesSingleRowUpload(mode) ? (
                   <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-zinc-200 bg-zinc-50/90 px-3 py-2.5 text-sm text-zinc-800">
                     <input
                       type="checkbox"
@@ -2200,7 +2210,9 @@ export default function Home() {
                     <span>
                       <span className="font-medium">跳过模型，直接复制拼接</span>
                       <span className="mt-0.5 block text-xs font-normal text-zinc-500">
-                        上传已是清晰白底一行五甲时勾选，整行原样复制为两排，不经模型改图。
+                        {modeIsDiagonalRowFlatlay(mode)
+                          ? "上传已是清晰白底一行五甲时勾选：整行等比复制为两排并旋转成斜排，不经模型改图，最大程度保留甲型与长短宽窄。"
+                          : "上传已是清晰白底一行五甲时勾选，整行原样复制为两排，不经模型改图。"}
                       </span>
                     </span>
                   </label>
@@ -2219,8 +2231,8 @@ export default function Home() {
             {parallelImageJobCountForMode(mode) > 1 && filledResultSlotCount > 0 ? (
               <p className="text-xs leading-relaxed text-zinc-600">
                 已并行生成 {filledResultSlotCount} 张，请对比
-                {modeIsVerticalToScatteredFlatLay(mode)
-                  ? "是否恰好 10 枚、底边是否纯白；A 是否贴近内置参考排版（同列共线、约 45°）且花色来自你的产品图；B 是否 10 枚全部打散、非整齐 2×5"
+                {modeIsScatteredGridFlatlay(mode)
+                  ? "是否恰好 10 枚、底边是否纯白、是否已打散且每枚角度各异（非整齐 2×5）"
                   : modeIsPhotoExtractToGrid(mode)
                     ? "抠图保真度与排版"
                     : "甲型保真度与竖直/间距"}
@@ -2314,7 +2326,7 @@ export default function Home() {
                               : "转为投喂图片"}
                           </button>
                         ) : null}
-                        {modeIsVerticalToScatteredFlatLay(mode) &&
+                        {parallelImageJobCountForMode(mode) > 1 &&
                         parallelVariantChoiceFromSlotIndex(i) ? (
                           <button
                             type="button"
