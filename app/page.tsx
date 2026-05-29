@@ -6,6 +6,12 @@ import { GenerationModePicker } from "@/components/generation-mode-picker";
 import { ImageModelSelect } from "@/components/image-model-select";
 import { NailShapeProfilePicker } from "@/components/nail-shape-profile-picker";
 import { PanelColorPicker } from "@/components/panel-color-picker";
+import { FeedPasteZone, firstImageFileFromDataTransfer } from "@/components/feed-paste-zone";
+import { UploadTile } from "@/components/upload-tile";
+import { TenSlotUpload } from "@/components/ten-slot-upload";
+import { ResultDisplay } from "@/components/result-display";
+import { PromptPresetsPanel } from "@/components/prompt-presets-panel";
+import { GridLayoutPanel } from "@/components/grid-layout-panel";
 import {
   getDualUploadKind,
   modeIsDiagonalRowFlatlay,
@@ -62,6 +68,7 @@ import {
   NAIL_SCALE_PCT_MIN,
   serializeNailColScalePctDrafts,
 } from "@/lib/ten-singles-grid-layout";
+import { usePromptPresets } from "@/lib/use-prompt-presets";
 
 function clampColGutterSumPct(n: number): number {
   return Math.min(COL_GUTTER_SUM_INNER_WIDTH_PCT_MAX, Math.max(0, n));
@@ -124,20 +131,9 @@ import {
 import { SiteAccessLogout } from "@/components/site-access-logout";
 
 const LS_LAST_USER_NOTES = "manicure_last_user_extra_notes";
-const LS_PROMPT_PRESETS = "manicure_user_prompt_presets";
-const LS_SOLO_PROMPT_PRESETS = "manicure_solo_image_prompt_presets";
 const LS_NAIL_SHAPE_PROFILE = "manicure_model_tryon_nail_shape_profile";
 const MAX_PRESETS = 40;
 const MAX_PRESET_LINE_CHARS = 200;
-
-type PromptPresetItem = { id: string; text: string };
-
-function newPresetId(): string {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-    return crypto.randomUUID();
-  }
-  return `p-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
-}
 
 /** 与 `/api/extract-nails` 并行流式分支一致：多路时先完成的先下发 */
 type StreamResultSlot = {
@@ -152,166 +148,10 @@ function parallelStreamJobCount(m: GenerationMode): number {
   return n > 1 ? n : 0;
 }
 
-function defaultPresetItems(): PromptPresetItem[] {
-  return DEFAULT_USER_PROMPT_PRESETS.map((text, i) => ({
-    id: `builtin-${i}`,
-    text,
-  }));
-}
-
-function defaultSoloPresetItems(): PromptPresetItem[] {
-  return DEFAULT_SOLO_IMAGE_PROMPT_PRESETS.map((text, i) => ({
-    id: `solo-builtin-${i}`,
-    text,
-  }));
-}
-
-/** 兼容旧版 string[] 与新版 { id, text }[] */
-function parseStoredPresets(raw: string): PromptPresetItem[] | null {
-  try {
-    const arr = JSON.parse(raw) as unknown;
-    if (!Array.isArray(arr) || arr.length === 0) return null;
-    if (arr.every((x): x is string => typeof x === "string")) {
-      const lines = arr
-        .map((s) => s.trim())
-        .filter(Boolean)
-        .map((s) => s.slice(0, MAX_PRESET_LINE_CHARS))
-        .slice(0, MAX_PRESETS);
-      if (!lines.length) return null;
-      return lines.map((text) => ({ id: newPresetId(), text }));
-    }
-    const out: PromptPresetItem[] = [];
-    for (const entry of arr) {
-      if (typeof entry !== "object" || entry === null) continue;
-      const o = entry as Record<string, unknown>;
-      const textRaw = typeof o.text === "string" ? o.text.trim() : "";
-      const text = textRaw.slice(0, MAX_PRESET_LINE_CHARS);
-      if (!text) continue;
-      const id =
-        typeof o.id === "string" && o.id.length > 0 ? o.id : newPresetId();
-      out.push({ id, text });
-      if (out.length >= MAX_PRESETS) break;
-    }
-    return out.length ? out : null;
-  } catch {
-    return null;
-  }
-}
-
 type TenSlotCell = { file: File | null; previewUrl: string | null };
 
 function emptyTenSlots(): TenSlotCell[] {
   return Array.from({ length: 10 }, () => ({ file: null, previewUrl: null }));
-}
-
-/** 从系统剪贴板取第一张图片文件（用于投喂区粘贴） */
-function firstImageFileFromDataTransfer(dt: DataTransfer | null): File | null {
-  if (!dt) return null;
-  if (dt.items?.length) {
-    for (let i = 0; i < dt.items.length; i++) {
-      const item = dt.items[i];
-      if (item?.kind !== "file") continue;
-      const t = item.type?.toLowerCase() ?? "";
-      if (!t.startsWith("image/")) continue;
-      const f = item.getAsFile();
-      if (f) return f;
-    }
-  }
-  const { files } = dt;
-  if (files?.length) {
-    for (let i = 0; i < files.length; i++) {
-      const f = files.item(i);
-      if (f?.type.startsWith("image/")) return f;
-    }
-  }
-  return null;
-}
-
-/** 投喂区专用：点击聚焦后在此粘贴剪贴板图片，不会打开系统文件夹 */
-function FeedPasteZone({
-  ariaLabel,
-  children,
-  onPasteImage,
-  className = "",
-}: {
-  ariaLabel: string;
-  children: React.ReactNode;
-  onPasteImage: (file: File) => void;
-  className?: string;
-}) {
-  const onPaste = (e: React.ClipboardEvent<HTMLDivElement>) => {
-    const f = firstImageFileFromDataTransfer(e.clipboardData);
-    if (!f) return;
-    e.preventDefault();
-    e.stopPropagation();
-    onPasteImage(f);
-  };
-
-  return (
-    <div
-      tabIndex={0}
-      role="region"
-      aria-label={ariaLabel}
-      onPaste={onPaste}
-      onClick={(e) => {
-        (e.currentTarget as HTMLDivElement).focus();
-      }}
-      className={`cursor-default rounded-lg border border-dashed border-zinc-300 bg-zinc-50/90 px-3 py-2.5 text-xs leading-relaxed text-zinc-600 outline-none transition hover:border-rose-200 hover:bg-rose-50/60 focus-visible:border-rose-400 focus-visible:ring-2 focus-visible:ring-rose-400/40 ${className}`}
-    >
-      {children}
-    </div>
-  );
-}
-
-function UploadTile({
-  title,
-  hint,
-  previewUrl,
-  onPick,
-  onClear,
-}: {
-  title: string;
-  hint: string;
-  previewUrl: string | null;
-  onPick: () => void;
-  onClear?: () => void;
-}) {
-  return (
-    <div className="relative rounded-xl border-2 border-dashed border-zinc-300 bg-zinc-50 transition hover:border-rose-300 hover:bg-rose-50/60">
-      {previewUrl && onClear ? (
-        <button
-          type="button"
-          aria-label="删除该投喂图"
-          onClick={(ev) => {
-            ev.stopPropagation();
-            onClear();
-          }}
-          className="absolute right-2 top-2 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-zinc-900/80 text-sm font-bold text-white shadow-md transition hover:bg-red-600"
-        >
-          ×
-        </button>
-      ) : null}
-      <button
-        type="button"
-        onClick={onPick}
-        className="flex min-h-[180px] w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-[10px] px-3 py-6 text-center text-sm text-zinc-600"
-      >
-        {previewUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={previewUrl}
-            alt={title}
-            className="max-h-40 w-full rounded-lg object-contain"
-          />
-        ) : (
-          <>
-            <span className="text-sm font-medium text-zinc-800">{title}</span>
-            <span className="text-xs text-zinc-500">{hint}</span>
-          </>
-        )}
-      </button>
-    </div>
-  );
 }
 
 export default function Home() {
@@ -389,28 +229,43 @@ export default function Home() {
   /** 非空时：服务端在框内文前加两句白底底线后发图；不拼长系统提示与「补充说明」 */
   const [soloImageEditPrompt, setSoloImageEditPrompt] = useState("");
   const skipNextNotesPersist = useRef(true);
-  const [promptPresets, setPromptPresets] =
-    useState<PromptPresetItem[]>(defaultPresetItems);
-  const skipFirstPresetPersist = useRef(true);
+  const userPresets = usePromptPresets(
+    "manicure_user_prompt_presets",
+    DEFAULT_USER_PROMPT_PRESETS,
+  );
+  const soloPresets = usePromptPresets(
+    "manicure_solo_image_prompt_presets",
+    DEFAULT_SOLO_IMAGE_PROMPT_PRESETS,
+  );
   const [presetPanelOpen, setPresetPanelOpen] = useState(false);
-  const [newPresetDraft, setNewPresetDraft] = useState("");
-  const [draggingPresetIndex, setDraggingPresetIndex] = useState<number | null>(
-    null,
-  );
-  const [dragOverPresetIndex, setDragOverPresetIndex] = useState<number | null>(
-    null,
-  );
-  const [soloPromptPresets, setSoloPromptPresets] =
-    useState<PromptPresetItem[]>(defaultSoloPresetItems);
-  const skipFirstSoloPresetPersist = useRef(true);
   const [soloPresetPanelOpen, setSoloPresetPanelOpen] = useState(false);
-  const [newSoloPresetDraft, setNewSoloPresetDraft] = useState("");
-  const [draggingSoloPresetIndex, setDraggingSoloPresetIndex] = useState<
-    number | null
-  >(null);
-  const [dragOverSoloPresetIndex, setDragOverSoloPresetIndex] = useState<
-    number | null
-  >(null);
+
+  // Aliases for JSX backward compatibility
+  const promptPresets = userPresets.presets;
+  const newPresetDraft = userPresets.newDraft;
+  const setNewPresetDraft = userPresets.setNewDraft;
+  const draggingPresetIndex = userPresets.draggingIndex;
+  const setDraggingPresetIndex = userPresets.setDraggingIndex;
+  const dragOverPresetIndex = userPresets.dragOverIndex;
+  const setDragOverPresetIndex = userPresets.setDragOverIndex;
+  const addPresetFromDraft = userPresets.addFromDraft;
+  const removePresetById = userPresets.removeById;
+  const movePreset = userPresets.move;
+  const reorderPresetByDrag = userPresets.reorderByDrag;
+  const clearPresetDragUi = userPresets.clearDragUi;
+
+  const soloPromptPresets = soloPresets.presets;
+  const newSoloPresetDraft = soloPresets.newDraft;
+  const setNewSoloPresetDraft = soloPresets.setNewDraft;
+  const draggingSoloPresetIndex = soloPresets.draggingIndex;
+  const setDraggingSoloPresetIndex = soloPresets.setDraggingIndex;
+  const dragOverSoloPresetIndex = soloPresets.dragOverIndex;
+  const setDragOverSoloPresetIndex = soloPresets.setDragOverIndex;
+  const addSoloPresetFromDraft = soloPresets.addFromDraft;
+  const removeSoloPresetById = soloPresets.removeById;
+  const moveSoloPreset = soloPresets.move;
+  const reorderSoloPresetByDrag = soloPresets.reorderByDrag;
+  const clearSoloPresetDragUi = soloPresets.clearDragUi;
 
   const {
     provider: gatewayProvider,
@@ -444,17 +299,6 @@ export default function Home() {
       /* private mode */
     }
   }, [nailShapeProfile]);
-
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(LS_PROMPT_PRESETS);
-      if (!raw) return;
-      const next = parseStoredPresets(raw);
-      if (next?.length) setPromptPresets(next);
-    } catch {
-      /* ignore */
-    }
-  }, []);
 
   useEffect(() => {
     try {
@@ -517,44 +361,6 @@ export default function Home() {
       /* ignore */
     }
   }, [userExtraNotes]);
-
-  useEffect(() => {
-    if (skipFirstPresetPersist.current) {
-      skipFirstPresetPersist.current = false;
-      return;
-    }
-    try {
-      localStorage.setItem(LS_PROMPT_PRESETS, JSON.stringify(promptPresets));
-    } catch {
-      /* ignore */
-    }
-  }, [promptPresets]);
-
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(LS_SOLO_PROMPT_PRESETS);
-      if (!raw) return;
-      const next = parseStoredPresets(raw);
-      if (next?.length) setSoloPromptPresets(next);
-    } catch {
-      /* ignore */
-    }
-  }, []);
-
-  useEffect(() => {
-    if (skipFirstSoloPresetPersist.current) {
-      skipFirstSoloPresetPersist.current = false;
-      return;
-    }
-    try {
-      localStorage.setItem(
-        LS_SOLO_PROMPT_PRESETS,
-        JSON.stringify(soloPromptPresets),
-      );
-    } catch {
-      /* ignore */
-    }
-  }, [soloPromptPresets]);
 
   const dualKind = getDualUploadKind(mode);
   const tenMode = requiresTenSingleNails(mode);
@@ -1513,118 +1319,18 @@ export default function Home() {
   }, []);
 
   const appendPresetToNotes = useCallback((line: string) => {
-    const t = line.trim().slice(0, MAX_PRESET_LINE_CHARS);
+    const t = line.trim().slice(0, 200);
     if (!t) return;
     setUserExtraNotes((prev) => (prev.trim() ? `${prev.trim()}\n${t}` : t));
   }, []);
 
-  const addPresetFromDraft = useCallback(() => {
-    const t = newPresetDraft.trim().slice(0, MAX_PRESET_LINE_CHARS);
-    if (!t) return;
-    setPromptPresets((prev) => {
-      if (prev.some((p) => p.text === t)) return prev;
-      if (prev.length >= MAX_PRESETS) return prev;
-      return [{ id: newPresetId(), text: t }, ...prev];
-    });
-    setNewPresetDraft("");
-  }, [newPresetDraft]);
-
-  const removePresetById = useCallback((id: string) => {
-    setPromptPresets((prev) => prev.filter((p) => p.id !== id));
-  }, []);
-
-  const movePreset = useCallback((index: number, delta: -1 | 1) => {
-    setPromptPresets((prev) => {
-      const j = index + delta;
-      if (j < 0 || j >= prev.length) return prev;
-      const next = [...prev];
-      const tmp = next[index]!;
-      next[index] = next[j]!;
-      next[j] = tmp;
-      return next;
-    });
-  }, []);
-
-  const reorderPresetByDrag = useCallback((from: number, to: number) => {
-    if (from === to) return;
-    setPromptPresets((prev) => {
-      if (
-        from < 0 ||
-        to < 0 ||
-        from >= prev.length ||
-        to >= prev.length
-      ) {
-        return prev;
-      }
-      const next = [...prev];
-      const [el] = next.splice(from, 1);
-      next.splice(to, 0, el!);
-      return next;
-    });
-  }, []);
-
-  const clearPresetDragUi = useCallback(() => {
-    setDraggingPresetIndex(null);
-    setDragOverPresetIndex(null);
-  }, []);
-
   const appendSoloPresetToField = useCallback((line: string) => {
-    const t = line.trim().slice(0, MAX_PRESET_LINE_CHARS);
+    const t = line.trim().slice(0, 200);
     if (!t) return;
     setSoloImageEditPrompt((prev) => {
       const next = prev.trim() ? `${prev.trim()}\n${t}` : t;
       return next.slice(0, 4000);
     });
-  }, []);
-
-  const addSoloPresetFromDraft = useCallback(() => {
-    const t = newSoloPresetDraft.trim().slice(0, MAX_PRESET_LINE_CHARS);
-    if (!t) return;
-    setSoloPromptPresets((prev) => {
-      if (prev.some((p) => p.text === t)) return prev;
-      if (prev.length >= MAX_PRESETS) return prev;
-      return [{ id: newPresetId(), text: t }, ...prev];
-    });
-    setNewSoloPresetDraft("");
-  }, [newSoloPresetDraft]);
-
-  const removeSoloPresetById = useCallback((id: string) => {
-    setSoloPromptPresets((prev) => prev.filter((p) => p.id !== id));
-  }, []);
-
-  const moveSoloPreset = useCallback((index: number, delta: -1 | 1) => {
-    setSoloPromptPresets((prev) => {
-      const j = index + delta;
-      if (j < 0 || j >= prev.length) return prev;
-      const next = [...prev];
-      const tmp = next[index]!;
-      next[index] = next[j]!;
-      next[j] = tmp;
-      return next;
-    });
-  }, []);
-
-  const reorderSoloPresetByDrag = useCallback((from: number, to: number) => {
-    if (from === to) return;
-    setSoloPromptPresets((prev) => {
-      if (
-        from < 0 ||
-        to < 0 ||
-        from >= prev.length ||
-        to >= prev.length
-      ) {
-        return prev;
-      }
-      const next = [...prev];
-      const [el] = next.splice(from, 1);
-      next.splice(to, 0, el!);
-      return next;
-    });
-  }, []);
-
-  const clearSoloPresetDragUi = useCallback(() => {
-    setDraggingSoloPresetIndex(null);
-    setDragOverSoloPresetIndex(null);
   }, []);
 
   const displayResultSlots = useMemo((): StreamResultSlot[] | null => {
@@ -1940,90 +1646,17 @@ export default function Home() {
           <div className="flex flex-col gap-4">
             <h2 className="text-sm font-semibold text-zinc-500">投喂图片</h2>
             {tenMode ? (
-              <div className="flex flex-col gap-3">
-                <FeedPasteZone
-                  ariaLabel="剪贴板粘贴到十格首个空位"
-                  onPasteImage={applyTenPasteToFirstAvailable}
-                >
-                  在对应区域点击一下使焦点落在该处后，可用 Ctrl+V（Windows）或 ⌘+V（Mac）将剪贴板中的图片粘贴为投喂图（填入<strong>首个空位</strong>；十格已满则替换第 1 格）。各格内可点击从文件夹选图或粘贴。
-                </FeedPasteZone>
-                <p className="text-xs leading-relaxed text-zinc-500">
-                  共 10 格：第 1–5 格 → 上排左→右；第 6–10 格 → 下排左→右。每格可单独添加、替换或删除；亦可一次选 10 张按顺序填满。提交后服务端会先将每格做「指尖朝下」校正，再按位置拼成**一张 2×5 白底参考图**，**每行内上对齐**使甲根后缘共线（格角带 1–10 小标）；模型成品提示词要求**不保留**小标。
-                </p>
-                <div className="grid w-full max-w-md grid-cols-5 gap-2 lg:max-w-full">
-                  {tenSlots.map((cell, i) => (
-                    <div
-                      key={i}
-                      className="group relative aspect-square w-full overflow-hidden rounded-md border border-zinc-200 bg-white shadow-sm"
-                    >
-                      {cell.previewUrl ? (
-                        <>
-                          <button
-                            type="button"
-                            aria-label={`删除第 ${i + 1} 格`}
-                            onClick={(ev) => {
-                              ev.stopPropagation();
-                              removeTenSlot(i);
-                            }}
-                            className="absolute right-1 top-1 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-zinc-900/80 text-sm font-bold text-white shadow-md transition hover:bg-red-600"
-                          >
-                            ×
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => beginPickTenSlot(i)}
-                            onPaste={onPasteTenSlot(i)}
-                            className="flex h-full w-full items-stretch justify-stretch p-0.5"
-                          >
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img
-                              src={cell.previewUrl}
-                              alt={`第 ${i + 1} 格`}
-                              className="h-full w-full rounded-[4px] object-cover"
-                            />
-                          </button>
-                          <span className="pointer-events-none absolute bottom-1 left-1 rounded bg-black/55 px-1.5 py-0.5 text-[10px] font-semibold text-white">
-                            {i + 1}
-                          </span>
-                        </>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => beginPickTenSlot(i)}
-                          onPaste={onPasteTenSlot(i)}
-                          className="flex h-full w-full flex-col items-center justify-center gap-0.5 bg-zinc-50 px-1 text-center transition hover:bg-rose-50/80"
-                        >
-                          <span className="text-xs font-semibold text-zinc-500">{i + 1}</span>
-                          <span className="text-[10px] leading-tight text-zinc-400">点击添加</span>
-                        </button>
-                      )}
-                    </div>
-                  ))}
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={onPickTenBatch}
-                    className="inline-flex h-10 items-center justify-center rounded-lg border border-zinc-300 bg-white px-3 text-sm font-medium text-zinc-800 shadow-sm transition hover:border-rose-400 hover:bg-rose-50"
-                  >
-                    一次选择 10 张（按顺序填入 1–10 格）
-                  </button>
-                  <button
-                    type="button"
-                    disabled={!tenSlots.some((s) => s.file)}
-                    onClick={() => {
-                      clearTenSlots();
-                      setError(null);
-                    }}
-                    className="inline-flex h-10 items-center justify-center rounded-lg border border-zinc-300 bg-white px-3 text-sm font-medium text-zinc-700 transition hover:border-red-200 hover:bg-red-50 hover:text-red-900 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    清空十格
-                  </button>
-                </div>
-                <p className="text-xs text-zinc-500">
-                  点击已有图片可替换该格；角标 × 仅删除本格。各格内点击后亦可 Ctrl+V / ⌘+V 粘贴；或使用上方粘贴区填入首个空位。
-                </p>
-              </div>
+              <TenSlotUpload
+                tenSlots={tenSlots}
+                onPickSlot={beginPickTenSlot}
+                onRemoveSlot={removeTenSlot}
+                onBatchPick={onPickTenBatch}
+                onClear={() => {
+                  clearTenSlots();
+                  setError(null);
+                }}
+                onPasteToFirst={applyTenPasteToFirstAvailable}
+              />
             ) : dualKind ? (
               <div className="flex flex-col gap-4">
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
@@ -2221,145 +1854,45 @@ export default function Home() {
             )}
           </div>
 
-          <div className="flex flex-col gap-4">
-            <h2 className="text-sm font-semibold text-zinc-500">{resultHeading}</h2>
-            {parallelImageJobCountForMode(mode) > 1 ? (
-              <p className="text-xs leading-relaxed text-zinc-500">
-                多路会同时打模型；若网关排队或限流，总耗时不一定比单路短（有时接近「两路各自变慢」）。先完成的图会先显示，不必等全部结束。
-              </p>
-            ) : null}
-            {parallelImageJobCountForMode(mode) > 1 && filledResultSlotCount > 0 ? (
-              <p className="text-xs leading-relaxed text-zinc-600">
-                已并行生成 {filledResultSlotCount} 张，请对比
-                {modeIsScatteredGridFlatlay(mode)
-                  ? "是否恰好 10 枚、底边是否纯白、是否已打散且每枚角度各异（非整齐 2×5）"
-                  : modeIsPhotoExtractToGrid(mode)
-                    ? "抠图保真度与排版"
-                    : "甲型保真度与竖直/间距"}
-                ，选用更合适的一张；若只满意其中一张，可点该图下方「重新生成此方案」单独重跑，另一张会保留。
-              </p>
-            ) : null}
-            <div className="min-h-[200px] rounded-xl border border-zinc-200 bg-zinc-50/50 p-4">
-              {displayResultSlots?.length ? (
-                <div className={gridClass}>
-                  {displayResultSlots.map((slot, i) => (
-                    <figure
-                      key={`result-slot-${i}`}
-                      className="flex flex-col gap-2"
-                    >
-                      <figcaption className="text-center text-xs font-medium text-zinc-500">
-                        {slot?.label ?? `图 ${i + 1}`}
-                      </figcaption>
-                      <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white p-2 shadow-sm">
-                        {slot ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img
-                            src={slot.url}
-                            alt={slot.label}
-                            className="mx-auto max-h-[min(70vh,520px)] w-full object-contain"
-                          />
-                        ) : (
-                          <div className="flex min-h-[200px] flex-col items-center justify-center gap-2 px-4 py-10 text-center text-sm text-zinc-400">
-                            <span
-                              className="inline-block size-8 animate-spin rounded-full border-2 border-zinc-200 border-t-rose-400"
-                              aria-hidden
-                            />
-                            <span>生成中…</span>
-                          </div>
-                        )}
-                      </div>
-                      <div className="flex flex-wrap items-center justify-center gap-2">
-                        <button
-                          type="button"
-                          disabled={
-                            !slot ||
-                            downloadBusyIndex === i ||
-                            copyBusyIndex === i
-                          }
-                          onClick={() => {
-                            if (!slot) return;
-                            void downloadResult(
-                              slot.url,
-                              i,
-                              slot.exportUrl,
-                              slot.label,
-                            );
-                          }}
-                          className="inline-flex h-9 min-w-[5.5rem] items-center justify-center rounded-lg border border-zinc-300 bg-white px-3 text-sm font-medium text-zinc-800 shadow-sm transition hover:border-rose-400 hover:bg-rose-50 hover:text-rose-900 disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          {downloadBusyIndex === i ? "下载中…" : "下载"}
-                        </button>
-                        <button
-                          type="button"
-                          disabled={
-                            !slot ||
-                            copyBusyIndex === i ||
-                            downloadBusyIndex === i
-                          }
-                          onClick={() => {
-                            if (!slot) return;
-                            void copyResultToClipboard(slot.url, i, slot.exportUrl);
-                          }}
-                          title="复制图片到剪贴板，便于粘贴到其他应用"
-                          className="inline-flex h-9 min-w-[5.5rem] items-center justify-center rounded-lg border border-zinc-300 bg-white px-3 text-sm font-medium text-zinc-800 shadow-sm transition hover:border-rose-400 hover:bg-rose-50 hover:text-rose-900 disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          {copyBusyIndex === i ? "复制中…" : "复制"}
-                        </button>
-                        {!tenMode ? (
-                          <button
-                            type="button"
-                            disabled={
-                              !slot ||
-                              feedFromResultBusyIndex === i ||
-                              downloadBusyIndex === i ||
-                              copyBusyIndex === i
-                            }
-                            onClick={() => {
-                              if (!slot) return;
-                              void convertResultToFeedImage(slot.url, i, slot.exportUrl);
-                            }}
-                            title="用该图替换左侧「投喂图片」中的主图，便于继续处理"
-                            className="inline-flex h-9 min-w-[6.5rem] items-center justify-center rounded-lg border border-rose-200 bg-rose-50 px-3 text-sm font-medium text-rose-900 shadow-sm transition hover:border-rose-400 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50"
-                          >
-                            {feedFromResultBusyIndex === i
-                              ? "处理中…"
-                              : "转为投喂图片"}
-                          </button>
-                        ) : null}
-                        {parallelImageJobCountForMode(mode) > 1 &&
-                        parallelVariantChoiceFromSlotIndex(i) ? (
-                          <button
-                            type="button"
-                            disabled={
-                              loading ||
-                              !slot ||
-                              regenerateBusyIndex === i ||
-                              downloadBusyIndex === i ||
-                              copyBusyIndex === i ||
-                              feedFromResultBusyIndex === i
-                            }
-                            onClick={() => onRegenerateVariant(i)}
-                            title="仅重新生成当前方案（方案 A 或 B），另一张结果会保留"
-                            className="inline-flex h-9 min-w-[7.5rem] items-center justify-center rounded-lg border border-zinc-300 bg-white px-3 text-sm font-medium text-zinc-800 shadow-sm transition hover:border-rose-400 hover:bg-rose-50 hover:text-rose-900 disabled:cursor-not-allowed disabled:opacity-50"
-                          >
-                            {regenerateBusyIndex === i
-                              ? "重新生成中…"
-                              : "重新生成此方案"}
-                          </button>
-                        ) : null}
-                      </div>
-                    </figure>
-                  ))}
-                </div>
-              ) : (
-                <div className="flex min-h-[180px] items-center justify-center">
-                  <p className="px-4 text-center text-sm text-zinc-400">
-                    生成结果会显示在这里
-                  </p>
-                </div>
-              )}
-            </div>
-          </div>
+          <ResultDisplay
+            displayResultSlots={displayResultSlots}
+            resultHeading={resultHeading}
+            gridClass={gridClass}
+            downloadBusyIndex={downloadBusyIndex}
+            copyBusyIndex={copyBusyIndex}
+            feedFromResultBusyIndex={feedFromResultBusyIndex}
+            regenerateBusyIndex={regenerateBusyIndex}
+            loading={loading}
+            onDownload={(i) => {
+              const slot = displayResultSlots?.[i];
+              if (!slot) return;
+              void downloadResult(slot.url, i, slot.exportUrl, slot.label);
+            }}
+            onCopy={(i) => {
+              const slot = displayResultSlots?.[i];
+              if (!slot) return;
+              void copyResultToClipboard(slot.url, i, slot.exportUrl);
+            }}
+            onConvertToFeed={(i) => {
+              const slot = displayResultSlots?.[i];
+              if (!slot) return;
+              void convertResultToFeedImage(slot.url, i, slot.exportUrl);
+            }}
+            onRegenerateVariant={onRegenerateVariant}
+            canConvertToFeed={!tenMode}
+            canRegenerate={(i) =>
+              parallelImageJobCountForMode(mode) > 1 &&
+              !!parallelVariantChoiceFromSlotIndex(i)
+            }
+            parallelCount={parallelImageJobCountForMode(mode)}
+            modeDescription={
+              modeIsScatteredGridFlatlay(mode)
+                ? "是否恰好 10 枚、底边是否纯白、是否已打散且每枚角度各异（非整齐 2×5）"
+                : modeIsPhotoExtractToGrid(mode)
+                  ? "抠图保真度与排版"
+                  : "甲型保真度与竖直/间距"
+            }
+          />
           <div className="min-w-0 flex flex-col gap-4 lg:col-span-2">
             <div className="rounded-xl border border-amber-200/80 bg-amber-50/40 p-4 shadow-sm">
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -2403,121 +1936,22 @@ export default function Home() {
                 </span>
               </div>
               {soloPresetPanelOpen ? (
-                <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50/90 p-3">
-                  <p className="mb-2 text-xs font-medium text-amber-900/90">
-                    新添加的词条会出现在**第一行**。可**拖动左侧手柄**排序，或用「上移 / 下移」微调；顺序会保存（与本框下方的「补充说明」常用词分存）。
-                  </p>
-                  <ul className="max-h-52 space-y-2 overflow-y-auto">
-                    {soloPromptPresets.map((item, i) => (
-                      <li
-                        key={item.id}
-                        onDragOver={(e) => {
-                          e.preventDefault();
-                          e.dataTransfer.dropEffect = "move";
-                          setDragOverSoloPresetIndex(i);
-                        }}
-                        onDrop={(e) => {
-                          e.preventDefault();
-                          const raw = e.dataTransfer.getData(
-                            "text/x-solo-preset-index",
-                          );
-                          const from = Number.parseInt(raw, 10);
-                          if (Number.isNaN(from)) {
-                            clearSoloPresetDragUi();
-                            return;
-                          }
-                          reorderSoloPresetByDrag(from, i);
-                          clearSoloPresetDragUi();
-                        }}
-                        className={`flex flex-wrap items-start gap-2 rounded-md border bg-white px-2 py-2 text-sm text-zinc-800 ${
-                          dragOverSoloPresetIndex === i
-                            ? "border-amber-500 ring-2 ring-amber-200"
-                            : "border-amber-200/80"
-                        } ${draggingSoloPresetIndex === i ? "opacity-60" : ""}`}
-                      >
-                        <span
-                          draggable
-                          onDragStart={(e) => {
-                            e.dataTransfer.setData(
-                              "text/x-solo-preset-index",
-                              String(i),
-                            );
-                            e.dataTransfer.effectAllowed = "move";
-                            setDraggingSoloPresetIndex(i);
-                          }}
-                          onDragEnd={clearSoloPresetDragUi}
-                          className="flex h-7 w-7 shrink-0 cursor-grab select-none items-center justify-center rounded border border-dashed border-amber-300 bg-amber-50/80 text-xs text-amber-800/70 active:cursor-grabbing"
-                          title="拖动排序"
-                          aria-label="拖动排序"
-                        >
-                          ⋮⋮
-                        </span>
-                        <span
-                          className="flex h-7 w-7 shrink-0 items-center justify-center rounded bg-amber-100 text-xs font-semibold text-amber-900/70"
-                          title="顺序"
-                        >
-                          {i + 1}
-                        </span>
-                        <span className="min-w-0 flex-1 break-words">
-                          {item.text}
-                        </span>
-                        <div className="flex shrink-0 flex-wrap gap-1">
-                          <button
-                            type="button"
-                            disabled={i === 0}
-                            onClick={() => moveSoloPreset(i, -1)}
-                            className="rounded border border-amber-200 px-2 py-0.5 text-xs text-amber-950 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-40"
-                          >
-                            上移
-                          </button>
-                          <button
-                            type="button"
-                            disabled={i >= soloPromptPresets.length - 1}
-                            onClick={() => moveSoloPreset(i, 1)}
-                            className="rounded border border-amber-200 px-2 py-0.5 text-xs text-amber-950 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-40"
-                          >
-                            下移
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => appendSoloPresetToField(item.text)}
-                            className="rounded border border-amber-400 bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-950 hover:bg-amber-200"
-                          >
-                            使用
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => removeSoloPresetById(item.id)}
-                            className="rounded border border-amber-200 px-2 py-0.5 text-xs text-amber-900/80 hover:border-red-200 hover:bg-red-50 hover:text-red-800"
-                          >
-                            删除
-                          </button>
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                  <div className="mt-3 flex flex-wrap items-stretch gap-2">
-                    <input
-                      type="text"
-                      value={newSoloPresetDraft}
-                      onChange={(e) => setNewSoloPresetDraft(e.target.value)}
-                      maxLength={MAX_PRESET_LINE_CHARS}
-                      placeholder="新增强提示词…"
-                      className="min-w-[12rem] flex-1 rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm outline-none ring-amber-500 focus:border-amber-500 focus:ring-2"
-                    />
-                    <button
-                      type="button"
-                      onClick={addSoloPresetFromDraft}
-                      disabled={
-                        !newSoloPresetDraft.trim() ||
-                        soloPromptPresets.length >= MAX_PRESETS
-                      }
-                      className="inline-flex h-10 shrink-0 items-center justify-center rounded-lg bg-amber-900 px-4 text-sm font-medium text-amber-50 transition hover:bg-amber-950 disabled:cursor-not-allowed disabled:bg-amber-300"
-                    >
-                      添加
-                    </button>
-                  </div>
-                </div>
+                <PromptPresetsPanel
+                  presets={soloPromptPresets}
+                  newDraft={newSoloPresetDraft}
+                  setNewDraft={setNewSoloPresetDraft}
+                  draggingIndex={draggingSoloPresetIndex}
+                  dragOverIndex={dragOverSoloPresetIndex}
+                  onAdd={addSoloPresetFromDraft}
+                  onRemove={removeSoloPresetById}
+                  onMove={moveSoloPreset}
+                  onReorderDrag={reorderSoloPresetByDrag}
+                  onClearDragUi={clearSoloPresetDragUi}
+                  onAppend={appendSoloPresetToField}
+                  description="新添加的词条会出现在**第一行**。可**拖动左侧手柄**排序，或用「上移 / 下移」微调；顺序会保存（与本框下方的「补充说明」常用词分存）。"
+                  colorScheme="amber"
+                  dragDataKey="text/x-solo-preset-index"
+                />
               ) : null}
             </div>
           <div className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm">
@@ -2561,113 +1995,22 @@ export default function Home() {
               </span>
             </div>
             {presetPanelOpen ? (
-              <div className="mt-3 rounded-lg border border-zinc-200 bg-zinc-50/90 p-3">
-                <p className="mb-2 text-xs font-medium text-zinc-600">
-                  新添加的词条会出现在**第一行**。可**拖动左侧手柄**排序，或用「上移 / 下移」微调；顺序会保存。
-                </p>
-                <ul className="max-h-52 space-y-2 overflow-y-auto">
-                  {promptPresets.map((item, i) => (
-                    <li
-                      key={item.id}
-                      onDragOver={(e) => {
-                        e.preventDefault();
-                        e.dataTransfer.dropEffect = "move";
-                        setDragOverPresetIndex(i);
-                      }}
-                      onDrop={(e) => {
-                        e.preventDefault();
-                        const raw = e.dataTransfer.getData("text/x-preset-index");
-                        const from = Number.parseInt(raw, 10);
-                        if (Number.isNaN(from)) {
-                          clearPresetDragUi();
-                          return;
-                        }
-                        reorderPresetByDrag(from, i);
-                        clearPresetDragUi();
-                      }}
-                      className={`flex flex-wrap items-start gap-2 rounded-md border bg-white px-2 py-2 text-sm text-zinc-800 ${
-                        dragOverPresetIndex === i
-                          ? "border-rose-400 ring-2 ring-rose-200"
-                          : "border-zinc-200"
-                      } ${draggingPresetIndex === i ? "opacity-60" : ""}`}
-                    >
-                      <span
-                        draggable
-                        onDragStart={(e) => {
-                          e.dataTransfer.setData("text/x-preset-index", String(i));
-                          e.dataTransfer.effectAllowed = "move";
-                          setDraggingPresetIndex(i);
-                        }}
-                        onDragEnd={clearPresetDragUi}
-                        className="flex h-7 w-7 shrink-0 cursor-grab select-none items-center justify-center rounded border border-dashed border-zinc-300 bg-zinc-50 text-xs text-zinc-500 active:cursor-grabbing"
-                        title="拖动排序"
-                        aria-label="拖动排序"
-                      >
-                        ⋮⋮
-                      </span>
-                      <span
-                        className="flex h-7 w-7 shrink-0 items-center justify-center rounded bg-zinc-100 text-xs font-semibold text-zinc-500"
-                        title="顺序"
-                      >
-                        {i + 1}
-                      </span>
-                      <span className="min-w-0 flex-1 break-words">{item.text}</span>
-                      <div className="flex shrink-0 flex-wrap gap-1">
-                        <button
-                          type="button"
-                          disabled={i === 0}
-                          onClick={() => movePreset(i, -1)}
-                          className="rounded border border-zinc-200 px-2 py-0.5 text-xs text-zinc-700 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-40"
-                        >
-                          上移
-                        </button>
-                        <button
-                          type="button"
-                          disabled={i >= promptPresets.length - 1}
-                          onClick={() => movePreset(i, 1)}
-                          className="rounded border border-zinc-200 px-2 py-0.5 text-xs text-zinc-700 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-40"
-                        >
-                          下移
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => appendPresetToNotes(item.text)}
-                          className="rounded border border-rose-200 bg-rose-50 px-2 py-0.5 text-xs font-medium text-rose-900 hover:bg-rose-100"
-                        >
-                          使用
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => removePresetById(item.id)}
-                          className="rounded border border-zinc-200 px-2 py-0.5 text-xs text-zinc-600 hover:border-red-200 hover:bg-red-50 hover:text-red-800"
-                        >
-                          删除
-                        </button>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-                <div className="mt-3 flex flex-wrap items-stretch gap-2">
-                  <input
-                    type="text"
-                    value={newPresetDraft}
-                    onChange={(e) => setNewPresetDraft(e.target.value)}
-                    maxLength={MAX_PRESET_LINE_CHARS}
-                    placeholder="新增强提示词…"
-                    className="min-w-[12rem] flex-1 rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm outline-none ring-rose-500 focus:border-rose-500 focus:ring-2"
-                  />
-                  <button
-                    type="button"
-                    onClick={addPresetFromDraft}
-                    disabled={
-                      !newPresetDraft.trim() || promptPresets.length >= MAX_PRESETS
-                    }
-                    className="inline-flex h-10 shrink-0 items-center justify-center rounded-lg bg-zinc-800 px-4 text-sm font-medium text-white transition hover:bg-zinc-900 disabled:cursor-not-allowed disabled:bg-zinc-300"
-                  >
-                    添加
-                  </button>
-                </div>
-              </div>
+              <PromptPresetsPanel
+                presets={promptPresets}
+                newDraft={newPresetDraft}
+                setNewDraft={setNewPresetDraft}
+                draggingIndex={draggingPresetIndex}
+                dragOverIndex={dragOverPresetIndex}
+                onAdd={addPresetFromDraft}
+                onRemove={removePresetById}
+                onMove={movePreset}
+                onReorderDrag={reorderPresetByDrag}
+                onClearDragUi={clearPresetDragUi}
+                onAppend={appendPresetToNotes}
+                description="新添加的词条会出现在**第一行**。可**拖动左侧手柄**排序，或用「上移 / 下移」微调；顺序会保存。"
+                colorScheme="rose"
+                dragDataKey="text/x-preset-index"
+              />
             ) : null}
           </div>
           </div>
@@ -2675,368 +2018,46 @@ export default function Home() {
         </section>
 
         {modeShowsWhiteGridLayoutPanel(mode) ? (
-          <div className="mt-4 min-w-0 rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
-            <fieldset className="w-full rounded-lg border border-rose-100 bg-rose-50/40 px-3 py-3 lg:px-5">
-              <legend className="px-1 text-xs font-semibold text-rose-800">
-                白底栅格排版（可选）
-              </legend>
-              <div className="flex w-full min-w-0 flex-col gap-3">
-                <div className="space-y-2.5">
-                  <p className="text-xs leading-relaxed text-zinc-600">
-                    五列相对宽度对应上排左→右拇→小（下排同列再重复一遍）。
-                    {mode === "extract_ten_grid"
-                      ? "抠图排版：**锁定甲片尺寸**，仅调外留白/列缝/行间缝（**五列相对宽度不生效**，不会按列缩放甲片）；每次 **1 张**。"
-                      : mode === "white_grid_rectify"
-                        ? "几何矫正：**十格拆层整版重排**（非整图扶正），逐格锁定甲型与长短，每枚 **刚性旋转至竖直** + 平移；每次 **1 张**。附录：外留白/列缝/行间缝；「五列宽」无效。"
-                      : mode === "complete_single_grid"
-                        ? "单甲补齐：下列数值仅用于服务端把「一枚抠图甲片」按列宽复制成 10 格（体现拇→小尺码差），**不会**再次发给模型改甲型。"
-                        : mode === "single_row_to_grid"
-                          ? "单行复制成双行：条带默认约占画布内区 **68%**（四周留白更大）；可调**外留白（占边长 %）**继续缩小甲片占比（建议 5–8）；「五列相对宽度」不生效。"
-                          : "提交时服务端会按最大列归一；缝过大时可能自动缩小甲片以适配画布。"}
-                  </p>
-                  <p className="text-xs leading-relaxed text-rose-900/90">
-                    <span className="font-medium">关于「缝」：</span>
-                    <strong>同一行相邻美甲</strong>的左右留白用下方滑条控制：<strong>四条竖缝合计占「内区宽度」的百分之几</strong>（内区 = 去掉外留白后的中间区域）；下方会显示<strong>每条竖缝约占内宽的几%</strong>（合计÷4）。
-                    行与行之间的上下留白仍用「行间缝」百分比（占内高，<span className="font-mono">0</span>～<span className="font-mono">12</span>，失焦夹紧）。
-                    外留白失焦后会在 <span className="font-mono">0.5</span>～<span className="font-mono">8</span> 之间。
-                    <span className="mt-1.5 block text-zinc-700">
-                      若横向已贴紧仍觉得整图偏「宽」，多半是<strong>四边外留白</strong>偏大，可把<strong>外留白（占边长 %）</strong>适当<strong>调小</strong>。
-                    </span>
-                  </p>
-                </div>
-                <div className="min-w-0 space-y-3 border-t border-rose-100/80 pt-3">
-                  <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
-                    <p className="text-[11px] leading-snug text-zinc-500">
-                      五列相对宽度 + 每列格内甲片高/宽（%），100% 为默认。
-                      {mode === "white_grid_rectify"
-                        ? " 几何矫正由模型排版，格内高宽不生效。"
-                        : " 锁定纵横比时，改该列宽会联动该列高。"}
-                    </p>
-                    <div className="flex shrink-0 flex-wrap items-center gap-3">
-                      <label className="flex cursor-pointer items-center gap-2 text-xs text-zinc-800">
-                        <input
-                          type="checkbox"
-                          checked={lockNailAspectRatio}
-                          onChange={(e) => {
-                            const on = e.target.checked;
-                            setLockNailAspectRatio(on);
-                            if (on) refreshNailAspectLockRatios();
-                          }}
-                          className="size-4 rounded border-zinc-300 text-rose-600 focus:ring-rose-500"
-                        />
-                        <span className="font-medium">锁定纵横比</span>
-                      </label>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setNailWidthPctDrafts([...DEFAULT_NAIL_SCALE_PCT_DRAFTS]);
-                          setNailHeightPctDrafts([...DEFAULT_NAIL_SCALE_PCT_DRAFTS]);
-                          nailAspectLockRatioRef.current = [1, 1, 1, 1, 1];
-                        }}
-                        className="text-xs font-medium text-rose-700 underline decoration-rose-300 underline-offset-2 hover:text-rose-900"
-                      >
-                        重设各列大小
-                      </button>
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-5 sm:gap-x-3 sm:gap-y-2">
-                    {(["拇", "食", "中", "无", "小"] as const).map((lab, i) => (
-                      <div
-                        key={lab}
-                        className="flex flex-col gap-1.5 rounded-md border border-zinc-200/80 bg-white/60 px-2 py-2"
-                      >
-                        <span className="text-xs font-semibold text-zinc-800">
-                          {lab}指
-                        </span>
-                        <label className="flex flex-col gap-0.5 text-[11px] text-zinc-600">
-                          <span>列宽</span>
-                          <input
-                            type="text"
-                            inputMode="decimal"
-                            autoComplete="off"
-                            spellCheck={false}
-                            value={colWidthDrafts[i] ?? ""}
-                            onChange={(e) => {
-                              const t = e.target.value;
-                              setColWidthDrafts((prev) => {
-                                const next = [...prev];
-                                next[i] = t;
-                                return next;
-                              });
-                            }}
-                            onBlur={() => {
-                              setColWidthDrafts((prev) => {
-                                const next = [...prev];
-                                next[i] = colWidthDraftAfterBlur(prev[i] ?? "", i);
-                                return next;
-                              });
-                            }}
-                            className="w-full rounded border border-zinc-300 bg-white px-2 py-1 text-sm tabular-nums outline-none ring-rose-500 focus:border-rose-500 focus:ring-1"
-                          />
-                        </label>
-                        <label className="flex flex-col gap-0.5 text-[11px] text-zinc-600">
-                          <span>高度 %</span>
-                          <input
-                            type="text"
-                            inputMode="decimal"
-                            autoComplete="off"
-                            spellCheck={false}
-                            value={nailHeightPctDrafts[i] ?? ""}
-                            onChange={(e) => {
-                              const t = e.target.value;
-                              setNailHeightPctDrafts((prev) => {
-                                const next = [...prev];
-                                next[i] = t;
-                                return next;
-                              });
-                              if (lockNailAspectRatio) {
-                                syncNailWidthFromHeightAt(i, t);
-                              }
-                            }}
-                            onBlur={() => {
-                              const blurred = nailScalePctDraftAfterBlur(
-                                nailHeightPctDrafts[i] ?? "",
-                              );
-                              setNailHeightPctDrafts((prev) => {
-                                const next = [...prev];
-                                next[i] = blurred;
-                                return next;
-                              });
-                              if (lockNailAspectRatio) {
-                                syncNailWidthFromHeightAt(i, blurred);
-                              }
-                            }}
-                            className="w-full rounded border border-zinc-300 bg-white px-2 py-1 text-sm tabular-nums outline-none ring-rose-500 focus:border-rose-500 focus:ring-1"
-                          />
-                        </label>
-                        <label className="flex flex-col gap-0.5 text-[11px] text-zinc-600">
-                          <span>宽度 %</span>
-                          <input
-                            type="text"
-                            inputMode="decimal"
-                            autoComplete="off"
-                            spellCheck={false}
-                            value={nailWidthPctDrafts[i] ?? ""}
-                            onChange={(e) => {
-                              const t = e.target.value;
-                              setNailWidthPctDrafts((prev) => {
-                                const next = [...prev];
-                                next[i] = t;
-                                return next;
-                              });
-                              if (lockNailAspectRatio) {
-                                syncNailHeightFromWidthAt(i, t);
-                              }
-                            }}
-                            onBlur={() => {
-                              const blurred = nailScalePctDraftAfterBlur(
-                                nailWidthPctDrafts[i] ?? "",
-                              );
-                              setNailWidthPctDrafts((prev) => {
-                                const next = [...prev];
-                                next[i] = blurred;
-                                return next;
-                              });
-                              if (lockNailAspectRatio) {
-                                syncNailHeightFromWidthAt(i, blurred);
-                              } else {
-                                nailAspectLockRatioRef.current[i] =
-                                  nailScaleFromPctDraft(
-                                    nailHeightPctDrafts[i] ?? "",
-                                  ) /
-                                  Math.max(1e-6, nailScaleFromPctDraft(blurred));
-                              }
-                            }}
-                            className="w-full rounded border border-zinc-300 bg-white px-2 py-1 text-sm tabular-nums outline-none ring-rose-500 focus:border-rose-500 focus:ring-1"
-                          />
-                        </label>
-                      </div>
-                    ))}
-                  </div>
-                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 sm:gap-3">
-                    <label className="flex flex-col gap-1 text-xs text-zinc-700">
-                      <span className="font-medium leading-snug text-zinc-800">
-                        外留白（占边长 %）
-                      </span>
-                      <input
-                        type="text"
-                        inputMode="decimal"
-                        autoComplete="off"
-                        spellCheck={false}
-                        value={marginPctDraft}
-                        onChange={(e) => setMarginPctDraft(e.target.value)}
-                        onBlur={() =>
-                          setMarginPctDraft((v) =>
-                            pctDraftAfterBlur(v, 0.5, 8, 1.8),
-                          )
-                        }
-                        className="w-full rounded border border-zinc-300 bg-white px-2 py-1.5 text-sm tabular-nums outline-none ring-rose-500 focus:border-rose-500 focus:ring-1"
-                      />
-                    </label>
-                    <label className="flex min-w-0 flex-col gap-2 text-xs text-zinc-700">
-                      <span className="font-medium leading-snug text-zinc-800">
-                        同一行相邻美甲间距
-                      </span>
-                      <span className="text-[11px] leading-snug text-zinc-500">
-                        拖动滑条：四条竖缝合计占「内区宽度」0～
-                        {COL_GUTTER_SUM_INNER_WIDTH_PCT_MAX}%（步进 0.5）
-                      </span>
-                      <div className="flex min-w-0 items-center gap-3">
-                        <input
-                          type="range"
-                          min={0}
-                          max={COL_GUTTER_SUM_INNER_WIDTH_PCT_MAX}
-                          step={0.5}
-                          value={colGutterSumPct}
-                          onChange={(e) =>
-                            setColGutterSumPct(
-                              clampColGutterSumPct(
-                                parseFloat(e.target.value),
-                              ),
-                            )
-                          }
-                          className="h-2 min-w-0 flex-1 cursor-pointer accent-rose-600"
-                          aria-valuemin={0}
-                          aria-valuemax={COL_GUTTER_SUM_INNER_WIDTH_PCT_MAX}
-                          aria-valuenow={colGutterSumPct}
-                          aria-label="同一行四条竖缝合计占内区宽度百分比"
-                        />
-                        <span className="w-12 shrink-0 text-right text-sm font-semibold tabular-nums text-zinc-900">
-                          {colGutterSumPct.toFixed(1)}%
-                        </span>
-                      </div>
-                      <p className="text-[11px] leading-snug text-zinc-600">
-                        合计约 {colGutterSumPct.toFixed(1)}% 内宽 · 每条约{" "}
-                        {(colGutterSumPct / 4).toFixed(1)}% 内宽
-                        {mode === "single_row_to_grid"
-                          ? " · 走模型时主要约束模型列缝；跳过模型时服务端列缝下限约 14%"
-                          : null}
-                      </p>
-                      <div className="flex flex-wrap gap-1.5">
-                        {mode !== "single_row_to_grid" ? (
-                          <button
-                            type="button"
-                            onClick={() => setColGutterSumPct(0)}
-                            className="rounded border border-zinc-200 bg-white px-2 py-0.5 text-[11px] font-medium text-zinc-700 hover:border-rose-300 hover:bg-rose-50"
-                          >
-                            无
-                          </button>
-                        ) : null}
-                        {COL_GUTTER_SUM_QUICK_PRESET_PCTS.map((pct) => (
-                          <button
-                            key={pct}
-                            type="button"
-                            onClick={() => setColGutterSumPct(pct)}
-                            className="rounded border border-zinc-200 bg-white px-2 py-0.5 text-[11px] font-medium text-zinc-700 hover:border-rose-300 hover:bg-rose-50"
-                          >
-                            {pct}%
-                          </button>
-                        ))}
-                      </div>
-                    </label>
-                    <label className="flex flex-col gap-1 text-xs text-zinc-700">
-                      <span className="font-medium leading-snug text-zinc-800">
-                        行间缝（占内高 %）
-                      </span>
-                      <input
-                        type="text"
-                        inputMode="decimal"
-                        autoComplete="off"
-                        spellCheck={false}
-                        value={rowGutterPctDraft}
-                        onChange={(e) => setRowGutterPctDraft(e.target.value)}
-                        onBlur={() =>
-                          setRowGutterPctDraft((v) =>
-                            pctDraftAfterBlur(v, 0, 12, 0),
-                          )
-                        }
-                        className="w-full rounded border border-zinc-300 bg-white px-2 py-1.5 text-sm tabular-nums outline-none ring-rose-500 focus:border-rose-500 focus:ring-1"
-                      />
-                    </label>
-                  </div>
-                  <div className="flex flex-col gap-2 border-t border-rose-100/80 pt-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-3 sm:gap-y-2">
-                    <div className="flex min-w-0 max-w-full flex-nowrap items-center gap-1.5 overflow-x-auto py-0.5 sm:gap-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setColWidthDrafts([...DEFAULT_COL_WIDTH_DRAFTS]);
-                          setMarginPctDraft("1.8");
-                          setColGutterSumPct(0);
-                          setRowGutterPctDraft("0");
-                          setNailWidthPctDrafts([...DEFAULT_NAIL_SCALE_PCT_DRAFTS]);
-                          setNailHeightPctDrafts([...DEFAULT_NAIL_SCALE_PCT_DRAFTS]);
-                          nailAspectLockRatioRef.current = [1, 1, 1, 1, 1];
-                          setGridPresetNotice(null);
-                        }}
-                        className="shrink-0 text-xs font-medium whitespace-nowrap text-rose-700 underline decoration-rose-300 underline-offset-2 hover:text-rose-900"
-                      >
-                        恢复默认排版
-                      </button>
-                      {gridPresets.length > 0 ? (
-                        <span className="hidden shrink-0 text-zinc-300 sm:inline" aria-hidden>
-                          |
-                        </span>
-                      ) : null}
-                      <div
-                        ref={gridPresetChipsRowRef}
-                        className="flex shrink-0 flex-nowrap items-center gap-1.5 sm:gap-2"
-                      >
-                        {gridPresets.map((p, i) => (
-                          <div
-                            key={p.id}
-                            className="relative inline-flex h-8 min-w-[2rem] shrink-0 items-stretch sm:h-9 sm:min-w-[2.25rem]"
-                          >
-                            <button
-                              type="button"
-                              onClick={() => applyGridPresetAt(i)}
-                              title={`载入第 ${i + 1} 套；已选中时再点此可取消选中`}
-                              className={`rounded-md border px-2 pr-5 text-[11px] font-semibold tabular-nums transition sm:rounded-lg sm:px-2.5 sm:pr-5 sm:text-xs ${
-                                gridPresetSelectedIndex === i
-                                  ? "border-rose-500 bg-rose-100 text-rose-950 ring-1 ring-rose-400"
-                                  : "border-zinc-300 bg-white text-zinc-800 hover:border-rose-300 hover:bg-rose-50/80"
-                              }`}
-                            >
-                              {i + 1}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                deleteGridPresetAt(i);
-                              }}
-                              className="absolute -right-1 -top-1 flex h-5 min-h-[1.25rem] min-w-[1.25rem] items-center justify-center rounded-full border border-zinc-300 bg-white text-[11px] font-bold leading-none text-zinc-600 shadow-sm hover:border-rose-400 hover:bg-rose-50 hover:text-rose-800"
-                              aria-label={`删除排版预设 ${i + 1}`}
-                            >
-                              ×
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                      <button
-                        ref={gridLayoutSavePresetButtonRef}
-                        type="button"
-                        onClick={() => saveGridLayoutPreset()}
-                        title="保存当前栅格参数到预设"
-                        className="shrink-0 whitespace-nowrap rounded-md border border-rose-400 bg-rose-600 px-2 py-1 text-[11px] font-semibold leading-none text-white shadow-sm transition hover:bg-rose-700 sm:rounded-lg sm:px-2.5 sm:py-1.5 sm:text-xs"
-                      >
-                        保存配置
-                      </button>
-                    </div>
-                    {gridPresetNotice ? (
-                      <p className="min-w-0 flex-1 text-xs text-rose-800 sm:pt-0.5">
-                        {gridPresetNotice}
-                      </p>
-                    ) : (
-                      <p className="min-w-0 flex-1 text-xs text-zinc-500 sm:pt-0.5">
-                        预设保存在本机浏览器；未选中数字时保存会新增一套（最多 5 套）。再次点击已高亮的数字，或点击数字区域以外（「保存配置」除外）可取消选中。
-                      </p>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </fieldset>
-          </div>
+          <GridLayoutPanel
+            modeLabel={
+              mode === "extract_ten_grid"
+                ? "抠图排版：**锁定甲片尺寸**，仅调外留白/列缝/行间缝（**五列相对宽度不生效**，不会按列缩放甲片）；每次 **1 张**。"
+                : mode === "white_grid_rectify"
+                  ? "几何矫正：**十格拆层整版重排**（非整图扶正），逐格锁定甲型与长短，每枚 **刚性旋转至竖直** + 平移；每次 **1 张**。附录：外留白/列缝/行间缝；「五列宽」无效。"
+                  : mode === "complete_single_grid"
+                    ? "单甲补齐：下列数值仅用于服务端把「一枚抠图甲片」按列宽复制成 10 格（体现拇→小尺码差），**不会**再次发给模型改甲型。"
+                    : mode === "single_row_to_grid"
+                      ? "单行复制成双行：条带默认约占画布内区 **68%**（四周留白更大）；可调**外留白（占边长 %）**继续缩小甲片占比（建议 5–8）；「五列相对宽度」不生效。"
+                      : "提交时服务端会按最大列归一；缝过大时可能自动缩小甲片以适配画布。"
+            }
+            colWidthDrafts={colWidthDrafts}
+            setColWidthDrafts={setColWidthDrafts}
+            marginPctDraft={marginPctDraft}
+            setMarginPctDraft={setMarginPctDraft}
+            colGutterSumPct={colGutterSumPct}
+            setColGutterSumPct={setColGutterSumPct}
+            rowGutterPctDraft={rowGutterPctDraft}
+            setRowGutterPctDraft={setRowGutterPctDraft}
+            nailWidthPctDrafts={nailWidthPctDrafts}
+            setNailWidthPctDrafts={setNailWidthPctDrafts}
+            nailHeightPctDrafts={nailHeightPctDrafts}
+            setNailHeightPctDrafts={setNailHeightPctDrafts}
+            lockNailAspectRatio={lockNailAspectRatio}
+            setLockNailAspectRatio={setLockNailAspectRatio}
+            nailAspectLockRatioRef={nailAspectLockRatioRef}
+            refreshNailAspectLockRatios={refreshNailAspectLockRatios}
+            syncNailHeightFromWidthAt={syncNailHeightFromWidthAt}
+            syncNailWidthFromHeightAt={syncNailWidthFromHeightAt}
+            gridPresets={gridPresets}
+            gridPresetSelectedIndex={gridPresetSelectedIndex}
+            setGridPresetSelectedIndex={setGridPresetSelectedIndex}
+            gridPresetNotice={gridPresetNotice}
+            onApplyPreset={applyGridPresetAt}
+            onDeletePreset={deleteGridPresetAt}
+            onSavePreset={saveGridLayoutPreset}
+            gridPresetChipsRowRef={gridPresetChipsRowRef}
+            gridLayoutSavePresetButtonRef={gridLayoutSavePresetButtonRef}
+          />
         ) : null}
       </main>
     </div>

@@ -7,7 +7,7 @@ import {
   verifySiteAccessCookieValue,
 } from "@/lib/site-access";
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   if (!isSiteAccessEnabled()) {
     return NextResponse.next();
   }
