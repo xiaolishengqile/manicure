@@ -232,6 +232,27 @@ export function modeUsesSingleRowUpload(mode: GenerationMode): boolean {
   return mode === "single_row_to_grid" || mode === "extract_diagonal_row";
 }
 
+/** 可选「上下手同款 · 一行五甲」的模式（勾选后上传一行五枚） */
+export function modeSupportsSameHandsRowOption(mode: GenerationMode): boolean {
+  return mode === "white_grid_rectify" || mode === "packaging_mockup";
+}
+
+/** FormData `sameHandsRow`：默认 true；仅 `"0"` / `"false"` / `"off"` 为关 */
+export function parseSameHandsRow(raw: FormDataEntryValue | null): boolean {
+  const s = typeof raw === "string" ? raw.trim().toLowerCase() : "";
+  if (s === "0" || s === "false" || s === "off") return false;
+  return true;
+}
+
+/** 当前是否按「一行五枚」上传（含同款勾选后的二次矫正 / 手握盒） */
+export function effectiveUsesSingleRowUpload(
+  mode: GenerationMode,
+  sameHandsRow: boolean,
+): boolean {
+  if (modeUsesSingleRowUpload(mode)) return true;
+  return modeSupportsSameHandsRowOption(mode) && sameHandsRow;
+}
+
 /** 竖直 2×5 → 模型打散排布 */
 export function modeIsScatteredGridFlatlay(mode: GenerationMode): boolean {
   return mode === "extract_scattered_grid";
@@ -944,6 +965,49 @@ SELF-CHECK (scan **1→10** in order before output):
 ${WHITE_GRID_RECTIFY_OUTPUT_EN}
 
 Return **one** square image.`;
+
+/** 二次矫正 · 同款一行：模型只出 5 格；服务端复制为 2×5 */
+export const WHITE_GRID_RECTIFY_ONE_ROW_API_PREFIX = `VERTICAL RE-LAYOUT LOCK — **ONE ROW × FIVE NAILS ONLY**: server duplicates your row into a full 2×5 after edit. Output **exactly one horizontal row** of five nails — **forbidden** second row or 2×5 preview. Every nail **yaw = 0°** (≤1° lean); **only** rigid rotate + translate per nail.\n\n`;
+
+const WHITE_GRID_RECTIFY_ONE_ROW_PROMPT = `PER-SLOT STAMP — **#1 HARD RULE** (any violation = failure):
+For **each of the five nails (columns 1→5 = thumb→pinky)**, output must be the **same physical nail** as input — **same** outer contour, **same** plate **height** and **width** (within **~3%**), **same** tip shape, **same** art pixels. **Forbidden:** redrawing, beautifying, or equalizing all five to one length/shape.
+
+**NOT regeneration** — **only** rigid **rotate + translate** per nail layer + white backdrop.
+
+INPUT: **one horizontal row** of five press-on nails on flat white (or a photo where five nails in one row are clearly visible). **Left → right = thumb → pinky**. Tips down / roots up.
+
+SERVER DUPLICATION (do not do the server's job):
+- **Forbidden:** outputting **two** rows, a **2×5** grid, or ten nails. Output **one** row only — the server copies it verbatim for the bottom row.
+
+DO (mandatory):
+1) **DECOMPOSE:** isolate each of the **five** nails as its own layer.
+2) **PARALLEL:** per nail, rigid rotation → **yaw = 0°** (tips down, cuticle up). **≤1°** lean max.
+3) **RE-LAYOUT:** one fresh horizontal row with spacing per **USER-SUPPLIED GRID SPACING** appendix if present; **never** resize plates to fit gutters.
+
+STEPPED TIPS (mandatory):
+- Preserve **staggered free-edge Y** from the source (thumb vs pinky length differences). **Forbidden:** flat tabletop line-up.
+
+FORBIDDEN besides rigid moves: rescale, stretch, squish, liquify, warp, recolour, relight, redraw, swap columns.
+
+${PACKSHOT_GRID_VERTICAL_QA_EN}
+
+SELF-CHECK (columns **1→5** before output):
+(1) Each nail vertical, yaw **0°**; (2) row re-composed on white; (3) stepped tips like input; (4) **only one row of five nails**.
+
+${WHITE_GRID_RECTIFY_OUTPUT_EN}
+
+Return **one** wide square image with **only one row of five nails**.`;
+
+/** 同款一行 → 2×5 前，单行模型步使用的 prompt（按模式） */
+export function sameHandsRowModelPrompt(mode: GenerationMode): string {
+  if (mode === "white_grid_rectify") {
+    return `${WHITE_GRID_RECTIFY_ONE_ROW_API_PREFIX}${WHITE_GRID_RECTIFY_ONE_ROW_PROMPT}`;
+  }
+  if (mode === "packaging_mockup") {
+    return SINGLE_ROW_EXTRACT_ONE_ROW_PROMPT;
+  }
+  throw new Error(`sameHandsRowModelPrompt: unsupported mode ${mode}`);
+}
 
 /** 单枚高清化：仅 EXIF 转正；用户约定甲尖朝下；模型只出一枚抠图单甲，2×5 由服务端复制列缩放拼接。 */
 const COMPLETE_SINGLE_GRID_PROMPT = `You act as a **professional e-commerce product retoucher**.

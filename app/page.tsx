@@ -18,7 +18,8 @@ import {
   modeIsPhotoExtractToGrid,
   modeIsScatteredGridFlatlay,
   modeShowsWhiteGridLayoutPanel,
-  modeUsesSingleRowUpload,
+  modeSupportsSameHandsRowOption,
+  effectiveUsesSingleRowUpload,
   parallelImageJobCountForMode,
   parallelVariantChoiceFromSlotIndex,
   promptsForMode,
@@ -186,8 +187,8 @@ export default function Home() {
     ...DEFAULT_NAIL_SCALE_PCT_DRAFTS,
   ]);
   const [lockNailAspectRatio, setLockNailAspectRatio] = useState(true);
-  /** 单行复制成双行：仅裁切+拼接，不调用模型规整 */
-  const [skipSingleRowModel, setSkipSingleRowModel] = useState(false);
+  /** 上下手同款：默认勾选，上传一行五甲（二次矫正 / 手握盒） */
+  const [sameHandsRow, setSameHandsRow] = useState(true);
   const nailAspectLockRatioRef = useRef<number[]>([1, 1, 1, 1, 1]);
   const [gridPresets, setGridPresets] = useState<GridLayoutPreset[]>([]);
   const [gridPresetSelectedIndex, setGridPresetSelectedIndex] = useState<
@@ -364,6 +365,11 @@ export default function Home() {
 
   const dualKind = getDualUploadKind(mode);
   const tenMode = requiresTenSingleNails(mode);
+  const usesSingleRowUpload = effectiveUsesSingleRowUpload(mode, sameHandsRow);
+  const showsSameHandsOption = modeSupportsSameHandsRowOption(mode);
+  const showsWhiteGridLayoutPanel =
+    modeShowsWhiteGridLayoutPanel(mode) ||
+    (mode === "packaging_mockup" && sameHandsRow);
   const showPanelColorPicker = modeUsesDominantColorExtraction(mode);
 
   const applyGridPresetAt = useCallback(
@@ -1062,10 +1068,13 @@ export default function Home() {
           body.set("packagingBoxImage", secondFile);
           body.set("nailArrangement", nailBoxArrangement);
         }
-        if (modeUsesSingleRowUpload(mode) && skipSingleRowModel) {
-          body.set("skipRowModel", "1");
+        if (showsSameHandsOption) {
+          body.set("sameHandsRow", sameHandsRow ? "1" : "0");
         }
-        if (modeUsesWhiteGridFormFields(mode)) {
+        if (
+          modeUsesWhiteGridFormFields(mode) ||
+          (mode === "packaging_mockup" && sameHandsRow)
+        ) {
           body.set("nailGridColWidths", serializeColWidthDrafts(colWidthDrafts));
           body.set(
             "nailGridMarginPct",
@@ -1293,6 +1302,8 @@ export default function Home() {
     rowGutterPctDraft,
     nailWidthPctDrafts,
     nailHeightPctDrafts,
+    sameHandsRow,
+    showsSameHandsOption,
     prepareResultUrlForDisplay,
     gatewayProvider,
     gatewayApiKey,
@@ -1419,7 +1430,9 @@ export default function Home() {
 
   const firstDualProductHint =
     dualKind === "packaging_pose"
-      ? "款式来源：托盘、背卡、白底栅格等均可；不用于锁手型"
+      ? sameHandsRow
+        ? "上传**一行五枚**（拇→小，甲尖朝下）；服务端复制为 2×5 后再合成手握图。取消勾选可传完整 2×5"
+        : "款式来源：完整 **2×5** 背卡/托盘/白底栅格；上下行可不同款"
       : dualKind === "packaging_3d_ref"
         ? "正面/背面展开、屏显效果图、刀版图截图均可；为盒面图文唯一来源；服务端会**自动提取主色**写入提示词"
         : dualKind === "sachet_back"
@@ -1436,25 +1449,29 @@ export default function Home() {
       : mode === "extract_ten_grid"
         ? "点击选择含多枚甲片的照片"
         : mode === "white_grid_rectify"
-        ? "点击选择已生成的 2×5 白底栅格图"
+        ? sameHandsRow
+          ? "点击选择一行五枚甲片照片"
+          : "点击选择已生成的 2×5 白底栅格图"
         : mode === "complete_single_grid"
           ? "点击选择单枚甲片照片"
-          : modeUsesSingleRowUpload(mode)
+          : usesSingleRowUpload
             ? "点击选择一行五枚甲片照片"
             : "点击选择美甲照片";
   const singleUploadHint =
     modeIsScatteredGridFlatlay(mode)
       ? "上传**竖直 2×5**（上排 1–5、下排 6–10）；输出 **10 枚**在白底**随机位置与角度**打散，保留每格甲型与花色，禁止仍排成整齐栅格；每次 **1 张**"
       : modeIsDiagonalRowFlatlay(mode)
-        ? "上传**一行五枚**（拇→小，甲尖朝下）。**完全保留**源图五枚的甲型与高矮胖瘦；服务端**整行等比复制**后旋转成斜排。**强烈建议**清晰白底时勾选「跳过模型」以免 AI 改轮廓；走模型时只抠一行、列间留白缝"
+        ? "上传**一行五枚**（拇→小，甲尖朝下）。**完全保留**源图五枚的甲型与高矮胖瘦；模型抠出一行后服务端**整行等比复制**并旋转成斜排，列间留白缝"
       : mode === "extract_ten_grid"
         ? "托盘、卡纸、实拍平铺等；只抠已出现的甲片，**锁定每枚长短与甲型**，每行甲根齐平、指尖随长短自然阶梯；每次 **1 张**"
         : mode === "white_grid_rectify"
-          ? "请上传 2×5 白底成品图。**不改甲型与长短**，仅刚性旋转摆正歪斜，用外留白/列缝/行间缝控距；每次生成 **1 张**"
+          ? sameHandsRow
+            ? "上传**一行五枚**（拇→小，甲尖朝下）。模型只矫正 **5 枚**，服务端**复制成双行 2×5**；取消下方勾选则改传完整 2×5"
+            : "请上传 **2×5** 白底成品图。**不改甲型与长短**，仅刚性旋转摆正歪斜，用外留白/列缝/行间缝控距；每次 **1 张**"
           : mode === "complete_single_grid"
             ? "请上传甲尖朝下、甲根朝上的单枚（或含一枚主款）；仅做 EXIF 转正后由模型抠出一枚高清单甲，再由服务端按五列相对宽度复制成 10 格"
             : mode === "single_row_to_grid"
-              ? "上传一行五枚（拇→小，甲尖朝下）。**默认**：模型出带白缝的一行，服务端**整行复制**成双排；「同一行相邻美甲间距」主要约束模型。勾选**跳过模型**时，服务端才可能按枚裁切+列缝拼图"
+              ? "上传一行五枚（拇→小，甲尖朝下）。模型抠出带白缝的一行，服务端**整行复制**成双排；「同一行相邻美甲间距」主要约束模型"
               : "支持常见图片格式";
 
   useEffect(() => {
@@ -1585,7 +1602,9 @@ export default function Home() {
             ? mode === "multi_angle"
               ? "正在生成正视上手主图…"
               : mode === "packaging_mockup"
-                ? "正在生成包装手握图…"
+                ? sameHandsRow
+                  ? "正在规整一行并复制为 2×5，再合成手握图…"
+                  : "正在生成包装手握图…"
                 : mode === "flat_to_3d_packaging"
                   ? "正在生成 3D 开窗盒装主视图…"
                   : mode === "flat_to_3d_sachet"
@@ -1609,7 +1628,9 @@ export default function Home() {
                                 : mode === "extract_scattered_grid"
                                   ? "正在生成散落排版…"
                                 : mode === "white_grid_rectify"
-                                ? "正在几何矫正…"
+                                ? sameHandsRow
+                                  ? "正在规整一行并复制为 2×5…"
+                                  : "正在几何矫正…"
                                 : "正在生成…"
             : "开始生成"}
         </button>
@@ -1668,7 +1689,7 @@ export default function Home() {
                     }}
                   >
                     <span className="font-medium text-zinc-700">① </span>
-                    在对应区域点击一下使焦点落在该处后，可用 Ctrl+V（Windows）或 ⌘+V（Mac）将剪贴板中的图片粘贴为投喂图（第一张）。
+                    Ctrl+V（Windows）或 ⌘+V（Mac）
                   </FeedPasteZone>
                   <FeedPasteZone
                     ariaLabel="粘贴第二张投喂图"
@@ -1678,7 +1699,7 @@ export default function Home() {
                     }}
                   >
                     <span className="font-medium text-zinc-700">② </span>
-                    在对应区域点击一下使焦点落在该处后，可用 Ctrl+V（Windows）或 ⌘+V（Mac）将剪贴板中的图片粘贴为投喂图（第二张）。
+                    Ctrl+V（Windows）或 ⌘+V（Mac）
                   </FeedPasteZone>
                 </div>
                 <div className="flex flex-col gap-4">
@@ -1701,7 +1722,9 @@ export default function Home() {
                             ? "点击选择袋装正面平面稿"
                             : dualKind === "nails_box"
                               ? "点击选择美甲款式图"
-                              : "点击选择产品 / 甲片款式图"
+                              : dualKind === "packaging_pose" && sameHandsRow
+                                ? "点击选择一行五枚甲片照片"
+                                : "点击选择产品 / 甲片款式图"
                       }
                       hint={firstDualProductHint}
                       previewUrl={previewUrl}
@@ -1741,6 +1764,22 @@ export default function Home() {
                 <p className="text-xs text-zinc-500">
                   下方虚线区域点击后仅从文件夹选图；剪贴板粘贴请使用上方两个「粘贴区」。
                 </p>
+                {showsSameHandsOption ? (
+                  <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-zinc-200 bg-zinc-50/90 px-3 py-2.5 text-sm text-zinc-800">
+                    <input
+                      type="checkbox"
+                      className="mt-0.5"
+                      checked={sameHandsRow}
+                      onChange={(e) => setSameHandsRow(e.target.checked)}
+                    />
+                    <span>
+                      <span className="font-medium">上下手同款（一行五甲）</span>
+                      <span className="mt-0.5 block text-xs font-normal text-zinc-500">
+                        默认开启：产品图上传**一行五枚**（拇→小），服务端复制为 2×5 后再合成。取消勾选则按原逻辑上传完整 **2×5** 背卡。
+                      </span>
+                    </span>
+                  </label>
+                ) : null}
                 {dualKind === "nails_box" ? (
                   <fieldset className="rounded-lg border border-zinc-200 bg-zinc-50/90 px-3 py-3">
                     <legend className="px-1 text-xs font-semibold text-zinc-600">
@@ -1789,7 +1828,7 @@ export default function Home() {
                     applyMainImageFile(f);
                   }}
                 >
-                  在对应区域点击一下使焦点落在该处后，可用 Ctrl+V（Windows）或 ⌘+V（Mac）将剪贴板中的图片粘贴为投喂图。
+                  Ctrl+V（Windows）或 ⌘+V（Mac）
                 </FeedPasteZone>
                 <div className="relative rounded-xl border-2 border-dashed border-zinc-300 bg-zinc-50 transition hover:border-rose-300 hover:bg-rose-50/60">
                   {previewUrl ? (
@@ -1832,20 +1871,18 @@ export default function Home() {
                 <p className="text-xs text-zinc-500">
                   下方虚线区域点击后仅从文件夹选图；剪贴板粘贴请使用上方「粘贴区」。
                 </p>
-                {modeUsesSingleRowUpload(mode) ? (
+                {showsSameHandsOption ? (
                   <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-zinc-200 bg-zinc-50/90 px-3 py-2.5 text-sm text-zinc-800">
                     <input
                       type="checkbox"
                       className="mt-0.5"
-                      checked={skipSingleRowModel}
-                      onChange={(e) => setSkipSingleRowModel(e.target.checked)}
+                      checked={sameHandsRow}
+                      onChange={(e) => setSameHandsRow(e.target.checked)}
                     />
                     <span>
-                      <span className="font-medium">跳过模型，直接复制拼接</span>
+                      <span className="font-medium">上下手同款（一行五甲）</span>
                       <span className="mt-0.5 block text-xs font-normal text-zinc-500">
-                        {modeIsDiagonalRowFlatlay(mode)
-                          ? "上传已是清晰白底一行五甲时勾选：整行等比复制为两排并旋转成斜排，不经模型改图，最大程度保留甲型与长短宽窄。"
-                          : "上传已是清晰白底一行五甲时勾选，整行原样复制为两排，不经模型改图。"}
+                        默认开启：上传**一行五枚**（拇→小），服务端复制为 2×5。取消勾选则上传完整 **2×5** 白底栅格走原有几何矫正。
                       </span>
                     </span>
                   </label>
@@ -2017,13 +2054,17 @@ export default function Home() {
           </div>
         </section>
 
-        {modeShowsWhiteGridLayoutPanel(mode) ? (
+        {showsWhiteGridLayoutPanel ? (
           <GridLayoutPanel
             modeLabel={
               mode === "extract_ten_grid"
                 ? "抠图排版：**锁定甲片尺寸**，仅调外留白/列缝/行间缝（**五列相对宽度不生效**，不会按列缩放甲片）；每次 **1 张**。"
                 : mode === "white_grid_rectify"
-                  ? "几何矫正：**十格拆层整版重排**（非整图扶正），逐格锁定甲型与长短，每枚 **刚性旋转至竖直** + 平移；每次 **1 张**。附录：外留白/列缝/行间缝；「五列宽」无效。"
+                  ? sameHandsRow
+                    ? "同款一行：模型只处理 **5 枚**单行，服务端**整行复制**为 2×5；列缝/外留白主要约束模型单行。取消上方勾选则走完整 **2×5** 几何矫正。"
+                    : "几何矫正：**十格拆层整版重排**（非整图扶正），逐格锁定甲型与长短，每枚 **刚性旋转至竖直** + 平移；每次 **1 张**。附录：外留白/列缝/行间缝；「五列宽」无效。"
+                  : mode === "packaging_mockup" && sameHandsRow
+                    ? "手握盒 · 同款一行：下列参数用于「一行五甲 → 复制 2×5 产品图」的列缝与外留白；合成握姿时以复制后的背卡为准。"
                   : mode === "complete_single_grid"
                     ? "单甲补齐：下列数值仅用于服务端把「一枚抠图甲片」按列宽复制成 10 格（体现拇→小尺码差），**不会**再次发给模型改甲型。"
                     : mode === "single_row_to_grid"

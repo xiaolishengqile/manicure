@@ -19,6 +19,7 @@ import {
   filterParallelImageJobs,
   parseParallelVariantChoice,
   promptsForMode,
+  parseSameHandsRow,
   type GenerationImageJob,
   type GenerationMode,
 } from "@/lib/generation-modes";
@@ -27,6 +28,7 @@ import {
   buildTenSinglesCollageReference,
 } from "@/lib/ten-singles-collage";
 import { buildDuplicatedRowGridFromOneRow } from "@/lib/single-row-split";
+import { buildSameHandsProductSheet2x5 } from "@/lib/same-hands-row-sheet";
 import {
   buildSingleRowModelSpacingPromptAddendum,
   buildWhiteGridLayoutPromptAddendum,
@@ -511,6 +513,33 @@ export async function POST(request: Request) {
       return Response.json({ error: poseRes.error }, { status: 400 });
     }
 
+    const sameHandsRow = parseSameHandsRow(formData.get("sameHandsRow"));
+    let productBuffer = nailsRes.buffer;
+    let productMime = nailsRes.mime;
+    if (sameHandsRow) {
+      const gridLayout = layoutWithMinColGutterForSingleRow(
+        parseTenSinglesGridLayoutFromFormData(formData),
+      );
+      const skipRowModel = formData.get("skipRowModel") === "1";
+      try {
+        productBuffer = await buildSameHandsProductSheet2x5({
+          mode: "packaging_mockup",
+          inputBuffer: nailsRes.buffer,
+          inputMime: nailsRes.mime,
+          skipRowModel,
+          gridLayout,
+          imageCtx,
+          gatewayEdit,
+          replicateDownloadAuth: replAuth,
+        });
+        productMime = "image/png";
+      } catch (e) {
+        const message =
+          e instanceof Error ? e.message : "一行五甲复制为 2×5 产品图失败";
+        return Response.json({ error: message, imageUrls: [], labels: [] }, { status: 502 });
+      }
+    }
+
     const jobs = promptsForMode(mode);
 
     try {
@@ -522,8 +551,8 @@ export async function POST(request: Request) {
             imageCtx,
             poseRes.buffer,
             poseRes.mime,
-            nailsRes.buffer,
-            nailsRes.mime,
+            productBuffer,
+            productMime,
             imageEditPrompt(prompt),
             gatewayEdit,
           ),
@@ -827,6 +856,40 @@ export async function POST(request: Request) {
       const message =
         e instanceof Error ? e.message : "单甲高清化或服务端拼图失败";
       return Response.json({ error: message }, { status: 502 });
+    }
+  }
+
+  if (mode === "white_grid_rectify" && parseSameHandsRow(formData.get("sameHandsRow"))) {
+    const gridLayout = layoutWithMinColGutterForSingleRow(
+      parseTenSinglesGridLayoutFromFormData(formData),
+    );
+    const skipRowModel = formData.get("skipRowModel") === "1";
+    try {
+      const gridBuffer = await buildSameHandsProductSheet2x5({
+        mode: "white_grid_rectify",
+        inputBuffer: buffer,
+        inputMime: mime,
+        skipRowModel,
+        gridLayout,
+        imageCtx,
+        gatewayEdit,
+        replicateDownloadAuth: replAuth,
+      });
+      const gridUrl = `data:image/png;base64,${gridBuffer.toString("base64")}`;
+      const defaultLabel = generationModeOption(mode).label;
+      const label = skipRowModel
+        ? `${defaultLabel}（同款一行 · 跳过模型）`
+        : `${defaultLabel}（同款一行 · 复制成双行）`;
+      return Response.json({
+        imageUrls: [gridUrl],
+        labels: [label],
+        imageUrl: gridUrl,
+        mode,
+      });
+    } catch (e) {
+      const message =
+        e instanceof Error ? e.message : "同款一行矫正或复制拼接失败";
+      return Response.json({ error: message, imageUrls: [], labels: [] }, { status: 502 });
     }
   }
 
