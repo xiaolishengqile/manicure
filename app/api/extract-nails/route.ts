@@ -520,13 +520,11 @@ export async function POST(request: Request) {
       const gridLayout = layoutWithMinColGutterForSingleRow(
         parseTenSinglesGridLayoutFromFormData(formData),
       );
-      const skipRowModel = formData.get("skipRowModel") === "1";
       try {
         productBuffer = await buildSameHandsProductSheet2x5({
           mode: "packaging_mockup",
           inputBuffer: nailsRes.buffer,
           inputMime: nailsRes.mime,
-          skipRowModel,
           gridLayout,
           imageCtx,
           gatewayEdit,
@@ -863,13 +861,11 @@ export async function POST(request: Request) {
     const gridLayout = layoutWithMinColGutterForSingleRow(
       parseTenSinglesGridLayoutFromFormData(formData),
     );
-    const skipRowModel = formData.get("skipRowModel") === "1";
     try {
       const gridBuffer = await buildSameHandsProductSheet2x5({
         mode: "white_grid_rectify",
         inputBuffer: buffer,
         inputMime: mime,
-        skipRowModel,
         gridLayout,
         imageCtx,
         gatewayEdit,
@@ -877,9 +873,7 @@ export async function POST(request: Request) {
       });
       const gridUrl = `data:image/png;base64,${gridBuffer.toString("base64")}`;
       const defaultLabel = generationModeOption(mode).label;
-      const label = skipRowModel
-        ? `${defaultLabel}（同款一行 · 跳过模型）`
-        : `${defaultLabel}（同款一行 · 复制成双行）`;
+      const label = `${defaultLabel}（同款一行 · 模型规整后复制成双行）`;
       return Response.json({
         imageUrls: [gridUrl],
         labels: [label],

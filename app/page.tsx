@@ -19,6 +19,8 @@ import {
   modeIsScatteredGridFlatlay,
   modeShowsWhiteGridLayoutPanel,
   modeSupportsSameHandsRowOption,
+  sameHandsRowUsesGridFormFields,
+  sameHandsRowOptionHint,
   effectiveUsesSingleRowUpload,
   parallelImageJobCountForMode,
   parallelVariantChoiceFromSlotIndex,
@@ -369,7 +371,7 @@ export default function Home() {
   const showsSameHandsOption = modeSupportsSameHandsRowOption(mode);
   const showsWhiteGridLayoutPanel =
     modeShowsWhiteGridLayoutPanel(mode) ||
-    (mode === "packaging_mockup" && sameHandsRow);
+    sameHandsRowUsesGridFormFields(mode, sameHandsRow);
   const showPanelColorPicker = modeUsesDominantColorExtraction(mode);
 
   const applyGridPresetAt = useCallback(
@@ -1073,7 +1075,7 @@ export default function Home() {
         }
         if (
           modeUsesWhiteGridFormFields(mode) ||
-          (mode === "packaging_mockup" && sameHandsRow)
+          sameHandsRowUsesGridFormFields(mode, sameHandsRow)
         ) {
           body.set("nailGridColWidths", serializeColWidthDrafts(colWidthDrafts));
           body.set(
@@ -1431,7 +1433,7 @@ export default function Home() {
   const firstDualProductHint =
     dualKind === "packaging_pose"
       ? sameHandsRow
-        ? "上传**一行五枚**（拇→小，甲尖朝下）；服务端复制为 2×5 后再合成手握图。取消勾选可传完整 2×5"
+        ? "上传**一行五枚**（拇→小，甲尖朝下）；**模型先规整单行**，服务端再复制为 2×5 后合成手握图。取消勾选可传完整 2×5"
         : "款式来源：完整 **2×5** 背卡/托盘/白底栅格；上下行可不同款"
       : dualKind === "packaging_3d_ref"
         ? "正面/背面展开、屏显效果图、刀版图截图均可；为盒面图文唯一来源；服务端会**自动提取主色**写入提示词"
@@ -1452,6 +1454,8 @@ export default function Home() {
         ? sameHandsRow
           ? "点击选择一行五枚甲片照片"
           : "点击选择已生成的 2×5 白底栅格图"
+        : mode === "multi_angle"
+          ? "点击选择美甲款式参考图"
         : mode === "complete_single_grid"
           ? "点击选择单枚甲片照片"
           : usesSingleRowUpload
@@ -1466,8 +1470,10 @@ export default function Home() {
         ? "托盘、卡纸、实拍平铺等；只抠已出现的甲片，**锁定每枚长短与甲型**，每行甲根齐平、指尖随长短自然阶梯；每次 **1 张**"
         : mode === "white_grid_rectify"
           ? sameHandsRow
-            ? "上传**一行五枚**（拇→小，甲尖朝下）。模型只矫正 **5 枚**，服务端**复制成双行 2×5**；取消下方勾选则改传完整 2×5"
+            ? "上传**一行五枚**（拇→小，甲尖朝下）。**模型先规整单行**，服务端**再复制为 2×5**；取消勾选则改传完整 2×5"
             : "请上传 **2×5** 白底成品图。**不改甲型与长短**，仅刚性旋转摆正歪斜，用外留白/列缝/行间缝控距；每次 **1 张**"
+          : mode === "multi_angle"
+            ? "上传 2×5 背卡、平铺或商品图作为款式参考，生成 **1 张**正视上手棚拍主图"
           : mode === "complete_single_grid"
             ? "请上传甲尖朝下、甲根朝上的单枚（或含一枚主款）；仅做 EXIF 转正后由模型抠出一枚高清单甲，再由服务端按五列相对宽度复制成 10 格"
             : mode === "single_row_to_grid"
@@ -1603,7 +1609,7 @@ export default function Home() {
               ? "正在生成正视上手主图…"
               : mode === "packaging_mockup"
                 ? sameHandsRow
-                  ? "正在规整一行并复制为 2×5，再合成手握图…"
+                  ? "正在模型规整一行并复制为 2×5，再合成手握图…"
                   : "正在生成包装手握图…"
                 : mode === "flat_to_3d_packaging"
                   ? "正在生成 3D 开窗盒装主视图…"
@@ -1629,7 +1635,7 @@ export default function Home() {
                                   ? "正在生成散落排版…"
                                 : mode === "white_grid_rectify"
                                 ? sameHandsRow
-                                  ? "正在规整一行并复制为 2×5…"
+                                  ? "正在模型规整一行并复制为 2×5…"
                                   : "正在几何矫正…"
                                 : "正在生成…"
             : "开始生成"}
@@ -1775,7 +1781,7 @@ export default function Home() {
                     <span>
                       <span className="font-medium">上下手同款（一行五甲）</span>
                       <span className="mt-0.5 block text-xs font-normal text-zinc-500">
-                        默认开启：产品图上传**一行五枚**（拇→小），服务端复制为 2×5 后再合成。取消勾选则按原逻辑上传完整 **2×5** 背卡。
+                        {sameHandsRowOptionHint(mode)}
                       </span>
                     </span>
                   </label>
@@ -1882,7 +1888,7 @@ export default function Home() {
                     <span>
                       <span className="font-medium">上下手同款（一行五甲）</span>
                       <span className="mt-0.5 block text-xs font-normal text-zinc-500">
-                        默认开启：上传**一行五枚**（拇→小），服务端复制为 2×5。取消勾选则上传完整 **2×5** 白底栅格走原有几何矫正。
+                        {sameHandsRowOptionHint(mode)}
                       </span>
                     </span>
                   </label>
@@ -2061,10 +2067,10 @@ export default function Home() {
                 ? "抠图排版：**锁定甲片尺寸**，仅调外留白/列缝/行间缝（**五列相对宽度不生效**，不会按列缩放甲片）；每次 **1 张**。"
                 : mode === "white_grid_rectify"
                   ? sameHandsRow
-                    ? "同款一行：模型只处理 **5 枚**单行，服务端**整行复制**为 2×5；列缝/外留白主要约束模型单行。取消上方勾选则走完整 **2×5** 几何矫正。"
+                    ? "同款一行：**模型先规整 5 枚单行**，服务端**再整行复制**为 2×5；列缝/外留白约束模型单行。取消勾选则走完整 **2×5** 几何矫正。"
                     : "几何矫正：**十格拆层整版重排**（非整图扶正），逐格锁定甲型与长短，每枚 **刚性旋转至竖直** + 平移；每次 **1 张**。附录：外留白/列缝/行间缝；「五列宽」无效。"
                   : mode === "packaging_mockup" && sameHandsRow
-                    ? "手握盒 · 同款一行：下列参数用于「一行五甲 → 复制 2×5 产品图」的列缝与外留白；合成握姿时以复制后的背卡为准。"
+                    ? "手握盒 · 同款一行：模型先规整单行，服务端再复制 2×5；下列参数约束单行列缝与外留白。"
                   : mode === "complete_single_grid"
                     ? "单甲补齐：下列数值仅用于服务端把「一枚抠图甲片」按列宽复制成 10 格（体现拇→小尺码差），**不会**再次发给模型改甲型。"
                     : mode === "single_row_to_grid"

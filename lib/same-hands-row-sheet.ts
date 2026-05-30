@@ -19,7 +19,6 @@ export type BuildSameHandsProductSheet2x5Params = {
   mode: GenerationMode;
   inputBuffer: Buffer;
   inputMime: string;
-  skipRowModel: boolean;
   gridLayout: TenSinglesGridLayout;
   imageCtx: ImageCtx;
   gatewayEdit: ParsedGatewayEditFields;
@@ -29,39 +28,34 @@ export type BuildSameHandsProductSheet2x5Params = {
 };
 
 /**
- * 一行五甲 → 可选模型规整 → 服务端整行复制为 2×5 产品背卡。
- * 用于「上下手同款」下的二次矫正（最终输出）与手握盒（作 SECOND 产品图）。
+ * 一行五甲 → **模型先规整单行** → 服务端整行复制为 2×5 产品背卡。
+ * 用于「上下手同款」下的二次矫正与手握盒产品图。
  */
 export async function buildSameHandsProductSheet2x5(
   params: BuildSameHandsProductSheet2x5Params,
 ): Promise<Buffer> {
   const pre = await exifUprightToPng(params.inputBuffer, params.inputMime);
-  let oneRowBuffer = pre.buffer;
   const ext = extFromMime(pre.mime);
 
-  if (!params.skipRowModel) {
-    const basePrompt = sameHandsRowModelPrompt(params.mode);
-    const rowModelPrompt =
-      basePrompt +
-      buildSingleRowModelSpacingPromptAddendum(params.gridLayout) +
-      (params.promptSuffix ?? "");
-    const oneRowUrl = await editOnceRoute(
-      params.imageCtx,
-      oneRowBuffer,
-      ext,
-      pre.mime,
-      rowModelPrompt,
-      params.gatewayEdit,
-    );
-    if (!oneRowUrl) {
-      throw new Error("模型未返回单行美甲图（既无 url 也无 b64_json）。");
-    }
-    oneRowBuffer = await imageUrlToBuffer(oneRowUrl, {
-      replicateDownloadAuth: params.replicateDownloadAuth,
-    });
+  const basePrompt = sameHandsRowModelPrompt(params.mode);
+  const rowModelPrompt =
+    basePrompt +
+    buildSingleRowModelSpacingPromptAddendum(params.gridLayout) +
+    (params.promptSuffix ?? "");
+  const oneRowUrl = await editOnceRoute(
+    params.imageCtx,
+    pre.buffer,
+    ext,
+    pre.mime,
+    rowModelPrompt,
+    params.gatewayEdit,
+  );
+  if (!oneRowUrl) {
+    throw new Error("模型未返回单行美甲图（既无 url 也无 b64_json）。");
   }
-
-  return buildDuplicatedRowGridFromOneRow(oneRowBuffer, params.gridLayout, {
-    skipRowModel: params.skipRowModel,
+  const oneRowBuffer = await imageUrlToBuffer(oneRowUrl, {
+    replicateDownloadAuth: params.replicateDownloadAuth,
   });
+
+  return buildDuplicatedRowGridFromOneRow(oneRowBuffer, params.gridLayout);
 }

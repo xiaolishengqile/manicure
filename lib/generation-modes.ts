@@ -237,6 +237,26 @@ export function modeSupportsSameHandsRowOption(mode: GenerationMode): boolean {
   return mode === "white_grid_rectify" || mode === "packaging_mockup";
 }
 
+/** 同款一行勾选后需提交白底栅格排版参数（列缝/外留白等） */
+export function sameHandsRowUsesGridFormFields(
+  mode: GenerationMode,
+  sameHandsRow: boolean,
+): boolean {
+  return modeSupportsSameHandsRowOption(mode) && sameHandsRow;
+}
+
+/** 「上下手同款」勾选框说明文案 */
+export function sameHandsRowOptionHint(mode: GenerationMode): string {
+  switch (mode) {
+    case "white_grid_rectify":
+      return "默认开启：上传一行五枚（拇→小）。模型先规整单行，服务端再复制为 2×5。取消勾选则上传完整 2×5 走几何矫正。";
+    case "packaging_mockup":
+      return "默认开启：产品图上传一行五枚。模型先规整单行，服务端复制为 2×5 后再合成手握图。取消勾选则上传完整 2×5 背卡。";
+    default:
+      return "";
+  }
+}
+
 /** FormData `sameHandsRow`：默认 true；仅 `"0"` / `"false"` / `"off"` 为关 */
 export function parseSameHandsRow(raw: FormDataEntryValue | null): boolean {
   const s = typeof raw === "string" ? raw.trim().toLowerCase() : "";
