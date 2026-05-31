@@ -36,7 +36,7 @@ export const GENERATION_MODE_OPTIONS: {
     shortLabel: "规整实拍 · 抠图排版",
     whenToUse: "背卡、托盘、较正的 2×5 或平铺，甲片大致对齐",
     description:
-      "从实拍/背卡识别并抠出已出现的甲片，摆成 2×5 白底；不补款。**锁定**每枚的长度、宽度与甲型；每行**甲根顶线齐平**，指尖随真实长短**自然形成阶梯**。仅竖直摆正（yaw=0°）与留白/列缝；附录**不**按列宽缩放甲片。每次生成 **1 张**。仅 EXIF 转正，不整图强制 180°。",
+      "从实拍/背卡识别并抠出已出现的甲片，摆成 2×5 白底；不补款。**锁定**每枚的长度、宽度与甲型；每行**甲根顶线齐平**，指尖随真实长短**自然形成阶梯**。仅竖直摆正（yaw=0°）与留白/列缝；附录**不**按列宽缩放甲片。每次并行生成 **2 张**（同 prompt 双份采样，择优）。仅 EXIF 转正，不整图强制 180°。",
   },
   {
     value: "extract_diagonal_row",
@@ -44,7 +44,7 @@ export const GENERATION_MODE_OPTIONS: {
     shortLabel: "斜排 · 一行复制 + 旋转",
     whenToUse: "已有一行五枚平铺，要斜拍 2×5 背卡成片",
     description:
-      "上传**一行五枚**（拇→小，甲尖朝下）。**锁定**每枚甲型与长短宽窄；服务端**整行等比复制**成双排后**刚性旋转**成斜排（不改轮廓）。勾选**跳过模型**时不经 AI 改图，保真最高。走模型时只抠一行。每次 **1 张**。",
+      "上传**一行五枚**（拇→小，甲尖朝下）。**锁定**每枚甲型与长短宽窄；服务端**整行等比复制**成双排后按可填角度**刚性旋转**成斜排（默认 **15°**，不改轮廓）。勾选**跳过模型**时不经 AI 改图，保真最高。走模型时只抠一行。每次 **1 张**。",
   },
   {
     value: "extract_scattered_grid",
@@ -1346,8 +1346,13 @@ const FLAT_TO_3D_SACHET_PROMPTS: { prompt: string; label: string }[] = [
   },
 ];
 
-/** 白底栅格「仅抠图 / 几何矫正」并行出图张数（同 prompt 多次，供用户择优） */
+/** 同 prompt 并行出图张数（供用户择优） */
 export const WHITE_GRID_DUAL_VARIANT_COUNT = 2;
+
+/** 规整实拍 · 抠图排版：同 prompt 并行双份采样，不合并为单次请求 */
+export function modeUsesParallelDuplicateSamples(mode: GenerationMode): boolean {
+  return mode === "extract_ten_grid";
+}
 
 function buildWhiteGridDualVariantJobs(
   baseLabel: string,
@@ -1371,6 +1376,7 @@ export function stripParallelVariantSchemeLabel(label: string): string {
 
 /**
  * 多路任务若最终 prompt 完全一致，只保留 1 路（1 次 API、1 张结果）。
+ * `extract_ten_grid` 在 {@link finalizeParallelImageJobs} 中跳过合并。
  * 方案 A/B prompt 不同时原样返回（如斜拍散落：倾斜 vs 散乱）。
  */
 export function collapseIdenticalPromptJobs(
@@ -1389,9 +1395,23 @@ export function collapseIdenticalPromptJobs(
   ];
 }
 
-/** 按模式定义的路数；相同 prompt 的模式在 API 层会合并为 1 路 */
+/** 提交/API 层实际并行路数（含同 prompt 双份采样） */
+export function finalizeParallelImageJobs(
+  mode: GenerationMode,
+  jobs: ReadonlyArray<GenerationImageJob>,
+): GenerationImageJob[] {
+  if (modeUsesParallelDuplicateSamples(mode)) {
+    return jobs.map((j) => ({ ...j }));
+  }
+  return collapseIdenticalPromptJobs(jobs);
+}
+
+/** 按模式定义的路数；相同 prompt 的模式在 API 层会合并为 1 路（extract_ten_grid 除外） */
 export function parallelImageJobCountForMode(mode: GenerationMode): number {
   if (mode === "nails_in_box") return 1;
+  if (modeUsesParallelDuplicateSamples(mode)) {
+    return WHITE_GRID_DUAL_VARIANT_COUNT;
+  }
   const jobs = promptsForMode(mode);
   if (jobs.length === 0) return 0;
   if (jobs.every((j) => j.prompt === jobs[0]!.prompt)) return 1;
@@ -1444,12 +1464,15 @@ function jobMatchesParallelVariantChoice(
 export function filterParallelImageJobs(
   jobs: ReadonlyArray<GenerationImageJob>,
   choice: ParallelVariantChoice,
-  mode: GenerationMode,
+  _mode: GenerationMode,
 ): GenerationImageJob[] {
   if (choice === "all" || jobs.length <= 1) {
     return jobs.map((j) => ({ ...j }));
   }
-  return jobs.map((j) => ({ ...j }));
+  const filtered = jobs.filter((j) =>
+    jobMatchesParallelVariantChoice(j.label, choice),
+  );
+  return (filtered.length > 0 ? filtered : jobs).map((j) => ({ ...j }));
 }
 
 export function promptsForMode(mode: GenerationMode): { prompt: string; label: string }[] {

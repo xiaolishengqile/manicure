@@ -7,6 +7,7 @@ import {
   EXTRACT_TEN_GRID_API_PREFIX,
   WHITE_GRID_RECTIFY_API_PREFIX,
   collapseIdenticalPromptJobs,
+  finalizeParallelImageJobs,
   composeScatteredGridEditPrompt,
   EXTRACT_DIAGONAL_ROW_API_PREFIX,
   buildNailsInBoxBoxAspectApiPrefix,
@@ -35,7 +36,10 @@ import {
   layoutWithMinColGutterForSingleRow,
   parseTenSinglesGridLayoutFromFormData,
 } from "@/lib/ten-singles-grid-layout";
-import { applyDiagonalPackshotRotation } from "@/lib/diagonal-flatlay";
+import {
+  applyDiagonalPackshotRotation,
+  parseDiagonalPackshotRotateDeg,
+} from "@/lib/diagonal-flatlay";
 import {
   exifUprightToPng,
   normalizeTenSingleNailForCollageCell,
@@ -124,7 +128,7 @@ function resolveImageEditJobs(
       extractGridAddendum,
     ),
   }));
-  return collapseIdenticalPromptJobs(composed);
+  return finalizeParallelImageJobs(mode, composed);
 }
 
 function getImageModel(): string {
@@ -784,7 +788,10 @@ export async function POST(request: Request) {
         { skipRowModel, maxInnerFillFrac: stripFill },
       );
       if (isDiagonal) {
-        gridBuffer = await applyDiagonalPackshotRotation(gridBuffer);
+        const rotateDeg = parseDiagonalPackshotRotateDeg(
+          formData.get("diagonalPackshotRotateDeg"),
+        );
+        gridBuffer = await applyDiagonalPackshotRotation(gridBuffer, rotateDeg);
       }
       const gridUrl = `data:image/png;base64,${gridBuffer.toString("base64")}`;
 

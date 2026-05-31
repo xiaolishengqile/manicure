@@ -12,6 +12,7 @@ import { TenSlotUpload } from "@/components/ten-slot-upload";
 import { ResultDisplay } from "@/components/result-display";
 import { PromptPresetsPanel } from "@/components/prompt-presets-panel";
 import { GridLayoutPanel } from "@/components/grid-layout-panel";
+import { DEFAULT_DIAGONAL_PACKSHOT_ROTATE_DEG } from "@/lib/diagonal-packshot-config";
 import {
   getDualUploadKind,
   modeIsDiagonalRowFlatlay,
@@ -92,6 +93,19 @@ function parsePctInput(
   const v = parseFloat(t);
   if (Number.isNaN(v)) return emptyFallback;
   return Math.min(max, Math.max(min, v));
+}
+
+function parseDiagonalRotateDegDraft(
+  raw: string,
+  emptyFallback: number = DEFAULT_DIAGONAL_PACKSHOT_ROTATE_DEG,
+): number {
+  return parsePctInput(raw, 0, 89, emptyFallback);
+}
+
+function diagonalRotateDegDraftAfterBlur(raw: string): string {
+  const t = raw.trim();
+  if (t === "") return "";
+  return String(parseDiagonalRotateDegDraft(t, DEFAULT_DIAGONAL_PACKSHOT_ROTATE_DEG));
 }
 
 /** 失焦后与提交一致：列缝/行缝、外留白不支持负数，会夹到合法区间 */
@@ -191,6 +205,8 @@ export default function Home() {
   const [lockNailAspectRatio, setLockNailAspectRatio] = useState(true);
   /** 上下手同款：默认勾选，上传一行五甲（二次矫正 / 手握盒） */
   const [sameHandsRow, setSameHandsRow] = useState(true);
+  /** 斜排模式：服务端整图旋转角度（度）；空 = 提交时用默认 15° */
+  const [diagonalRotateDegDraft, setDiagonalRotateDegDraft] = useState("");
   const nailAspectLockRatioRef = useRef<number[]>([1, 1, 1, 1, 1]);
   const [gridPresets, setGridPresets] = useState<GridLayoutPreset[]>([]);
   const [gridPresetSelectedIndex, setGridPresetSelectedIndex] = useState<
@@ -1073,6 +1089,12 @@ export default function Home() {
         if (showsSameHandsOption) {
           body.set("sameHandsRow", sameHandsRow ? "1" : "0");
         }
+        if (modeIsDiagonalRowFlatlay(mode)) {
+          body.set(
+            "diagonalPackshotRotateDeg",
+            String(parseDiagonalRotateDegDraft(diagonalRotateDegDraft)),
+          );
+        }
         if (
           modeUsesWhiteGridFormFields(mode) ||
           sameHandsRowUsesGridFormFields(mode, sameHandsRow)
@@ -1305,6 +1327,7 @@ export default function Home() {
     nailWidthPctDrafts,
     nailHeightPctDrafts,
     sameHandsRow,
+    diagonalRotateDegDraft,
     showsSameHandsOption,
     prepareResultUrlForDisplay,
     gatewayProvider,
@@ -1377,7 +1400,7 @@ export default function Home() {
               : mode === "ten_singles_grid"
                 ? "产出（十枚单甲 · 一张合集）"
                 : mode === "extract_ten_grid"
-                  ? "产出（白底栅格 · 仅抠图 · 1张）"
+                  ? "产出（白底栅格 · 仅抠图 · 2张择优）"
                   : mode === "extract_diagonal_row"
                     ? "产出（斜排 · 一行五甲 · 1张）"
                     : mode === "extract_scattered_grid"
@@ -1465,9 +1488,9 @@ export default function Home() {
     modeIsScatteredGridFlatlay(mode)
       ? "上传**竖直 2×5**（上排 1–5、下排 6–10）；输出 **10 枚**在白底**随机位置与角度**打散，保留每格甲型与花色，禁止仍排成整齐栅格；每次 **1 张**"
       : modeIsDiagonalRowFlatlay(mode)
-        ? "上传**一行五枚**（拇→小，甲尖朝下）。**完全保留**源图五枚的甲型与高矮胖瘦；模型抠出一行后服务端**整行等比复制**并旋转成斜排，列间留白缝"
+        ? `上传**一行五枚**（拇→小，甲尖朝下）。**完全保留**源图五枚的甲型与高矮胖瘦；模型抠出一行后服务端**整行等比复制**并旋转成斜排（角度可填，默认 **${DEFAULT_DIAGONAL_PACKSHOT_ROTATE_DEG}°**），列间留白缝`
       : mode === "extract_ten_grid"
-        ? "托盘、卡纸、实拍平铺等；只抠已出现的甲片，**锁定每枚长短与甲型**，每行甲根齐平、指尖随长短自然阶梯；每次 **1 张**"
+        ? "托盘、卡纸、实拍平铺等；只抠已出现的甲片，**锁定每枚长短与甲型**，每行甲根齐平、指尖随长短自然阶梯；每次并行 **2 张**（择优）"
         : mode === "white_grid_rectify"
           ? sameHandsRow
             ? "上传**一行五枚**（拇→小，甲尖朝下）。**模型先规整单行**，服务端**再复制为 2×5**；取消勾选则改传完整 2×5"
@@ -1628,7 +1651,7 @@ export default function Home() {
                             : mode === "single_row_to_grid"
                               ? "正在规整单行并复制拼接 2×5…"
                               : mode === "extract_ten_grid"
-                              ? "正在抠图排版…"
+                              ? "正在并行抠图排版（2 张）…"
                               : mode === "extract_diagonal_row"
                                 ? "正在生成斜排（一行抠图、复制、旋转）…"
                                 : mode === "extract_scattered_grid"
@@ -1893,6 +1916,32 @@ export default function Home() {
                     </span>
                   </label>
                 ) : null}
+                {modeIsDiagonalRowFlatlay(mode) ? (
+                  <label className="flex flex-col gap-1 rounded-lg border border-zinc-200 bg-zinc-50/90 px-3 py-2.5 text-sm text-zinc-800">
+                    <span className="font-medium">服务端斜排旋转角度（度）</span>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      className="max-w-[8rem] rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm tabular-nums outline-none ring-rose-500/30 focus:border-rose-400 focus:ring-2"
+                      value={diagonalRotateDegDraft}
+                      onChange={(e) => setDiagonalRotateDegDraft(e.target.value)}
+                      onBlur={() =>
+                        setDiagonalRotateDegDraft((prev) =>
+                          diagonalRotateDegDraftAfterBlur(prev),
+                        )
+                      }
+                      placeholder={String(DEFAULT_DIAGONAL_PACKSHOT_ROTATE_DEG)}
+                      aria-describedby="diagonal-rotate-deg-hint"
+                    />
+                    <span
+                      id="diagonal-rotate-deg-hint"
+                      className="text-xs font-normal text-zinc-500"
+                    >
+                      2×5 复制完成后整图刚性旋转；留空或未填时默认{" "}
+                      {DEFAULT_DIAGONAL_PACKSHOT_ROTATE_DEG}°，有效范围 0–89°。
+                    </span>
+                  </label>
+                ) : null}
               </>
             )}
           </div>
@@ -2064,7 +2113,7 @@ export default function Home() {
           <GridLayoutPanel
             modeLabel={
               mode === "extract_ten_grid"
-                ? "抠图排版：**锁定甲片尺寸**，仅调外留白/列缝/行间缝（**五列相对宽度不生效**，不会按列缩放甲片）；每次 **1 张**。"
+                ? "抠图排版：**锁定甲片尺寸**，仅调外留白/列缝/行间缝（**五列相对宽度不生效**，不会按列缩放甲片）；每次并行 **2 张**（同 prompt 双份采样，择优）。"
                 : mode === "white_grid_rectify"
                   ? sameHandsRow
                     ? "同款一行：**模型先规整 5 枚单行**，服务端**再整行复制**为 2×5；列缝/外留白约束模型单行。取消勾选则走完整 **2×5** 几何矫正。"
@@ -2075,7 +2124,9 @@ export default function Home() {
                     ? "单甲补齐：下列数值仅用于服务端把「一枚抠图甲片」按列宽复制成 10 格（体现拇→小尺码差），**不会**再次发给模型改甲型。"
                     : mode === "single_row_to_grid"
                       ? "单行复制成双行：条带默认约占画布内区 **68%**（四周留白更大）；可调**外留白（占边长 %）**继续缩小甲片占比（建议 5–8）；「五列相对宽度」不生效。"
-                      : "提交时服务端会按最大列归一；缝过大时可能自动缩小甲片以适配画布。"
+                      : mode === "extract_diagonal_row"
+                        ? `单行复制为 2×5 后，服务端按上方**旋转角度**整图斜排（默认 **${DEFAULT_DIAGONAL_PACKSHOT_ROTATE_DEG}°**）；下列参数约束列缝与外留白。`
+                        : "提交时服务端会按最大列归一；缝过大时可能自动缩小甲片以适配画布。"
             }
             colWidthDrafts={colWidthDrafts}
             setColWidthDrafts={setColWidthDrafts}

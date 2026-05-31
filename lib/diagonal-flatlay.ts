@@ -1,14 +1,19 @@
 import sharp from "sharp";
 
-/** 斜排成片：竖直 2×5 整组刚性旋转（与方案 A「~45° 平行长轴」一致） */
-export const DIAGONAL_PACKSHOT_ROTATE_DEG = 42;
+import { DEFAULT_DIAGONAL_PACKSHOT_ROTATE_DEG } from "@/lib/diagonal-packshot-config";
+
+export {
+  DEFAULT_DIAGONAL_PACKSHOT_ROTATE_DEG,
+  DIAGONAL_PACKSHOT_ROTATE_DEG,
+  parseDiagonalPackshotRotateDeg,
+} from "@/lib/diagonal-packshot-config";
 
 /**
  * 将竖直白底 2×5 栅格整图旋转为斜拍观感（白底扩边，不裁切甲片）。
  */
 export async function applyDiagonalPackshotRotation(
   uprightGridPng: Buffer,
-  rotateDeg: number = DIAGONAL_PACKSHOT_ROTATE_DEG,
+  rotateDeg: number = DEFAULT_DIAGONAL_PACKSHOT_ROTATE_DEG,
 ): Promise<Buffer> {
   return sharp(uprightGridPng)
     .rotate(rotateDeg, {
