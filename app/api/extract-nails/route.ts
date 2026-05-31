@@ -21,6 +21,7 @@ import {
   parseParallelVariantChoice,
   promptsForMode,
   parseSameHandsRow,
+  LAYER_EDITOR_EXTRACT_PROMPT,
   type GenerationImageJob,
   type GenerationMode,
 } from "@/lib/generation-modes";
@@ -713,6 +714,59 @@ export async function POST(request: Request) {
     }
   }
 
+  if (mode === "layer_editor") {
+    const nailsRes = await validateImageFile(
+      formData.get("image"),
+      "美甲产品图（字段 image）",
+    );
+    if (!nailsRes.ok) {
+      return Response.json({ error: nailsRes.error }, { status: 400 });
+    }
+
+    let buffer = nailsRes.buffer;
+    let mime = nailsRes.mime;
+    const pre = await exifUprightToPng(buffer, mime);
+    buffer = pre.buffer;
+    mime = pre.mime;
+    const ext = extFromMime(mime);
+
+    try {
+      // Call model to extract nails into a 2×5 grid
+      const prompt = imageEditPrompt(LAYER_EDITOR_EXTRACT_PROMPT);
+      const gridUrl = await editOnceRoute(
+        imageCtx,
+        buffer,
+        ext,
+        mime,
+        prompt,
+        gatewayEdit,
+      );
+      if (!gridUrl) {
+        return Response.json(
+          { error: "模型未返回抠图结果（既无 url 也无 b64_json）。" },
+          { status: 502 },
+        );
+      }
+
+      // Return the raw grid image — manual cropping happens on the client
+      const gridBuffer = await imageUrlToBuffer(gridUrl, {
+        replicateDownloadAuth: replAuth,
+      });
+      const gridB64 = gridBuffer.toString("base64");
+      const gridDataUrl = `data:image/png;base64,${gridB64}`;
+
+      return Response.json({
+        imageUrls: [gridDataUrl],
+        labels: ["抠图栅格（手动裁切）"],
+        imageUrl: gridDataUrl,
+        mode,
+      });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "图层编辑器抠图失败";
+      return Response.json({ error: message }, { status: 502 });
+    }
+  }
+
   const nailsOnly = await validateImageFile(formData.get("image"), "美甲图片（字段 image）");
   if (!nailsOnly.ok) {
     return Response.json({ error: nailsOnly.error }, { status: 400 });
@@ -796,21 +850,18 @@ export async function POST(request: Request) {
         });
       }
 
-      const stripFill = isDiagonal ? 0.84 : undefined;
       let gridBuffer: Buffer;
       if (
         isDiagonal &&
         skipRowModel &&
         diagonalUploadRows === "two_rows"
       ) {
-        gridBuffer = await buildTwoRowStripGrid(buffer, gridLayout, {
-          maxInnerFillFrac: stripFill,
-        });
+        gridBuffer = await buildTwoRowStripGrid(buffer, gridLayout);
       } else {
         gridBuffer = await buildDuplicatedRowGridFromOneRow(
           oneRowBuffer,
           gridLayout,
-          { skipRowModel, maxInnerFillFrac: stripFill },
+          { skipRowModel },
         );
       }
       if (isDiagonal) {

@@ -96,7 +96,7 @@ export function parseGridLayoutPresets(
         defaultColDrafts,
       );
       const marginPctDraft =
-        typeof o.marginPctDraft === "string" ? o.marginPctDraft : "1.8";
+        typeof o.marginPctDraft === "string" ? o.marginPctDraft : "8.5";
       const rowGutterPctDraft =
         typeof o.rowGutterPctDraft === "string" ? o.rowGutterPctDraft : "0";
       const colGutterSumPctDraft = migrateColGutterSumPctDraft(o);

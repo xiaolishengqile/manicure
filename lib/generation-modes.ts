@@ -2,6 +2,7 @@ import {
   buildTryonNailShapePromptBlock,
   type NailShapeProfileId,
 } from "@/lib/nail-shape-profiles";
+import { DEFAULT_OUTER_MARGIN_PCT } from "@/lib/ten-singles-grid-layout";
 
 export type GenerationMode =
   | "extract_ten_grid"
@@ -17,7 +18,8 @@ export type GenerationMode =
   | "nails_in_box"
   | "model_tryon"
   | "accessory_tryon"
-  | "ten_singles_grid";
+  | "ten_singles_grid"
+  | "layer_editor";
 
 export type GenerationModeGroupId = "white_grid" | "tryon" | "packaging";
 
@@ -200,16 +202,9 @@ export function modeUsesWhiteGridFormFields(mode: GenerationMode): boolean {
   );
 }
 
-/** 页面展示「白底栅格排版」面板 */
+/** 页面展示「白底栅格排版」面板（仅单枚款式·复制10格） */
 export function modeShowsWhiteGridLayoutPanel(mode: GenerationMode): boolean {
-  return (
-    mode === "ten_singles_grid" ||
-    mode === "complete_single_grid" ||
-    mode === "single_row_to_grid" ||
-    mode === "extract_diagonal_row" ||
-    mode === "extract_ten_grid" ||
-    mode === "white_grid_rectify"
-  );
+  return mode === "complete_single_grid";
 }
 
 /** 实际会并行多路请求（prompt 不同）；相同 prompt 仅 1 路 */
@@ -278,6 +273,11 @@ export function modeIsScatteredGridFlatlay(mode: GenerationMode): boolean {
   return mode === "extract_scattered_grid";
 }
 
+/** 图层编辑器：抠出单枚甲片后在画布上自由排版 */
+export function modeIsLayerEditor(mode: GenerationMode): boolean {
+  return mode === "layer_editor";
+}
+
 /** @deprecated 使用 modeIsScatteredGridFlatlay */
 export function modeIsVerticalToScatteredFlatLay(mode: GenerationMode): boolean {
   return modeIsScatteredGridFlatlay(mode);
@@ -302,7 +302,8 @@ export function parseGenerationMode(raw: FormDataEntryValue | null): GenerationM
     s === "model_tryon" ||
     s === "accessory_tryon" ||
     s === "ten_singles_grid" ||
-    s === "food_tryon"
+    s === "food_tryon" ||
+    s === "layer_editor"
   ) {
     if (s === "food_tryon") return "accessory_tryon";
     if (s === "extract_angle_scattered") return "extract_scattered_grid";
@@ -372,6 +373,9 @@ export const WHITE_BG_NAIL_GRID_TOP_BASELINE = `ROW-WISE TOP BASELINE (mandatory
 - In **each** row, the **cuticle / root / proximal TOP edge** of **every** nail in that row lies on **one shared horizontal straight line** — as if a ruler rests on top of all five nails — **not** a staircase along the tops.
 - **Forbidden:** aligning the **bottom free edges (tips)** to one line while the **tops** step up/down like stairs. Tips may end at different heights; only the **top / root** line must be shared.
 （每一行：所有美甲的甲根/上缘必须在同一条水平线上；禁止只对齐指尖、甲根呈阶梯。）`;
+
+/** 白底商品图统一外留白（与排版面板默认值一致） */
+const PACKSHOT_OUTER_MARGIN_EN = `- **Outer margin / quiet border:** **${DEFAULT_OUTER_MARGIN_PCT}%** of the **canvas side length** on all four sides (uniform white band). The nail cluster should fill the inner area without extra shrink-to-center padding beyond this margin.`;
 
 /** 白底栅格抠图 / 单甲：保真、允许修图、背景（extract + complete 共用；OUTPUT 单独常量见下） */
 const PACKSHOT_FIDELITY_CLEANUP_BG_EN = `DESIGN & SHAPE FIDELITY (hard — failure if violated):
@@ -825,6 +829,7 @@ SHARED RULES (Variant A and B):
 1. **Exactly 10 nails** in the output when the source has 10 — **count before finish**; do not drop slots.
 2. **Keep each nail’s shape, length, colour, and art** — no redesign, no warping, no beauty filter.
 3. Background: flat **#FFFFFF** on all sides; **bottom of frame must be white** with margin below the lowest nail.
+${PACKSHOT_OUTER_MARGIN_EN}
 4. **No overlap** — every nail fully visible; thin white gap between neighbors.
 5. Only **move** and **rotate** cutouts — do not invent new nails or duplicate a design to change count.
 
@@ -1475,6 +1480,64 @@ export function filterParallelImageJobs(
   return (filtered.length > 0 ? filtered : jobs).map((j) => ({ ...j }));
 }
 
+/**
+ * 图层编辑器：抠图专用 prompt — 输出 2×5 白底栅格（每枚竖直、甲根齐平、指尖阶梯）。
+ * 服务端会用 sharp 自动裁切每枚甲片并去除白底变为透明通道。
+ */
+export const LAYER_EDITOR_EXTRACT_PROMPT = `You act as a **professional e-commerce product retoucher**.
+
+TASK — **per-nail cutout and rigid re-place only** (NOT catalog redraw). You move **ten separate layers** onto white — **do not** redesign, re-style, equalize heights, or reinterpret the set.
+
+${EXTRACT_TEN_GRID_PRIORITY_LEDE_EN}
+${EXTRACT_TEN_GRID_SIZE_LOCK_EN}
+${PACKSHOT_FIDELITY_CLEANUP_BG_EN}
+
+Edit the provided reference photo of press-on / stick-on nails (display card, tray, flat-lay, hand-held set, noisy background, etc.).
+
+GOAL — **Extraction only:** cut out every **clearly visible** artificial nail and place it on flat white in **2 rows × 5 columns**. Preserve **slot identity** (output slot **N** = input slot **N**). This is **NOT** "fill to 10 with invented nails" and **NOT** a design refresh.
+
+IMAGE EDITING TASK:
+1) Identify every **individual** nail that is **unambiguously** visible. Ignore skin, fingers, printed text, logos, packaging, and environment.
+2) Cut out ONLY those pieces with crisp edges (no leftover card, skin, harsh cast shadows).
+3) Place each cutout in its **correct slot** on **#FFFFFF** or **#F7F7F7**. Preserve **left-to-right, top-to-bottom** order — **do not** swap columns or merge nails.
+
+NO INVENTION (hard rule):
+- If fewer than **10** nails are clearly visible: leave every **empty** cell as **solid flat backdrop only** — no guessed nail art, no duplicates "for symmetry." **Never** fabricate missing nails.
+- If more than 10 nails are visible, output **exactly 10** by following the dominant layout and omit extras.
+
+INPUT — layer_editor pipeline:
+- The server applied **EXIF upright only** (no global **180°** on the whole upload). Rectify **each nail** so **free edge points down** and **cuticle up** inside its cell.
+
+GEOMETRY — per nail only (not whole-image deskew):
+- **yaw = 0°** for every occupied nail — rigid rotation per layer; **forbidden** rotating/shearing the entire canvas to "straighten the tray."
+- **Fingertips down**, roots up per nail.（甲尖朝下，甲根朝上。）
+- **No warp for layout:** **forbidden** scale, stretch, shear, liquify, or "scale to fit cell" on any nail.
+
+${EXTRACT_TEN_GRID_PER_SLOT_TRANSFER_EN}
+
+${EXTRACT_TEN_GRID_VERTICAL_EN}
+
+${EXTRACT_TEN_GRID_ROW_LAYOUT_EN}
+
+${EXTRACT_TEN_GRID_ANTI_PATTERN_EN}
+
+GRID PLACEMENT:
+- **2 rows × 5 columns**; thin white gutters between nails.
+${PACKSHOT_OUTER_MARGIN_EN}
+- Center each nail in its column unless the source used a deliberate offset; keep column gutters visually even.
+- **Empty cells:** flat backdrop only.
+
+${EXTRACT_TEN_GRID_FAILSAFE_EN}
+
+LIGHTING — packshot finish:
+- Soft even studio light; preserve sparkle/chrome from originals; **no** heavy HDR or global re-grade beyond neutral cleanup.
+
+${EXTRACT_TEN_GRID_FINAL_LOCK_EN}
+
+${PACKSHOT_OUTPUT_COMPLIANCE_EN}
+
+Return a single square product-ready image.`;
+
 export function promptsForMode(mode: GenerationMode): { prompt: string; label: string }[] {
   switch (mode) {
     case "extract_ten_grid": {
@@ -1526,6 +1589,7 @@ export function promptsForMode(mode: GenerationMode): { prompt: string; label: s
     case "model_tryon":
     case "accessory_tryon":
     case "ten_singles_grid":
+    case "layer_editor":
       return [];
   }
 }

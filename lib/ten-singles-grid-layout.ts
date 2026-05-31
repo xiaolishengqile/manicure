@@ -4,6 +4,8 @@
 
 /** 四条竖缝合计占「内宽」百分比 — 与滑条、解析上限一致 */
 export const COL_GUTTER_SUM_INNER_WIDTH_PCT_MAX = 35;
+/** 单枚复制 10 格：列间距 % 下限（负值 = 更紧凑 / 轻微重叠） */
+export const COL_GUTTER_SUM_INNER_WIDTH_PCT_MIN = -15;
 
 /** 滑条下方「一键填入」参考值（与略疏/适中/较疏档位一致） */
 export const COL_GUTTER_SUM_QUICK_PRESET_PCTS = [14, 21, 29] as const;
@@ -54,10 +56,17 @@ export const NAIL_SCALE_PCT_MIN = 60;
 export const NAIL_SCALE_PCT_MAX = 140;
 export const DEFAULT_NAIL_SCALE_PCT = 100;
 
+/** 外留白占画布边长比例（统一标准，≈原一行复制模式有效留白的一半） */
+export const DEFAULT_OUTER_MARGIN_FRAC = 0.085;
+export const DEFAULT_OUTER_MARGIN_PCT = 8.5;
+/** FormData / UI 解析上限 */
+export const OUTER_MARGIN_FRAC_MAX = 0.12;
+export const OUTER_MARGIN_PCT_MAX = 12;
+
 /** 五列相对宽度（拇→小），已归一化使最大值为 1 */
 export type TenSinglesGridLayout = {
   readonly colWidthFrac: readonly [number, number, number, number, number];
-  /** 外留白占画布边长的比例，约 0.005–0.08 */
+  /** 外留白占画布边长的比例，约 0.005–0.12 */
   readonly marginFrac: number;
   /** 四条列缝总宽占「内宽」的比例；与 `interNailColGapMode` 一致时由 k 推导：4k/(5+4k) */
   readonly colGutterSumFrac: number;
@@ -79,33 +88,64 @@ export const DEFAULT_COL_WIDTH_FRAC: readonly [number, number, number, number, n
   1, 0.91, 0.98, 0.91, 0.86,
 ];
 
-export const DEFAULT_NAIL_COL_SCALE: readonly [number, number, number, number, number] = [
-  1, 1, 1, 1, 1,
-];
+/**
+ * 甲片默认宽度缩放（拇→食→中→无→小），相对拇指 100%。
+ */
+export const DEFAULT_NAIL_COL_WIDTH_SCALE: readonly [
+  number,
+  number,
+  number,
+  number,
+  number,
+] = [1, 0.8, 0.9, 0.8, 0.7];
+
+/** 甲片默认高度缩放（拇→食→中→无→小），相对拇指 100%。 */
+export const DEFAULT_NAIL_COL_HEIGHT_SCALE: readonly [
+  number,
+  number,
+  number,
+  number,
+  number,
+] = [1, 0.85, 0.85, 0.8, 0.78];
+
+/** 单枚复制 10 格：四条竖缝合计占内宽 %（UI 默认值） */
+export const DEFAULT_COL_GUTTER_PCT_DRAFT = "10";
+
+/** @deprecated 使用 {@link DEFAULT_NAIL_COL_WIDTH_SCALE} / {@link DEFAULT_NAIL_COL_HEIGHT_SCALE} */
+export const DEFAULT_NAIL_COL_SCALE = DEFAULT_NAIL_COL_WIDTH_SCALE;
 
 export const DEFAULT_TEN_SINGLES_GRID_LAYOUT: TenSinglesGridLayout = {
   colWidthFrac: DEFAULT_COL_WIDTH_FRAC,
-  marginFrac: 0.018,
-  colGutterSumFrac: 0,
+  marginFrac: DEFAULT_OUTER_MARGIN_FRAC,
+  colGutterSumFrac: 0.1,
   rowGutterSumFrac: 0,
-  nailColWidthScale: DEFAULT_NAIL_COL_SCALE,
-  nailColHeightScale: DEFAULT_NAIL_COL_SCALE,
+  nailColWidthScale: DEFAULT_NAIL_COL_WIDTH_SCALE,
+  nailColHeightScale: DEFAULT_NAIL_COL_HEIGHT_SCALE,
   interNailColGapMode: "tight",
 };
 
-export const DEFAULT_NAIL_SCALE_PCT_DRAFTS: readonly [
-  string,
-  string,
-  string,
-  string,
-  string,
-] = DEFAULT_NAIL_COL_SCALE.map((n) => String(Math.round(n * 100))) as [
-  string,
-  string,
-  string,
-  string,
-  string,
-];
+function scaleTupleToPctDrafts(
+  scales: readonly [number, number, number, number, number],
+): [string, string, string, string, string] {
+  return scales.map((n) => String(Math.round(n * 100))) as [
+    string,
+    string,
+    string,
+    string,
+    string,
+  ];
+}
+
+export const DEFAULT_NAIL_WIDTH_PCT_DRAFTS = scaleTupleToPctDrafts(
+  DEFAULT_NAIL_COL_WIDTH_SCALE,
+);
+
+export const DEFAULT_NAIL_HEIGHT_PCT_DRAFTS = scaleTupleToPctDrafts(
+  DEFAULT_NAIL_COL_HEIGHT_SCALE,
+);
+
+/** @deprecated 使用 {@link DEFAULT_NAIL_WIDTH_PCT_DRAFTS} / {@link DEFAULT_NAIL_HEIGHT_PCT_DRAFTS} */
+export const DEFAULT_NAIL_SCALE_PCT_DRAFTS = DEFAULT_NAIL_WIDTH_PCT_DRAFTS;
 
 /** 与页面「宽/高 %」输入一致，100 表示 1.0× */
 export function nailScaleFromPctDraft(draft: string): number {
@@ -249,7 +289,7 @@ export function normalizeColFracs(values: number[]): [number, number, number, nu
 /**
  * 从 FormData 解析栅格选项；字段均可缺省，用默认。
  * - `nailGridColWidths`: 逗号分隔五数，如 `1,0.95,0.98,0.95,0.9`
- * - `nailGridMarginPct`: 外留白占边长百分比，默认 1.8（即 0.018）
+ * - `nailGridMarginPct`: 外留白占边长百分比，默认 8.5（即 0.085）
  * - `nailGridColGapMode`: `tight` | `half` | `third` | `fifth`（相邻列缝宽 = k×列槽宽，优先）
  * - `nailGridColGutterPct`: 四条竖缝合计占「内宽」百分比（无 `nailGridColGapMode` 时使用），0–35，默认 0
  * - `nailGridRowGutterPct`: 行间缝占「内高」百分比，0–12，默认 0
@@ -277,7 +317,7 @@ export function parseTenSinglesGridLayoutFromFormData(
     String(formData.get("nailGridMarginPct") ?? "").trim(),
   );
   const marginFrac = Number.isFinite(marginPct)
-    ? clamp(marginPct / 100, 0.005, 0.08)
+    ? clamp(marginPct / 100, 0.005, OUTER_MARGIN_FRAC_MAX)
     : DEFAULT_TEN_SINGLES_GRID_LAYOUT.marginFrac;
 
   const gapMode = parseInterNailColGapModeRaw(formData.get("nailGridColGapMode"));
@@ -290,9 +330,10 @@ export function parseTenSinglesGridLayoutFromFormData(
     const colGutterPct = parseFloat(
       String(formData.get("nailGridColGutterPct") ?? "").trim(),
     );
+    const minColGutterSumFrac = COL_GUTTER_SUM_INNER_WIDTH_PCT_MIN / 100;
     const maxColGutterSumFrac = COL_GUTTER_SUM_INNER_WIDTH_PCT_MAX / 100;
     colGutterSumFrac = Number.isFinite(colGutterPct)
-      ? clamp(colGutterPct / 100, 0, maxColGutterSumFrac)
+      ? clamp(colGutterPct / 100, minColGutterSumFrac, maxColGutterSumFrac)
       : DEFAULT_TEN_SINGLES_GRID_LAYOUT.colGutterSumFrac;
     interNailColGapMode = null;
   }
@@ -305,10 +346,10 @@ export function parseTenSinglesGridLayoutFromFormData(
     : DEFAULT_TEN_SINGLES_GRID_LAYOUT.rowGutterSumFrac;
 
   let nailColWidthScale: [number, number, number, number, number] = [
-    ...DEFAULT_NAIL_COL_SCALE,
+    ...DEFAULT_NAIL_COL_WIDTH_SCALE,
   ];
   let nailColHeightScale: [number, number, number, number, number] = [
-    ...DEFAULT_NAIL_COL_SCALE,
+    ...DEFAULT_NAIL_COL_HEIGHT_SCALE,
   ];
   const rawNailWCols = formData.get("nailGridNailColWidthsPct");
   const rawNailHCols = formData.get("nailGridNailColHeightsPct");
@@ -380,9 +421,9 @@ export type WhiteGridCellRectPx = {
 
 function marginFracFromUiDraft(draft: string): number {
   const t = draft.trim().replace(/,/g, ".");
-  const v = t === "" ? 1.8 : parseFloat(t);
-  const n = Number.isNaN(v) ? 1.8 : v;
-  return clamp(n / 100, 0.005, 0.08);
+  const v = t === "" ? DEFAULT_OUTER_MARGIN_PCT : parseFloat(t);
+  const n = Number.isNaN(v) ? DEFAULT_OUTER_MARGIN_PCT : v;
+  return clamp(n / 100, 0.005, OUTER_MARGIN_FRAC_MAX);
 }
 
 function rowGutterFracFromUiDraft(draft: string): number {
@@ -428,10 +469,10 @@ export function buildTenSinglesGridLayoutFromUiDrafts(params: {
     ),
     rowGutterSumFrac: rowGutterFracFromUiDraft(params.rowGutterPctDraft),
     nailColWidthScale: nailColScaleTupleFromUiDrafts(
-      params.nailWidthPctDrafts ?? DEFAULT_NAIL_SCALE_PCT_DRAFTS,
+      params.nailWidthPctDrafts ?? DEFAULT_NAIL_WIDTH_PCT_DRAFTS,
     ),
     nailColHeightScale: nailColScaleTupleFromUiDrafts(
-      params.nailHeightPctDrafts ?? DEFAULT_NAIL_SCALE_PCT_DRAFTS,
+      params.nailHeightPctDrafts ?? DEFAULT_NAIL_HEIGHT_PCT_DRAFTS,
     ),
     interNailColGapMode: null,
   };

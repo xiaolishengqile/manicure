@@ -7,7 +7,7 @@ import { DEFAULT_TEN_SINGLES_GRID_LAYOUT } from "@/lib/ten-singles-grid-layout";
 const COLLAGE_SIDE = 1600;
 
 function clampInnerFillFrac(frac: number): number {
-  return Math.min(0.92, Math.max(0.45, frac));
+  return Math.min(1, Math.max(0.45, frac));
 }
 
 /** 去掉近似白边 */
@@ -120,16 +120,15 @@ async function placeRowWithAlignedRoots(
     let { w: iw, h: ih } = await pngMeta(imgBuf);
     const topOff = Math.round(R - ry);
 
-    // 若底会超出格高，画布会裁掉下半截 → 视觉上变成「底边齐平」。改为先缩放到格内，仍从 topOff 贴顶，保住甲根对齐。
+    // 若底会超出格高，等比缩小至格内，仍从 topOff 贴顶，保住甲根对齐与原始宽高比。
     if (topOff + ih > ch) {
       const targetH = Math.max(1, ch - topOff);
+      const scale = targetH / ih;
       imgBuf = await sharp(imgBuf)
         .resize({
-          width: cw,
+          width: Math.max(1, Math.round(iw * scale)),
           height: targetH,
-          fit: "contain",
-          position: "north",
-          background: { r: 255, g: 255, b: 255, alpha: 1 },
+          fit: "fill",
         })
         .png()
         .toBuffer();
@@ -153,6 +152,137 @@ async function placeRowWithAlignedRoots(
     out.push(cell);
   }
   return out;
+}
+
+/** 同一行五枚：甲根对齐，画布宽 = 甲片宽（无槽内居中留白，便于紧凑横排） */
+async function alignRowRootsTightPack(
+  innerBuffers: Buffer[],
+  ch: number,
+): Promise<Buffer[]> {
+  const originals = [...innerBuffers];
+  let scale = 1;
+  let current = originals;
+  let rootYs = await Promise.all(current.map((b) => firstContentRowYFromTop(b)));
+  let hs = await Promise.all(current.map(async (b) => (await pngMeta(b)).h));
+
+  while (!rowRootBaselineFeasible(rootYs, hs, ch) && scale > 0.02) {
+    scale *= 0.91;
+    current = await Promise.all(originals.map((b) => resizeInnerProportional(b, scale)));
+    rootYs = await Promise.all(current.map((b) => firstContentRowYFromTop(b)));
+    hs = await Promise.all(current.map(async (b) => (await pngMeta(b)).h));
+  }
+
+  const R = Math.max(...rootYs);
+  const out: Buffer[] = [];
+  for (let i = 0; i < current.length; i++) {
+    let imgBuf = current[i]!;
+    const ry = rootYs[i]!;
+    let { w: iw, h: ih } = await pngMeta(imgBuf);
+    const topOff = Math.round(R - ry);
+
+    if (topOff + ih > ch) {
+      const targetH = Math.max(1, ch - topOff);
+      const shrink = targetH / ih;
+      imgBuf = await sharp(imgBuf)
+        .resize({
+          width: Math.max(1, Math.round(iw * shrink)),
+          height: targetH,
+          fit: "fill",
+        })
+        .png()
+        .toBuffer();
+      const m2 = await pngMeta(imgBuf);
+      iw = m2.w;
+      ih = m2.h;
+    }
+
+    const cell = await sharp({
+      create: {
+        width: iw,
+        height: ch,
+        channels: 3,
+        background: { r: 255, g: 255, b: 255 },
+      },
+    })
+      .composite([{ input: imgBuf, left: 0, top: topOff }])
+      .png()
+      .toBuffer();
+    out.push(cell);
+  }
+  return out;
+}
+
+/** 按各列槽宽分别居中置入（用于拇→小列宽不等的单甲复制 10 格） */
+async function placeRowWithAlignedRootsVariableCells(
+  innerBuffers: Buffer[],
+  colWidths: readonly number[],
+  ch: number,
+): Promise<Buffer[]> {
+  const originals = [...innerBuffers];
+  let scale = 1;
+  let current = originals;
+  let rootYs = await Promise.all(current.map((b) => firstContentRowYFromTop(b)));
+  let hs = await Promise.all(current.map(async (b) => (await pngMeta(b)).h));
+
+  while (!rowRootBaselineFeasible(rootYs, hs, ch) && scale > 0.02) {
+    scale *= 0.91;
+    current = await Promise.all(originals.map((b) => resizeInnerProportional(b, scale)));
+    rootYs = await Promise.all(current.map((b) => firstContentRowYFromTop(b)));
+    hs = await Promise.all(current.map(async (b) => (await pngMeta(b)).h));
+  }
+
+  const R = Math.max(...rootYs);
+  const out: Buffer[] = [];
+  for (let i = 0; i < current.length; i++) {
+    let imgBuf = current[i]!;
+    const ry = rootYs[i]!;
+    let { w: iw, h: ih } = await pngMeta(imgBuf);
+    const topOff = Math.round(R - ry);
+    const cw = Math.max(1, colWidths[i] ?? 1);
+
+    if (topOff + ih > ch) {
+      const targetH = Math.max(1, ch - topOff);
+      const shrink = targetH / ih;
+      imgBuf = await sharp(imgBuf)
+        .resize({
+          width: Math.max(1, Math.round(iw * shrink)),
+          height: targetH,
+          fit: "fill",
+        })
+        .png()
+        .toBuffer();
+      const m2 = await pngMeta(imgBuf);
+      iw = m2.w;
+      ih = m2.h;
+    }
+
+    const padL = Math.max(0, Math.floor((cw - iw) / 2));
+    const cell = await sharp({
+      create: {
+        width: cw,
+        height: ch,
+        channels: 3,
+        background: { r: 255, g: 255, b: 255 },
+      },
+    })
+      .composite([{ input: imgBuf, left: padL, top: topOff }])
+      .png()
+      .toBuffer();
+    out.push(cell);
+  }
+  return out;
+}
+
+/** 五列槽宽按拇→小宽度缩放比例分配内区（扣除列缝后） */
+function proportionalColWidthsPx(
+  innerW: number,
+  gutterPx: number,
+  widthScales: readonly number[],
+): number[] {
+  const cols = widthScales.length;
+  const sum = widthScales.reduce((a, b) => a + b, 0) || 1;
+  const avail = innerW - (cols - 1) * gutterPx;
+  return widthScales.map((s) => Math.max(1, Math.round((avail * s) / sum)));
 }
 
 function cellSlotBadgeSvg(slot1Based: number, box: number): Buffer {
@@ -257,9 +387,15 @@ export async function buildTenSinglesCollageReference(
     .toBuffer();
 }
 
+/** 行内甲片最大高度占行格比例（参考零售 2×5，勿顶满半幅画布） */
+const SINGLE_GRID_ROW_NAIL_MAX_HEIGHT_FRAC = 0.72;
+
 /**
  * 将一枚模型高清化后的单甲复制成 2×5 尺码合集。
- * 与十枚单甲参考图不同，这个函数产出最终图：不加角标、不再交给模型重绘。
+ * 设计约束（与用户参考图一致）：
+ * - 同一行内 **高度相同**（拇→小仅宽度递减）
+ * - 拇指保持投喂/抠图宽高比，其余指在同高下按宽度 % 收窄
+ * - 按实际甲宽紧凑横排，列间距由 layout.colGutterSumFrac 控制
  */
 export async function buildScaledSingleNailGrid(
   singleNailBuffer: Buffer,
@@ -280,44 +416,71 @@ export async function buildScaledSingleNailGrid(
     rows > 1
       ? Math.round((innerH * layout.rowGutterSumFrac) / (rows - 1))
       : 0;
-  const cellW = (innerW - (cols - 1) * gutter) / cols;
   const cellH = (innerH - (rows - 1) * rowGutter) / rows;
-
-  const cw = Math.round(cellW);
   const ch = Math.round(cellH);
+
   const trimmed = await trimWhiteEdges(singleNailBuffer);
   const { w: sourceW, h: sourceH } = await pngMeta(trimmed);
-  const aspect = sourceH / Math.max(1, sourceW);
-  const targetBaseW = Math.min(cw * 0.88, (ch * 0.96) / Math.max(0.01, aspect));
+  const sourceAspect = sourceW / Math.max(1, sourceH);
+  const refWScale = layout.nailColWidthScale[0] ?? 1;
+  const refHScale = layout.nailColHeightScale[0] ?? 1;
+  const widthScaleSum = layout.nailColWidthScale.reduce((a, b) => a + b, 0) || 1;
+
+  const innerRowW = innerW - (cols - 1) * gutter;
+  const thumbSlotW = (innerRowW * refWScale) / widthScaleSum;
+  /** 行内统一甲高：不超行格 72%，且拇指按投喂宽高比能在宽度预算内放下 */
+  const rowTargetH = Math.max(
+    1,
+    Math.min(
+      Math.round((ch * SINGLE_GRID_ROW_NAIL_MAX_HEIGHT_FRAC) / refHScale),
+      Math.round(thumbSlotW / Math.max(1e-6, sourceAspect)),
+    ),
+  );
 
   const rowInners: Buffer[][] = [[], []];
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
-      const frac = layout.colWidthFrac[c] ?? 0.87;
-      const targetW = Math.max(1, Math.round(targetBaseW * frac));
-      const inner = await applyNailScaleToInner(
-        await sharp(trimmed)
-          .resize({ width: targetW, withoutEnlargement: false })
-          .png()
-          .toBuffer(),
-        layout,
-        c,
+      const wScale = layout.nailColWidthScale[c] ?? 1;
+      const hScale = layout.nailColHeightScale[c] ?? 1;
+      const targetH = Math.max(1, Math.round(rowTargetH * (hScale / refHScale)));
+      const targetW = Math.max(
+        1,
+        Math.round(targetH * sourceAspect * (wScale / refWScale)),
       );
+      const inner = await sharp(trimmed)
+        .resize({
+          width: targetW,
+          height: targetH,
+          fit: "fill",
+        })
+        .png()
+        .toBuffer();
       rowInners[r]!.push(inner);
     }
   }
 
-  const alignedRows: Buffer[][] = [];
-  for (let r = 0; r < rows; r++) {
-    alignedRows.push(await placeRowWithAlignedRoots(rowInners[r]!, cw, ch));
-  }
+  const alignedRow0 = await alignRowRootsTightPack(rowInners[0]!, ch);
+  const rowWidths = await Promise.all(alignedRow0.map(async (b) => (await pngMeta(b)).w));
+  const totalRowW =
+    rowWidths.reduce((a, b) => a + b, 0) + (cols - 1) * gutter;
+  let packX = margin + Math.max(0, Math.round((innerW - totalRowW) / 2));
+  const colLefts = rowWidths.map((w) => {
+    const left = packX;
+    packX += w + gutter;
+    return left;
+  });
+
+  const alignedRows: Buffer[][] = [
+    alignedRow0,
+    await alignRowRootsTightPack(rowInners[1]!, ch),
+  ];
 
   const composites: sharp.OverlayOptions[] = [];
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
       composites.push({
         input: alignedRows[r]![c]!,
-        left: Math.round(margin + c * (cellW + gutter)),
+        left: colLefts[c]!,
         top: Math.round(margin + r * (cellH + rowGutter)),
       });
     }
@@ -416,12 +579,12 @@ export async function buildDuplicatedFiveNailRowGrid(
     .toBuffer();
 }
 
-/** 单行复制成双行：条带最多占内区宽/高的比例（其余为四周与块间白边） */
-export const SINGLE_ROW_STRIP_MAX_INNER_FILL = 0.68;
+/** 单行复制成双行：条带占内区宽/高的比例上限（1 = 铺满内区，外留白仅由 marginFrac 控制） */
+export const SINGLE_ROW_STRIP_MAX_INNER_FILL = 1;
 
 /**
  * 整行条带 → 原样复制为上下两排 2×5 成品（不裁成 5 枚，避免高光竖条误判甲缝）。
- * 条带等比缩放，默认最多约占内区 68%，两行块在内区居中；拇→小比例与甲尖阶梯保留自源图。
+ * 条带等比缩放至内区上限，两行块在内区居中；拇→小比例与甲尖阶梯保留自源图。
  */
 export async function buildDuplicatedRowStripGrid(
   oneRowBuffer: Buffer,

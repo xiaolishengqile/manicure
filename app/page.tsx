@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { AppPageHeader } from "@/components/app-page-header";
 import { GenerationModePicker } from "@/components/generation-mode-picker";
-import { ImageModelSelect } from "@/components/image-model-select";
 import { NailShapeProfilePicker } from "@/components/nail-shape-profile-picker";
 import { PanelColorPicker } from "@/components/panel-color-picker";
 import { FeedPasteZone, firstImageFileFromDataTransfer } from "@/components/feed-paste-zone";
@@ -67,7 +67,9 @@ import {
 import {
   COL_GUTTER_SUM_INNER_WIDTH_PCT_MAX,
   COL_GUTTER_SUM_QUICK_PRESET_PCTS,
-  DEFAULT_NAIL_SCALE_PCT_DRAFTS,
+  DEFAULT_COL_GUTTER_PCT_DRAFT,
+  DEFAULT_NAIL_HEIGHT_PCT_DRAFTS,
+  DEFAULT_NAIL_WIDTH_PCT_DRAFTS,
   DEFAULT_TEN_SINGLES_GRID_LAYOUT,
   nailScaleFromPctDraft,
   nailScalePctDraftAfterBlur,
@@ -79,6 +81,13 @@ import { usePromptPresets } from "@/lib/use-prompt-presets";
 
 function clampColGutterSumPct(n: number): number {
   return Math.min(COL_GUTTER_SUM_INNER_WIDTH_PCT_MAX, Math.max(0, n));
+}
+
+function colGutterPctForSubmit(mode: GenerationMode, colGutterPctDraft: string, colGutterSumPct: number): number {
+  if (mode === "complete_single_grid") {
+    return parsePctInput(colGutterPctDraft, -15, 15, 10);
+  }
+  return colGutterSumPct;
 }
 
 const DEFAULT_COL_WIDTH_DRAFTS = DEFAULT_TEN_SINGLES_GRID_LAYOUT.colWidthFrac.map(
@@ -148,7 +157,6 @@ import {
   GatewaySettings,
   useGatewaySettingsFromStorage,
 } from "@/components/gateway-settings";
-import { SiteAccessLogout } from "@/components/site-access-logout";
 
 const LS_LAST_USER_NOTES = "manicure_last_user_extra_notes";
 const LS_NAIL_SHAPE_PROFILE = "manicure_model_tryon_nail_shape_profile";
@@ -196,14 +204,17 @@ export default function Home() {
   const [colWidthDrafts, setColWidthDrafts] = useState<string[]>(() => [
     ...DEFAULT_COL_WIDTH_DRAFTS,
   ]);
-  const [marginPctDraft, setMarginPctDraft] = useState("1.8");
+  const [marginPctDraft, setMarginPctDraft] = useState("8.5");
   const [colGutterSumPct, setColGutterSumPct] = useState(0);
   const [rowGutterPctDraft, setRowGutterPctDraft] = useState("0");
+  const [colGutterPctDraft, setColGutterPctDraft] = useState(
+    DEFAULT_COL_GUTTER_PCT_DRAFT,
+  );
   const [nailWidthPctDrafts, setNailWidthPctDrafts] = useState<string[]>(() => [
-    ...DEFAULT_NAIL_SCALE_PCT_DRAFTS,
+    ...DEFAULT_NAIL_WIDTH_PCT_DRAFTS,
   ]);
   const [nailHeightPctDrafts, setNailHeightPctDrafts] = useState<string[]>(() => [
-    ...DEFAULT_NAIL_SCALE_PCT_DRAFTS,
+    ...DEFAULT_NAIL_HEIGHT_PCT_DRAFTS,
   ]);
   const [lockNailAspectRatio, setLockNailAspectRatio] = useState(true);
   /** 上下手同款：默认勾选，上传一行五甲（二次矫正 / 手握盒） */
@@ -391,9 +402,7 @@ export default function Home() {
   const tenMode = requiresTenSingleNails(mode);
   const usesSingleRowUpload = effectiveUsesSingleRowUpload(mode, sameHandsRow);
   const showsSameHandsOption = modeSupportsSameHandsRowOption(mode);
-  const showsWhiteGridLayoutPanel =
-    modeShowsWhiteGridLayoutPanel(mode) ||
-    sameHandsRowUsesGridFormFields(mode, sameHandsRow);
+  const showsWhiteGridLayoutPanel = modeShowsWhiteGridLayoutPanel(mode);
   const showPanelColorPicker = modeUsesDominantColorExtraction(mode);
 
   const applyGridPresetAt = useCallback(
@@ -409,13 +418,15 @@ export default function Home() {
       setMarginPctDraft(p.marginPctDraft);
       {
         const g = parseFloat(p.colGutterSumPctDraft);
-        setColGutterSumPct(
-          clampColGutterSumPct(Number.isFinite(g) ? g : 0),
+        const v = Number.isFinite(g) ? g : 0;
+        setColGutterPctDraft(
+          String(Math.min(15, Math.max(-15, v))),
         );
+        setColGutterSumPct(clampColGutterSumPct(Math.max(0, v)));
       }
       setRowGutterPctDraft(p.rowGutterPctDraft);
-      const wDrafts = p.nailWidthPctDrafts ?? [...DEFAULT_NAIL_SCALE_PCT_DRAFTS];
-      const hDrafts = p.nailHeightPctDrafts ?? [...DEFAULT_NAIL_SCALE_PCT_DRAFTS];
+      const wDrafts = p.nailWidthPctDrafts ?? [...DEFAULT_NAIL_WIDTH_PCT_DRAFTS];
+      const hDrafts = p.nailHeightPctDrafts ?? [...DEFAULT_NAIL_HEIGHT_PCT_DRAFTS];
       setNailWidthPctDrafts([...wDrafts]);
       setNailHeightPctDrafts([...hDrafts]);
       const locked = p.lockNailAspectRatio ?? true;
@@ -448,7 +459,8 @@ export default function Home() {
     const snap = {
       colWidthDrafts: [...colWidthDrafts],
       marginPctDraft,
-      colGutterSumPctDraft: String(colGutterSumPct),
+      colGutterSumPctDraft:
+        mode === "complete_single_grid" ? colGutterPctDraft : String(colGutterSumPct),
       rowGutterPctDraft,
       nailWidthPctDrafts: [...nailWidthPctDrafts],
       nailHeightPctDrafts: [...nailHeightPctDrafts],
@@ -489,6 +501,8 @@ export default function Home() {
     colWidthDrafts,
     marginPctDraft,
     colGutterSumPct,
+    colGutterPctDraft,
+    mode,
     rowGutterPctDraft,
     nailWidthPctDrafts,
     nailHeightPctDrafts,
@@ -985,6 +999,7 @@ export default function Home() {
       variantChoice !== "all" &&
       mergeSlotIndex !== undefined &&
       parallelImageJobCountForMode(mode) > 1;
+
     if (tenMode) {
       if (!tenSlots.every((s) => s.file)) {
         setError("请填满全部 10 个格子后再生成（可逐格添加或一次选 10 张）。");
@@ -1057,7 +1072,7 @@ export default function Home() {
         body.set("nailGridColWidths", serializeColWidthDrafts(colWidthDrafts));
         body.set(
           "nailGridMarginPct",
-          String(parsePctInput(marginPctDraft, 0.5, 8, 1.8)),
+          String(parsePctInput(marginPctDraft, 0.5, 12, 8.5)),
         );
         body.set("nailGridColGutterPct", String(colGutterSumPct));
         body.set(
@@ -1112,9 +1127,12 @@ export default function Home() {
           body.set("nailGridColWidths", serializeColWidthDrafts(colWidthDrafts));
           body.set(
             "nailGridMarginPct",
-            String(parsePctInput(marginPctDraft, 0.5, 8, 1.8)),
+            String(parsePctInput(marginPctDraft, 0.5, 12, 8.5)),
           );
-          body.set("nailGridColGutterPct", String(colGutterSumPct));
+          body.set(
+            "nailGridColGutterPct",
+            String(colGutterPctForSubmit(mode, colGutterPctDraft, colGutterSumPct)),
+          );
           body.set(
             "nailGridRowGutterPct",
             String(parsePctInput(rowGutterPctDraft, 0, 12, 0)),
@@ -1333,6 +1351,7 @@ export default function Home() {
     colWidthDrafts,
     marginPctDraft,
     colGutterSumPct,
+    colGutterPctDraft,
     rowGutterPctDraft,
     nailWidthPctDrafts,
     nailHeightPctDrafts,
@@ -1482,9 +1501,9 @@ export default function Home() {
 
   const singleUploadTitle =
     modeIsScatteredGridFlatlay(mode)
-      ? "点击选择竖直 2×5 白底商品图"
-      : mode === "extract_ten_grid"
-        ? "点击选择含多枚甲片的照片"
+        ? "点击选择竖直 2×5 白底商品图"
+        : mode === "extract_ten_grid"
+          ? "点击选择含多枚甲片的照片"
         : mode === "white_grid_rectify"
         ? sameHandsRow
           ? "点击选择一行五枚甲片照片"
@@ -1541,14 +1560,15 @@ export default function Home() {
   }, [previewUrl, panelColorSource, showPanelColorPicker]);
 
   const onModeChange = useCallback((next: GenerationMode) => {
+    if (next === "layer_editor") return;
     setMode(next);
     if (modeUsesDominantColorExtraction(next)) {
       setPanelColorSource("auto");
       setPanelAutoHex(null);
     }
     if (next === "single_row_to_grid" || next === "extract_diagonal_row") {
-      if (marginPctDraft.trim() === "1.8") {
-        setMarginPctDraft("6");
+      if (marginPctDraft.trim() === "1.8" || marginPctDraft.trim() === "6") {
+        setMarginPctDraft("8.5");
       }
       setColGutterSumPct((prev) => (prev < 14 ? 14 : prev));
     }
@@ -1580,26 +1600,25 @@ export default function Home() {
     }
   }, []);
 
+  useEffect(() => {
+    if (mode === "layer_editor") {
+      setMode("extract_ten_grid");
+    }
+  }, [mode]);
+
   return (
     <div className="min-h-full bg-zinc-50 text-zinc-900">
-      <main className="mx-auto flex max-w-5xl flex-col gap-10 px-6 py-14">
-        <header className="flex flex-wrap items-start justify-between gap-3 space-y-2">
-          <div className="flex min-w-0 flex-wrap items-end gap-3">
-            <h1 className="text-xl font-semibold tracking-wide text-rose-600 sm:text-2xl">
-              美甲商家专用
-            </h1>
-            <ImageModelSelect
-              value={imageModelChoice}
-              onChange={(v) => {
-                setImageModelChoice(v);
-                clearResults();
-              }}
-              fluxSize={imageFluxSize}
-              onFluxSizeChange={setImageFluxSize}
-            />
-          </div>
-          <SiteAccessLogout />
-        </header>
+      <main className="mx-auto flex max-w-5xl flex-col gap-10 px-4 py-10 sm:px-6 sm:py-14">
+        <AppPageHeader
+          activeTab="generate"
+          imageModelChoice={imageModelChoice}
+          onImageModelChange={(v) => {
+            setImageModelChoice(v);
+            clearResults();
+          }}
+          fluxSize={imageFluxSize}
+          onFluxSizeChange={setImageFluxSize}
+        />
 
         <input
           ref={fileInputRef}
@@ -1698,7 +1717,7 @@ export default function Home() {
           />
         ) : null}
 
-        <section className="flex flex-col gap-6 rounded-2xl border border-zinc-200 bg-white p-8 shadow-sm">
+        <section className="flex flex-col gap-6 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm sm:p-8">
           {showPanelColorPicker ? (
             <PanelColorPicker
               value={panelColorHex}
@@ -2192,50 +2211,14 @@ export default function Home() {
 
         {showsWhiteGridLayoutPanel ? (
           <GridLayoutPanel
-            modeLabel={
-              mode === "extract_ten_grid"
-                ? "抠图排版：**锁定甲片尺寸**，仅调外留白/列缝/行间缝（**五列相对宽度不生效**，不会按列缩放甲片）；每次并行 **2 张**（同 prompt 双份采样，择优）。"
-                : mode === "white_grid_rectify"
-                  ? sameHandsRow
-                    ? "同款一行：**模型先规整 5 枚单行**，服务端**再整行复制**为 2×5；列缝/外留白约束模型单行。取消勾选则走完整 **2×5** 几何矫正。"
-                    : "几何矫正：**十格拆层整版重排**（非整图扶正），逐格锁定甲型与长短，每枚 **刚性旋转至竖直** + 平移；每次 **1 张**。附录：外留白/列缝/行间缝；「五列宽」无效。"
-                  : mode === "packaging_mockup" && sameHandsRow
-                    ? "手握盒 · 同款一行：模型先规整单行，服务端再复制 2×5；下列参数约束单行列缝与外留白。"
-                  : mode === "complete_single_grid"
-                    ? "单甲补齐：下列数值仅用于服务端把「一枚抠图甲片」按列宽复制成 10 格（体现拇→小尺码差），**不会**再次发给模型改甲型。"
-                    : mode === "single_row_to_grid"
-                      ? "单行复制成双行：条带默认约占画布内区 **68%**（四周留白更大）；可调**外留白（占边长 %）**继续缩小甲片占比（建议 5–8）；「五列相对宽度」不生效。"
-                      : mode === "extract_diagonal_row"
-                        ? `斜排：一行时复制为 2×5，两行时仅铺满画布；均按上方角度旋转（默认 **${DEFAULT_DIAGONAL_PACKSHOT_ROTATE_DEG}°**）。下列参数约束列缝与外留白（跳过模型时一行/两行条带占比）。`
-                        : "提交时服务端会按最大列归一；缝过大时可能自动缩小甲片以适配画布。"
-            }
-            colWidthDrafts={colWidthDrafts}
-            setColWidthDrafts={setColWidthDrafts}
-            marginPctDraft={marginPctDraft}
-            setMarginPctDraft={setMarginPctDraft}
-            colGutterSumPct={colGutterSumPct}
-            setColGutterSumPct={setColGutterSumPct}
-            rowGutterPctDraft={rowGutterPctDraft}
-            setRowGutterPctDraft={setRowGutterPctDraft}
             nailWidthPctDrafts={nailWidthPctDrafts}
             setNailWidthPctDrafts={setNailWidthPctDrafts}
             nailHeightPctDrafts={nailHeightPctDrafts}
             setNailHeightPctDrafts={setNailHeightPctDrafts}
-            lockNailAspectRatio={lockNailAspectRatio}
-            setLockNailAspectRatio={setLockNailAspectRatio}
-            nailAspectLockRatioRef={nailAspectLockRatioRef}
-            refreshNailAspectLockRatios={refreshNailAspectLockRatios}
-            syncNailHeightFromWidthAt={syncNailHeightFromWidthAt}
-            syncNailWidthFromHeightAt={syncNailWidthFromHeightAt}
-            gridPresets={gridPresets}
-            gridPresetSelectedIndex={gridPresetSelectedIndex}
-            setGridPresetSelectedIndex={setGridPresetSelectedIndex}
-            gridPresetNotice={gridPresetNotice}
-            onApplyPreset={applyGridPresetAt}
-            onDeletePreset={deleteGridPresetAt}
-            onSavePreset={saveGridLayoutPreset}
-            gridPresetChipsRowRef={gridPresetChipsRowRef}
-            gridLayoutSavePresetButtonRef={gridLayoutSavePresetButtonRef}
+            rowGutterPctDraft={rowGutterPctDraft}
+            setRowGutterPctDraft={setRowGutterPctDraft}
+            colGutterPctDraft={colGutterPctDraft}
+            setColGutterPctDraft={setColGutterPctDraft}
           />
         ) : null}
       </main>
