@@ -12,7 +12,10 @@ import { TenSlotUpload } from "@/components/ten-slot-upload";
 import { ResultDisplay } from "@/components/result-display";
 import { PromptPresetsPanel } from "@/components/prompt-presets-panel";
 import { GridLayoutPanel } from "@/components/grid-layout-panel";
-import { DEFAULT_DIAGONAL_PACKSHOT_ROTATE_DEG } from "@/lib/diagonal-packshot-config";
+import {
+  DEFAULT_DIAGONAL_PACKSHOT_ROTATE_DEG,
+  type DiagonalUploadRows,
+} from "@/lib/diagonal-packshot-config";
 import {
   getDualUploadKind,
   modeIsDiagonalRowFlatlay,
@@ -205,8 +208,11 @@ export default function Home() {
   const [lockNailAspectRatio, setLockNailAspectRatio] = useState(true);
   /** 上下手同款：默认勾选，上传一行五甲（二次矫正 / 手握盒） */
   const [sameHandsRow, setSameHandsRow] = useState(true);
-  /** 斜排模式：服务端整图旋转角度（度）；空 = 提交时用默认 15° */
+  /** 斜排模式：服务端整图旋转角度（度）；空 = 提交时用默认 25° */
   const [diagonalRotateDegDraft, setDiagonalRotateDegDraft] = useState("");
+  const [diagonalUploadRows, setDiagonalUploadRows] =
+    useState<DiagonalUploadRows>("one_row");
+  const [skipDiagonalRowModel, setSkipDiagonalRowModel] = useState(false);
   const nailAspectLockRatioRef = useRef<number[]>([1, 1, 1, 1, 1]);
   const [gridPresets, setGridPresets] = useState<GridLayoutPreset[]>([]);
   const [gridPresetSelectedIndex, setGridPresetSelectedIndex] = useState<
@@ -792,7 +798,9 @@ export default function Home() {
               : modeIsScatteredGridFlatlay(mode)
                 ? "竖直 2×5 白底商品图请选择图片文件。"
                 : modeIsDiagonalRowFlatlay(mode)
-                  ? "一行五甲照片请选择图片文件。"
+                  ? diagonalUploadRows === "two_rows"
+                    ? "两行 / 2×5 美甲图请选择图片文件。"
+                    : "一行五甲照片请选择图片文件。"
                   : "美甲产品图请选择图片文件。",
         );
         setFile(null);
@@ -1090,6 +1098,8 @@ export default function Home() {
           body.set("sameHandsRow", sameHandsRow ? "1" : "0");
         }
         if (modeIsDiagonalRowFlatlay(mode)) {
+          body.set("skipRowModel", skipDiagonalRowModel ? "1" : "0");
+          body.set("diagonalUploadRows", diagonalUploadRows);
           body.set(
             "diagonalPackshotRotateDeg",
             String(parseDiagonalRotateDegDraft(diagonalRotateDegDraft)),
@@ -1328,6 +1338,8 @@ export default function Home() {
     nailHeightPctDrafts,
     sameHandsRow,
     diagonalRotateDegDraft,
+    diagonalUploadRows,
+    skipDiagonalRowModel,
     showsSameHandsOption,
     prepareResultUrlForDisplay,
     gatewayProvider,
@@ -1481,14 +1493,24 @@ export default function Home() {
           ? "点击选择美甲款式参考图"
         : mode === "complete_single_grid"
           ? "点击选择单枚甲片照片"
-          : usesSingleRowUpload
-            ? "点击选择一行五枚甲片照片"
-            : "点击选择美甲照片";
+          : modeIsDiagonalRowFlatlay(mode)
+            ? diagonalUploadRows === "two_rows"
+              ? "点击选择两行 / 2×5 美甲图"
+              : "点击选择一行五枚甲片照片"
+            : usesSingleRowUpload
+              ? "点击选择一行五枚甲片照片"
+              : "点击选择美甲照片";
   const singleUploadHint =
     modeIsScatteredGridFlatlay(mode)
       ? "上传**竖直 2×5**（上排 1–5、下排 6–10）；输出 **10 枚**在白底**随机位置与角度**打散，保留每格甲型与花色，禁止仍排成整齐栅格；每次 **1 张**"
       : modeIsDiagonalRowFlatlay(mode)
-        ? `上传**一行五枚**（拇→小，甲尖朝下）。**完全保留**源图五枚的甲型与高矮胖瘦；模型抠出一行后服务端**整行等比复制**并旋转成斜排（角度可填，默认 **${DEFAULT_DIAGONAL_PACKSHOT_ROTATE_DEG}°**），列间留白缝`
+        ? diagonalUploadRows === "two_rows"
+          ? skipDiagonalRowModel
+            ? `上传**已是两行 / 2×5** 的白底商品图。仅 EXIF 转正 → 铺满画布 → 斜排旋转（默认 **${DEFAULT_DIAGONAL_PACKSHOT_ROTATE_DEG}°**），**不复制、不调模型**`
+            : "两行上传须勾选下方「跳过模型」；未勾选时请改选「一行五枚」走模型抠图。"
+          : skipDiagonalRowModel
+            ? `上传**一行五枚**。跳过模型：EXIF 转正 → 整行复制成双行 → 斜排旋转（默认 **${DEFAULT_DIAGONAL_PACKSHOT_ROTATE_DEG}°**）`
+            : `上传**一行五枚**（拇→小）。模型抠出一行后服务端复制成双行并旋转（默认 **${DEFAULT_DIAGONAL_PACKSHOT_ROTATE_DEG}°**）`
       : mode === "extract_ten_grid"
         ? "托盘、卡纸、实拍平铺等；只抠已出现的甲片，**锁定每枚长短与甲型**，每行甲根齐平、指尖随长短自然阶梯；每次并行 **2 张**（择优）"
         : mode === "white_grid_rectify"
@@ -1917,7 +1939,62 @@ export default function Home() {
                   </label>
                 ) : null}
                 {modeIsDiagonalRowFlatlay(mode) ? (
-                  <label className="flex flex-col gap-1 rounded-lg border border-zinc-200 bg-zinc-50/90 px-3 py-2.5 text-sm text-zinc-800">
+                  <div className="flex flex-col gap-3 rounded-lg border border-zinc-200 bg-zinc-50/90 px-3 py-2.5 text-sm text-zinc-800">
+                    <fieldset>
+                      <legend className="text-sm font-medium text-zinc-800">
+                        上传内容
+                      </legend>
+                      <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:gap-4">
+                        <label className="flex cursor-pointer items-start gap-2">
+                          <input
+                            type="radio"
+                            name="diagonalUploadRows"
+                            className="mt-1"
+                            checked={diagonalUploadRows === "one_row"}
+                            onChange={() => setDiagonalUploadRows("one_row")}
+                          />
+                          <span>
+                            <span className="font-medium">一行五枚</span>
+                            <span className="block text-xs font-normal text-zinc-500">
+                              可走模型抠图，或由服务端复制成双行
+                            </span>
+                          </span>
+                        </label>
+                        <label className="flex cursor-pointer items-start gap-2">
+                          <input
+                            type="radio"
+                            name="diagonalUploadRows"
+                            className="mt-1"
+                            checked={diagonalUploadRows === "two_rows"}
+                            onChange={() => {
+                              setDiagonalUploadRows("two_rows");
+                              setSkipDiagonalRowModel(true);
+                            }}
+                          />
+                          <span>
+                            <span className="font-medium">已是两行 / 2×5</span>
+                            <span className="block text-xs font-normal text-zinc-500">
+                              须勾选「跳过模型」，仅铺满画布后旋转
+                            </span>
+                          </span>
+                        </label>
+                      </div>
+                    </fieldset>
+                    <label className="flex cursor-pointer items-start gap-2">
+                      <input
+                        type="checkbox"
+                        className="mt-0.5"
+                        checked={skipDiagonalRowModel}
+                        onChange={(e) => setSkipDiagonalRowModel(e.target.checked)}
+                      />
+                      <span>
+                        <span className="font-medium">跳过模型</span>
+                        <span className="mt-0.5 block text-xs font-normal text-zinc-500">
+                          仅 EXIF 转正 + 服务端处理 + 斜排旋转；一行时复制成双行，两行时不复制
+                        </span>
+                      </span>
+                    </label>
+                  <label className="flex flex-col gap-1">
                     <span className="font-medium">服务端斜排旋转角度（度）</span>
                     <input
                       type="text"
@@ -1937,10 +2014,14 @@ export default function Home() {
                       id="diagonal-rotate-deg-hint"
                       className="text-xs font-normal text-zinc-500"
                     >
-                      2×5 复制完成后整图刚性旋转；留空或未填时默认{" "}
-                      {DEFAULT_DIAGONAL_PACKSHOT_ROTATE_DEG}°，有效范围 0–89°。
+                      {diagonalUploadRows === "two_rows"
+                        ? "两行铺满画布后整图刚性旋转"
+                        : "一行复制为 2×5 后整图刚性旋转"}
+                      ；留空或未填时默认 {DEFAULT_DIAGONAL_PACKSHOT_ROTATE_DEG}
+                      °，有效范围 0–89°。
                     </span>
                   </label>
+                  </div>
                 ) : null}
               </>
             )}
@@ -2125,7 +2206,7 @@ export default function Home() {
                     : mode === "single_row_to_grid"
                       ? "单行复制成双行：条带默认约占画布内区 **68%**（四周留白更大）；可调**外留白（占边长 %）**继续缩小甲片占比（建议 5–8）；「五列相对宽度」不生效。"
                       : mode === "extract_diagonal_row"
-                        ? `单行复制为 2×5 后，服务端按上方**旋转角度**整图斜排（默认 **${DEFAULT_DIAGONAL_PACKSHOT_ROTATE_DEG}°**）；下列参数约束列缝与外留白。`
+                        ? `斜排：一行时复制为 2×5，两行时仅铺满画布；均按上方角度旋转（默认 **${DEFAULT_DIAGONAL_PACKSHOT_ROTATE_DEG}°**）。下列参数约束列缝与外留白（跳过模型时一行/两行条带占比）。`
                         : "提交时服务端会按最大列归一；缝过大时可能自动缩小甲片以适配画布。"
             }
             colWidthDrafts={colWidthDrafts}

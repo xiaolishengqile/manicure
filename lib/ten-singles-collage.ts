@@ -475,3 +475,48 @@ export async function buildDuplicatedRowStripGrid(
     .png({ compressionLevel: 6 })
     .toBuffer();
 }
+
+/**
+ * 已是两行/2×5 的商品图：整图等比缩放后居中铺进标准画布（不复制、不裁十枚）。
+ * 供斜排「跳过模型」路径在旋转前使用。
+ */
+export async function buildTwoRowStripGrid(
+  twoRowBuffer: Buffer,
+  layout: TenSinglesGridLayout = DEFAULT_TEN_SINGLES_GRID_LAYOUT,
+  options?: { maxInnerFillFrac?: number },
+): Promise<Buffer> {
+  const fill = clampInnerFillFrac(options?.maxInnerFillFrac ?? SINGLE_ROW_STRIP_MAX_INNER_FILL);
+  const W = COLLAGE_SIDE;
+  const H = COLLAGE_SIDE;
+  const margin = Math.round(W * layout.marginFrac);
+  const innerW = W - 2 * margin;
+  const innerH = H - 2 * margin;
+  const targetW = innerW * fill;
+  const targetH = innerH * fill;
+
+  let block = await trimWhiteEdges(twoRowBuffer);
+  const { w, h } = await pngMeta(block);
+  if (w < 8 || h < 8) {
+    throw new Error("两行图尺寸过小，无法铺进画布。");
+  }
+
+  const scale = Math.min(targetW / w, targetH / h);
+  const nw = Math.max(1, Math.round(w * scale));
+  const nh = Math.max(1, Math.round(h * scale));
+  block = await sharp(block).resize({ width: nw, height: nh }).png().toBuffer();
+
+  const left = margin + Math.max(0, Math.round((innerW - nw) / 2));
+  const top = margin + Math.max(0, Math.round((innerH - nh) / 2));
+
+  return sharp({
+    create: {
+      width: W,
+      height: H,
+      channels: 3,
+      background: { r: 255, g: 255, b: 255 },
+    },
+  })
+    .composite([{ input: block, left, top }])
+    .png({ compressionLevel: 6 })
+    .toBuffer();
+}

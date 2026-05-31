@@ -6,6 +6,8 @@ export {
   DEFAULT_DIAGONAL_PACKSHOT_ROTATE_DEG,
   DIAGONAL_PACKSHOT_ROTATE_DEG,
   parseDiagonalPackshotRotateDeg,
+  parseDiagonalUploadRows,
+  type DiagonalUploadRows,
 } from "@/lib/diagonal-packshot-config";
 
 /**

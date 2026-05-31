@@ -39,7 +39,9 @@ import {
 import {
   applyDiagonalPackshotRotation,
   parseDiagonalPackshotRotateDeg,
+  parseDiagonalUploadRows,
 } from "@/lib/diagonal-flatlay";
+import { buildTwoRowStripGrid } from "@/lib/ten-singles-collage";
 import {
   exifUprightToPng,
   normalizeTenSingleNailForCollageCell,
@@ -740,8 +742,21 @@ export async function POST(request: Request) {
     const skipRowModel = formData.get("skipRowModel") === "1";
     const job = promptsForMode(mode)[0];
     const isDiagonal = mode === "extract_diagonal_row";
+    const diagonalUploadRows = isDiagonal
+      ? parseDiagonalUploadRows(formData.get("diagonalUploadRows"))
+      : "one_row";
 
     try {
+      if (isDiagonal && !skipRowModel && diagonalUploadRows === "two_rows") {
+        return Response.json(
+          {
+            error:
+              "已选择「两行 / 2×5」上传时请勾选「跳过模型」，或改选「一行五枚」走模型抠图。",
+          },
+          { status: 400 },
+        );
+      }
+
       let oneRowBuffer = buffer;
       if (!skipRowModel) {
         if (!job) {
@@ -782,11 +797,22 @@ export async function POST(request: Request) {
       }
 
       const stripFill = isDiagonal ? 0.84 : undefined;
-      let gridBuffer = await buildDuplicatedRowGridFromOneRow(
-        oneRowBuffer,
-        gridLayout,
-        { skipRowModel, maxInnerFillFrac: stripFill },
-      );
+      let gridBuffer: Buffer;
+      if (
+        isDiagonal &&
+        skipRowModel &&
+        diagonalUploadRows === "two_rows"
+      ) {
+        gridBuffer = await buildTwoRowStripGrid(buffer, gridLayout, {
+          maxInnerFillFrac: stripFill,
+        });
+      } else {
+        gridBuffer = await buildDuplicatedRowGridFromOneRow(
+          oneRowBuffer,
+          gridLayout,
+          { skipRowModel, maxInnerFillFrac: stripFill },
+        );
+      }
       if (isDiagonal) {
         const rotateDeg = parseDiagonalPackshotRotateDeg(
           formData.get("diagonalPackshotRotateDeg"),
@@ -798,7 +824,9 @@ export async function POST(request: Request) {
       const defaultLabel = generationModeOption(mode).label;
       const label = skipRowModel
         ? isDiagonal
-          ? `${defaultLabel}（跳过模型）`
+          ? diagonalUploadRows === "two_rows"
+            ? `${defaultLabel}（跳过模型 · 两行直转）`
+            : `${defaultLabel}（跳过模型 · 复制成双行）`
           : "白底栅格 · 单行复制成双行（跳过模型）"
         : job?.label ?? defaultLabel;
 
