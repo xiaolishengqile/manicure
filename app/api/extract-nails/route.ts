@@ -90,6 +90,7 @@ import {
   editOnceRoute,
   editDualSceneNailsRoute,
 } from "@/lib/image-edit-calls";
+import { loadMultiAngleFrontHandRef } from "@/lib/multi-angle-hand-ref";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -337,6 +338,63 @@ export async function POST(request: Request) {
     } catch (e) {
       const message = e instanceof Error ? e.message : "图像编辑接口调用失败";
       return Response.json({ error: message }, { status: 502 });
+    }
+  }
+
+  if (mode === "multi_angle") {
+    const nailsRes = await validateImageFile(
+      formData.get("image"),
+      "美甲款式参考图（字段 image）",
+    );
+    if (!nailsRes.ok) {
+      return Response.json({ error: nailsRes.error }, { status: 400 });
+    }
+
+    let handRef: { buffer: Buffer; mime: string };
+    try {
+      handRef = await loadMultiAngleFrontHandRef();
+    } catch (e) {
+      const message =
+        e instanceof Error ? e.message : "无法读取固定上手模板图";
+      return Response.json({ error: message, imageUrls: [], labels: [] }, { status: 500 });
+    }
+
+    const jobs = promptsForMode(mode);
+
+    try {
+      const outcome = await runParallelImageEditJobs({
+        jobs,
+        replicateDownloadAuth: replAuth,
+        edit: async ({ prompt }) =>
+          editDualSceneNailsRoute(
+            imageCtx,
+            handRef.buffer,
+            handRef.mime,
+            nailsRes.buffer,
+            nailsRes.mime,
+            imageEditPrompt(prompt),
+            gatewayEdit,
+          ),
+      });
+      if (!outcome.ok) {
+        return Response.json(
+          {
+            error: outcome.error,
+            imageUrls: outcome.imageUrls,
+            labels: outcome.labels,
+          },
+          { status: 502 },
+        );
+      }
+      return Response.json({
+        imageUrls: outcome.imageUrls,
+        labels: outcome.labels,
+        imageUrl: outcome.imageUrls[0],
+        mode,
+      });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "图像编辑接口调用失败";
+      return Response.json({ error: message, imageUrls: [], labels: [] }, { status: 502 });
     }
   }
 

@@ -94,7 +94,7 @@ export const GENERATION_MODE_OPTIONS: {
     shortLabel: "上手图 · 正视 1 张",
     whenToUse: "已有款式图，要一张棚拍正视上手主图",
     description:
-      "每次生成 **1 张**正视上手棚拍主图。**甲型**与参考一致不改动；**甲根→指根、甲尖→指尖**不戴反；**严格按上传图**还原花色与长短，摄影真实感。",
+      "每次生成 **1 张**正视上手棚拍主图，**固定使用内置棚拍上手模板**（pose/肤色/光影一致），仅将五指美甲替换为你上传的款式。**每指长短必须与上传图一致**，禁止拉长或缩短。**拇指**甲根→甲尖为**左→右**；**食/中/无名/小指**为**上→下**。严格按上传图还原长短、花色与甲型，摄影真实感。",
   },
   {
     value: "packaging_mockup",
@@ -1145,27 +1145,47 @@ LADDER OVERRIDE (overrides any generic finger-size ladder above):
 
 `;
 
-/** 正视上手 — 甲型保真（不拉长、不改型、不偷换列位形状） */
-const MULTI_ANGLE_SHAPE_FIDELITY_EN = `1) NAIL SHAPE — DO NOT CHANGE (failure if violated):
-- Each worn press-on must match the **reference nail for that finger's column** in **length, width, C-curve, thickness, apex, and free-edge profile** (square / round / almond / coffin / stiletto, etc.).
-- **Forbidden:** lengthening, shortening, widening, slimming, squashing, or substituting another column's silhouette to "look better" on the hand.
-- **2×5 or five-column sheet:** left → right = **thumb (col 1) → index → middle → ring → pinky (col 5)**. Wear the **shape + art** from **that column only**.
-- **Uniform reference:** if every slot shows the **same** nail, all five fingers must show the **same** shape and design — **no** extra decals, flowers, or patterns on any finger that are absent from the reference.`;
+/** 正视上手 — 长短保真（用户上传为唯一尺度，禁止为贴合模板手而改长短） */
+const MULTI_ANGLE_LENGTH_FIDELITY_EN = `1) NAIL LENGTH — USER UPLOAD IS LAW (failure if violated):
+- The **SECOND** image is the **only** authority for how **long or short** each press-on is. Measure each slot’s **visible nail plate length** (cuticle line → free edge) and reproduce that **same length class** on the hand — **millimeter-for-millimeter fidelity** within normal perspective warp.
+- **Forbidden:** lengthening any nail to “fill” the FIRST template’s longer placeholder nails; **forbidden:** shortening to look neater on the hand; **forbidden:** normalizing all five fingers to one uniform length when the upload shows different lengths per column.
+- **Aspect-ratio lock per finger:** after rigid rotation for wear axis only, each worn nail’s **length:width** must match that slot in the SECOND image within a few percent — **no** non-uniform stretch/squish to match the template silhouette.
+- **Template hand does NOT set length:** even if FIRST shows longer/shorter placeholder nails, **ignore** their size — copy **only** length from SECOND for that finger’s column.
+- **Allowed:** **rigid** in-plane rotation (thumb horizontal, others vertical) + **translation** to sit on the nail bed; **forbidden** scaling that changes sold SKU length.`;
 
-/** 正视上手 — 朝向：甲根朝指根、甲尖朝指尖，禁止 180° 戴反 */
-const MULTI_ANGLE_ORIENTATION_EN = `2) WEAR ORIENTATION — DO NOT REVERSE (failure if violated):
+/** 正视上手 — 甲型保真（不拉长、不改型、不偷换列位形状） */
+const MULTI_ANGLE_SHAPE_FIDELITY_EN = `2) NAIL SHAPE & WIDTH — DO NOT CHANGE (failure if violated):
+- Each worn press-on must match the **reference nail for that finger's column** in **width, C-curve, thickness, apex, and free-edge profile** (square / round / almond / coffin / stiletto, etc.) — **in addition to** the length rules above.
+- **Forbidden:** widening, slimming, squashing, or substituting another column's silhouette to "look better" on the hand.
+- **2×5 or five-column sheet:** left → right = **thumb (col 1) → index → middle → ring → pinky (col 5)**. Wear the **shape + art + length** from **that column only**.
+- **Uniform reference:** if every slot shows the **same** nail, all five fingers must show the **same** shape, **same length**, and design — **no** extra decals, flowers, or patterns on any finger that are absent from the reference.`;
+
+/** 正视上手 — 双图输入：FIRST=固定上手模板，SECOND=用户款式（与 API 顺序一致） */
+const MULTI_ANGLE_DUAL_INPUT_PREAMBLE = `You receive TWO images supplied to the editor in this **fixed** order:
+1) **FIRST — FIXED HAND POSE ANCHOR (same template every run):** A photoreal front-facing hand on pure white. **Treat as authoritative for:** hand identity, **exactly five digits**, finger lengths, joint angles, thumb pose, palm curl, camera viewpoint, crop, skin tone, lighting direction, and **where each nail plate sits on skin**. The existing nail **color/finish in this photo is placeholder only** — you will replace every visible nail with art from the SECOND image.
+2) **SECOND — NAIL PRODUCT SOURCE OF TRUTH:** Press-on sheet, tray, flat-lay, 2×5 card, or single-row product shot showing the **exact** artwork (colors, patterns, chrome, decals, length, silhouette) that must appear on the live hand.
+
+HARD RULE — **in-place nail swap, not a new hand:**
+- **Preserve the FIRST image’s hand geometry, pose, crop, and skin**; do **not** redraw a different hand, change digit count, or “beautify” into another pose.
+- Replace **only** the nail art on each visible nail bed → faithful copies from the SECOND reference per finger slot, keeping **each slot’s original length** (do not inherit nail size from FIRST).
+- **#FFFFFF** seamless backdrop must remain; keep studio lighting coherent with FIRST.`;
+
+/** 正视上手 — 每指穿戴轴向（拇指横、其余四指竖） */
+const MULTI_ANGLE_PER_FINGER_AXIS_EN = `3) PER-FINGER WEAR AXES — DO NOT REVERSE (failure if violated):
 
 ${DISTAL_PATTERN_AT_ANATOMICAL_FINGERTIP_EN}
 
-- **Sheet layout (default upload):** on the product image, **free edge / tip points toward the BOTTOM** and **cuticle / root toward the TOP** (tips down). On the hand: **root → knuckle / nail fold**, **tip → anatomical fingertip** — **every** finger including thumb.
-- **Forbidden:** **180°** flip so French / pale tips hug the cuticle while nude sits at the fingertip, or dark tips at the knuckle.
-- **Palm-up / palm toward camera:** wrap art on the curved plate in 3D so **distal pattern still caps the real fingertip** — anatomy wins over flat-card bitmap paste.
+**Product sheet → FIRST hand mapping (cols 1–5 = thumb → index → middle → ring → pinky):**
+- **Thumb (column 1):** on the SECOND reference, read each cell with **cuticle / root toward the LEFT** and **free edge / tip toward the RIGHT** (horizontal axis). On the FIRST hand’s thumb, wear so **root sits toward the finger base / thenar side** and **tip toward the lateral free margin** — **left→right** on the curved plate, **never** flipped 180°.
+- **Index, middle, ring, pinky (columns 2–5):** on the SECOND reference, **cuticle / root toward the TOP** and **free edge toward the BOTTOM** in each cell (vertical axis). On each matching finger in FIRST, **root → knuckle / nail fold**, **tip → anatomical fingertip** — **top→bottom** on the visible plate.
+- **Forbidden:** pasting a vertical-sheet cell onto the thumb without re-orienting to the horizontal axis; **forbidden** 180° wear on any finger (French / dark tips at knuckle).
 - **Printed top coat faces outward;** never show the matte inner underside as the visible design face.
-- **Do not mirror** the whole row (leftmost design must map to thumb, not pinky).`;
+- **Do not mirror** the product row (leftmost column must map to **thumb**, not pinky).`;
 
 /** 正视上手 — 严格参照用户图 + 摄影真实 */
-const MULTI_ANGLE_REFERENCE_AND_REALISM_EN = `3) STRICT REFERENCE + PHOTOREAL (failure if violated):
-- The user's upload is the **only** source of truth for **color, pattern, finish, micro-detail, decals, charms, and shape**. **Zero** creative redesign and **zero** invented motifs not visible on that finger's reference slot.
+const MULTI_ANGLE_REFERENCE_AND_REALISM_EN = `4) STRICT REFERENCE + PHOTOREAL (failure if violated):
+- The user's upload (SECOND) is the **only** source of truth for **length, color, pattern, finish, micro-detail, decals, charms, and shape**. **Zero** creative redesign and **zero** invented motifs not visible on that finger's reference slot.
+- **QA before finalize:** compare each worn nail’s **visible length** to its SECOND slot — if any finger looks longer or shorter than the product reference, **failed**.
 - **Per-slot copy:** each visible fingernail shows **only** the art (and shape) from its mapped column — never borrow another slot or add "prettier" stock decoration.
 - Output **one** photoreal e-commerce studio photograph — retouched DSLR / mirrorless look, **not** illustration or wax-doll skin.
 - **One adult hand**, **exactly five digits**, anatomically plausible pose; press-ons on nail beds with believable glue-line — **no** floating plates, **no** sixth finger, **no** tray/card without skin.
@@ -1174,17 +1194,21 @@ const MULTI_ANGLE_REFERENCE_AND_REALISM_EN = `3) STRICT REFERENCE + PHOTOREAL (f
 const ANGLE_PROMPTS: { prompt: string; label: string }[] = [
   {
     label: "正视上手主图",
-    prompt: `Using **only** the nail product in the user's reference image, create **one** photoreal **front-facing on-hand** catalog hero.
+    prompt: `${MULTI_ANGLE_DUAL_INPUT_PREAMBLE}
+
+TASK — **one** photoreal **front-facing on-hand** catalog hero:
+
+${MULTI_ANGLE_LENGTH_FIDELITY_EN}
 
 ${MULTI_ANGLE_SHAPE_FIDELITY_EN}
 
-${MULTI_ANGLE_ORIENTATION_EN}
+${MULTI_ANGLE_PER_FINGER_AXIS_EN}
 
 ${MULTI_ANGLE_REFERENCE_AND_REALISM_EN}
 
-**Front hero framing:**
-- One hand, **full set visible**; camera **frontal** to the nail plates (dorsal or palm-up) within ~0–25° — all five nails readable.
-- Natural, anatomically plausible pose.
+**Output framing (match FIRST):**
+- **Same** hand pose, crop, and five-digit layout as the FIRST template; camera **frontal** to nail plates within ~0–25° — all five nails readable.
+- Nail **length, shape, color, pattern, and finish** must come from SECOND **only**; skin and hand anatomy from FIRST unchanged.
 
 Return **one** square catalog-ready photograph.`,
   },
