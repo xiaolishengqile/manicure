@@ -659,17 +659,10 @@ export async function POST(request: Request) {
   if (mode === "flat_to_3d_packaging") {
     const flatRes = await validateImageFile(
       formData.get("image"),
-      "2D 包装平面稿（字段 image）",
+      "2D 包装刀模展开图（字段 image）",
     );
     if (!flatRes.ok) {
       return Response.json({ error: flatRes.error }, { status: 400 });
-    }
-    const refRes = await validateImageFile(
-      formData.get("packaging3dReferenceImage"),
-      "3D/摄影参考图（字段 packaging3dReferenceImage）",
-    );
-    if (!refRes.ok) {
-      return Response.json({ error: refRes.error }, { status: 400 });
     }
 
     const jobs = promptsForMode(mode);
@@ -689,11 +682,10 @@ export async function POST(request: Request) {
         jobs,
         replicateDownloadAuth: replAuth,
         edit: async ({ prompt }) =>
-          editDualSceneNailsRoute(
+          editOnceRoute(
             imageCtx,
-            refRes.buffer,
-            refRes.mime,
             flatRes.buffer,
+            extFromMime(flatRes.mime),
             flatRes.mime,
             imageEditPrompt(prompt),
             gatewayEdit,

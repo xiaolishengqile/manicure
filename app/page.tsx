@@ -807,7 +807,7 @@ export default function Home() {
           mode === "flat_to_3d_packaging" || mode === "flat_to_3d_sachet"
             ? mode === "flat_to_3d_sachet"
               ? "袋装正面平面稿请选择图片文件。"
-              : "2D 包装平面稿请选择图片文件。"
+              : "包装刀模展开图请选择图片文件。"
             : mode === "nails_in_box"
               ? "美甲款式图请选择图片文件。"
               : modeIsScatteredGridFlatlay(mode)
@@ -1024,7 +1024,11 @@ export default function Home() {
         return;
       }
     } else if (!file) {
-      setError("请先选择一张美甲照片。");
+      setError(
+        mode === "flat_to_3d_packaging"
+          ? "请先上传包装刀模展开图。"
+          : "请先选择一张美甲照片。",
+      );
       return;
     }
 
@@ -1423,7 +1427,7 @@ export default function Home() {
       : mode === "packaging_mockup"
         ? "产出（包装 + 手握 · 1张）"
         : mode === "flat_to_3d_packaging"
-          ? "产出（2D→3D 开窗盒装 · 1张）"
+          ? "产出（2D 刀模 → 3D 全封闭盒 · 1张）"
           : mode === "flat_to_3d_sachet"
             ? "产出（2D 正背面 → 单片袋装实拍 · 1张）"
             : mode === "nails_in_box"
@@ -1514,6 +1518,8 @@ export default function Home() {
           : "点击选择已生成的 2×5 白底栅格图"
         : mode === "multi_angle"
           ? "点击选择美甲款式参考图"
+        : mode === "flat_to_3d_packaging"
+          ? "点击选择包装刀模展开图"
         : mode === "complete_single_grid"
           ? "点击选择单枚甲片照片"
           : modeIsDiagonalRowFlatlay(mode)
@@ -1542,6 +1548,8 @@ export default function Home() {
             : "请上传 **2×5** 白底成品图。**不改甲型与长短**，仅刚性旋转摆正歪斜，用外留白/列缝/行间缝控距；每次 **1 张**"
           : mode === "multi_angle"
             ? "上传 2×5 背卡、平铺或商品图作为款式参考；上手 pose 固定为内置棚拍模板，仅替换五指美甲，**每指长短必须与上传图一致**（拇 **左→右**、其余四指 **上→下**），生成 **1 张**主图"
+          : mode === "flat_to_3d_packaging"
+            ? "上传刀模/展开结构图（含各面板印刷与折线）；输出 **1 张**全封闭 3D 盒白底 mockup（**无开窗**）；服务端自动提取稿面主色"
           : mode === "complete_single_grid"
             ? "请上传甲尖朝下、甲根朝上的单枚（或含一枚主款）；仅做 EXIF 转正后由模型抠出一枚高清单甲，再由服务端按五列相对宽度复制成 10 格"
             : mode === "single_row_to_grid"
@@ -1680,7 +1688,7 @@ export default function Home() {
                   ? "正在模型规整一行并复制为 2×5，再合成手握图…"
                   : "正在生成包装手握图…"
                 : mode === "flat_to_3d_packaging"
-                  ? "正在生成 3D 开窗盒装主视图…"
+                  ? "正在生成 3D 全封闭盒主视图…"
                   : mode === "flat_to_3d_sachet"
                     ? "正在生成单片袋装实拍图…"
                     : mode === "nails_in_box"

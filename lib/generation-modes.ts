@@ -106,11 +106,11 @@ export const GENERATION_MODE_OPTIONS: {
   },
   {
     value: "flat_to_3d_packaging",
-    label: "2D 文稿 → 3D 开窗盒装主视图",
-    shortLabel: "2D 稿 → 3D 盒装",
-    whenToUse: "平面稿 + 摄影参考，出立体开窗盒主图",
+    label: "2D 刀模 → 3D 全封闭盒主视图",
+    shortLabel: "刀模 → 3D 盒",
+    whenToUse: "刀模展开图，出立体全封闭盒白底主图",
     description:
-      "双图：① 2D 包装平面稿（盒面印刷、色值、Logo、窗内甲片示意**均以稿为准**；服务端会从①**自动提主色 Hex** 写入提示词）；② 摄影/3D **氛围参考**（取景、光影、白底投影）。**只输出 1 张**立体开窗盒；窗内甲片与外盒图文须来自①，勿照搬②上的竞品品牌与甲片款式（服务端将②先于①送模型以抑制「抄成参考图」）。",
+      "单图：上传包装盒**刀模/展开结构图**（含正/背/侧/顶底面板印刷与折线）。**只输出 1 张**立体**全封闭**纸盒电商主图（**无开窗**）；按折线折叠为 3/4 视角白底 mockup，盒面图文与色值以稿为准；服务端会从稿面**自动提主色 Hex** 写入提示词。",
   },
   {
     value: "flat_to_3d_sachet",
@@ -175,7 +175,7 @@ export const GENERATION_MODE_GROUPS: {
   {
     id: "packaging",
     title: "包装 / 盒装",
-    subtitle: "手握、2D 转 3D、开窗入盒",
+    subtitle: "手握、刀模转 3D、入盒",
     modes: [
       "packaging_mockup",
       "flat_to_3d_packaging",
@@ -332,7 +332,6 @@ export function getDualUploadKind(
   if (mode === "model_tryon") return "model";
   if (mode === "accessory_tryon") return "accessory";
   if (mode === "packaging_mockup") return "packaging_pose";
-  if (mode === "flat_to_3d_packaging") return "packaging_3d_ref";
   if (mode === "flat_to_3d_sachet") return "sachet_back";
   if (mode === "nails_in_box") return "nails_box";
   return null;
@@ -1317,36 +1316,35 @@ Return **one** photorealistic square image only.`,
 ];
 
 /**
- * 双图 → **单张**开窗盒装主视图。
- * **API 传入顺序（与 `editDualSceneNails` 一致）：FIRST = 摄影/3D 氛围参考图，SECOND = 2D 平面稿。**
- * 先传实拍易锚定光影；**禁止**把 FIRST 当最终画面像素级复刻，所有印刷与窗内甲片须来自 SECOND。
+ * 单图刀模展开 → **单张**全封闭 3D 盒装主视图（无开窗、无第二参考图）。
  */
-const FLAT_TO_3D_DUAL_PREFIX = `You receive TWO input images supplied to the editor in this **fixed** order:
-1) **FIRST — SCENE / LIGHTING ANCHOR ONLY (not final artwork):** A finished photograph or render of a retail box on white (often a competitor or mood packshot with window + nails). **You may use ONLY:** camera viewpoint, lens feel, **key vs fill light direction**, **cast-shadow shape and softness on the sweep**, backdrop brightness, overall exposure, and “premium shelf” depth cues. **You must NOT treat this as the product to duplicate.** **Forbidden (failure):** keeping the **same printed brand name / logotype / colorway / bottom legal strip** as in this FIRST photo when they differ from the SECOND flat; **forbidden:** keeping the **same nail art inside the window** (e.g. same metallic + gem layout) if the SECOND flat shows **different** nails (e.g. plain peach gloss). The FIRST image is a **lighting template**, not the SKU.
-2) **SECOND — FLAT 2D SOURCE OF TRUTH (graphics + window nails):** Packaging flat, die-line, or screen mock. **Every** exterior graphic on the final 3D box — panel colors, logos, placeholder text like “YOUR LOGO”, bow icons, barcodes, micro-copy — and the **visual design of press-ons shown in the window area on this flat** (color, simplicity, French shape, etc.) must be **faithfully realized in photoreal 3D**. If the flat is schematic, infer a believable 3D window layout that **honors** that schematic — **do not** import unrelated hero nails from the FIRST photo.
+const FLAT_TO_3D_DIELINE_SOLID_BOX_PROMPT = `You receive **ONE** input image — a **packaging die-line / unfolded structural flat** (front, back, side panels, top/bottom flaps, glue tab, fold/crease lines, and printed artwork).
 
-`;
-
-const FLAT_TO_3D_ANTI_LITERAL_COPY_EN = `ANTI–“COPY THE PHOTO” (critical QA gate):
-- If your result would still be **instantly recognizable as the same branded pack** as the **FIRST** input (same unrelated trademark wordmark, same nail jewelry motif), you **failed** — **re-skin** the entire box print and **re-place** window nails from the **SECOND** flat only.
-- **Self-check before finalize:** (a) Does the box text / logo match the **SECOND** image, not the first? (b) Do the nails in the window match the **SECOND** image’s nail look, not the first photo’s nails?
-
-`;
-
-const FLAT_TO_3D_WINDOWED_BOX_PROMPT = `${FLAT_TO_3D_DUAL_PREFIX}${FLAT_TO_3D_ANTI_LITERAL_COPY_EN}TASK — output **exactly ONE** photorealistic 3D hero photograph: **one** retail press-on carton with a **real clear window**, **re-lit** like the FIRST reference’s scene, but **built from the SECOND flat’s identity**.
+TASK — output **exactly ONE** photorealistic 3D e-commerce hero photograph of a **fully assembled, closed folding carton** built from this flat.
 
 HARD STRUCTURE (failure if violated):
-- **Single subject:** one folding carton, slight three-quarter or hero angle; **product-only** on white / very light seamless sweep; **natural cast shadow** (derive from FIRST lighting template).
-- **Transparent window:** large central **PET / clear plastic** with gloss and refraction; interior **readable** through glass.
-- **Window interior nails:** **must** match the **SECOND** flat’s implied or drawn nail set (color, finish, shape). **Never** default to the FIRST photo’s nail styling when it conflicts with the SECOND.
-- **Exterior print:** **only** from the **SECOND** flat, correctly warped in 3D perspective onto cardboard.
+- **Single subject:** one **sealed retail cardboard box** — **no transparent window**, **no cut-out aperture**, **no PET / clear plastic window** unless the flat **explicitly** shows a window die-cut (typical glue-flap cartons are **solid panels only** — treat them as **fully printed cardboard**).
+- **Fold the flat into 3D:** fold mentally along crease lines into a believable rectangular prism; **warp each printed panel** from the flat onto the correct physical face (classic ~3/4 hero: **front + top + one side** visible, like premium Amazon / Shopify mockups).
+- **Print fidelity:** **every** logo, wordmark, product name, tagline, icons, legal micro-copy, and panel fill color on the flat must appear on the **correct 3D face** — **same hue, spelling, typography**; **forbidden:** inventing new slogans, swapping SKUs, or “cleaning up” brand art.
+- **Side panels:** vertical side copy on the flat maps to **physical side faces** with correct orientation — **not** mirrored onto the front.
+- **Top / lid flaps:** if the flat shows tuck flaps, render believable **slightly rounded** manufactured closure — subtle edge radius, not razor-sharp paper.
+- **Material:** matte or soft-touch **coated cardboard** with visible edge thickness; **not** a flat 2D paste on a grey block.
+- **Scene:** seamless **#FFFFFF** studio sweep; soft commercial key + fill from front-right; **one** gentle contact shadow under the box; **product-only** — no hands, no props, no extra SKUs.
+- **Camera:** slight three-quarter product angle; square canvas with white margins OK — **never** output the unfolded die-line layout.
 
-Return **exactly ONE** square high-resolution image.`;
+DIE-LINE READING (mandatory):
+- Identify the **main front panel** (hero face with primary logo + product name) — this becomes the **camera-facing front**.
+- Map **back panel** to rear if any edge peeks; **narrow side strips** to left/right faces.
+- **Glue tabs / internal flaps** fold away — **do not** show them as exterior print.
+- **Illustrations on the front** (e.g. product sachets, bottles) stay **printed graphics on cardboard** — **not** real loose items in front of the box.
+
+Return **exactly ONE** square high-resolution product photograph.
+（中文：**单图刀模→全封闭 3D 盒**；按折线折叠；**禁止开窗**；图文保真；白底电商 mockup。）`;
 
 const FLAT_TO_3D_PACKAGING_PROMPTS: { prompt: string; label: string }[] = [
   {
-    label: "3D 开窗盒装主视图",
-    prompt: FLAT_TO_3D_WINDOWED_BOX_PROMPT,
+    label: "3D 全封闭盒装主视图",
+    prompt: FLAT_TO_3D_DIELINE_SOLID_BOX_PROMPT,
   },
 ];
 
