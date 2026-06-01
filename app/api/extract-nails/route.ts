@@ -527,10 +527,10 @@ export async function POST(request: Request) {
           edit: async ({ prompt }) =>
             editDualSceneNailsRoute(
               imageCtx,
-              nailsBuffer,
-              nailsMime,
               boxRes.buffer,
               boxRes.mime,
+              nailsBuffer,
+              nailsMime,
               prompt,
               gatewayEdit,
             ),
@@ -543,10 +543,10 @@ export async function POST(request: Request) {
         edit: async ({ prompt }) =>
           editDualSceneNailsRoute(
             imageCtx,
-            nailsBuffer,
-            nailsMime,
             boxRes.buffer,
             boxRes.mime,
+            nailsBuffer,
+            nailsMime,
             prompt,
             gatewayEdit,
           ),

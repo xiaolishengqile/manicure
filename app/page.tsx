@@ -1489,7 +1489,7 @@ export default function Home() {
           : dualKind === "sachet_back"
             ? "背面说明、成分表、撕口虚线等；袋身主色以右侧色板为准（手动指定时会替换正背面大面积底色）"
             : dualKind === "nails_box"
-            ? "盒型、开窗比例、背板质感与**盒面 Logo/文字**尽量与参考一致（勿改比例、勿杜撰印刷）；窗内**两排甲片之间不要留空带**；甲片款式与甲型以左侧图为准"
+            ? "实拍/渲染盒装图；成片以它为底，**只换**窗内美甲，位置高度不变"
             : "需清晰露出指甲区域";
 
   const firstDualProductHint =
@@ -1504,7 +1504,7 @@ export default function Home() {
           : dualKind === "model" || dualKind === "accessory"
           ? "美甲产品图约定：甲尖朝下；每行从左到右大拇指→小指；试戴成图按格严格还原款式"
           : dualKind === "nails_box"
-            ? "款式图：托盘/背卡/白底栅格均可；横向时**上下两排甲片紧挨无横缝**；左右与图案甲型逐枚保真"
+            ? "款式图：托盘/背卡/白底栅格；图案会**逐枚贴到**右侧包装盒窗内原有甲片位置（不重排、不拉伸盒体）"
             : "平铺、卡纸、白底商品图均可";
 
   const singleUploadTitle =
