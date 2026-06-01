@@ -349,6 +349,12 @@ export function parseNailsInBoxArrangement(
   return "vertical";
 }
 
+const NAILS_IN_BOX_LONG_NAILS_COMPACTED_EN = `**LONG / TALL NAIL SHEET — PRE-COMPACTED FIRST IMAGE (mandatory):**
+- The **FIRST** image was **already uniformly scaled down** with generous white margin so the nail cluster is **not** vertically dominant on the canvas.
+- **SECOND box shell is sacred:** outer carton **height:width** must **still match SECOND exactly** — the compacted FIRST image is **not** permission to shrink or grow the physical box.
+- Inside the window: place nails **even smaller** if needed (see WINDOW FIT) — **one uniform scale** for the whole cluster; **never** elongate the carton or window aperture to “honor” nail length from FIRST.
+（中文：第一张已预缩小；外盒比例仍只学第二张；窗内可再整组缩小，**禁止**为长甲拉高盒子。）`;
+
 /** 需一次上传 10 张单枚甲片（表单字段名 `nail`，可重复 append） */
 export function requiresTenSingleNails(mode: GenerationMode): boolean {
   return mode === "ten_singles_grid";
@@ -502,11 +508,15 @@ const NAILS_IN_BOX_WINDOW_TIGHT_AND_NAIL_FIDELITY_EN = `**WINDOW INTERIOR — TI
  */
 export function buildNailsInBoxPackagingPrompt(
   arrangement: NailsInBoxArrangement,
+  options?: { compactLongNails?: boolean },
 ): string {
   const arrangementBlock =
     arrangement === "vertical"
       ? NAILS_IN_BOX_VERTICAL_LAYOUT_EN
       : NAILS_IN_BOX_HORIZONTAL_LAYOUT_EN;
+  const longNailsBlock = options?.compactLongNails
+    ? `\n${NAILS_IN_BOX_LONG_NAILS_COMPACTED_EN}\n`
+    : "";
 
   return `You receive TWO input images in this fixed editor order:
 1) **FIRST — NAIL ART / PRODUCT SOURCE OF TRUTH:** press-on nails on a card, tray, flat-lay, or white grid — the **exact** artwork (colors, patterns, 3D chrome drips, charms, French edges, silhouettes) that must appear on every nail **visible inside the carton window**. **Zero** creative reinterpretation per nail.
@@ -518,7 +528,7 @@ export function buildNailsInBoxPackagingPrompt(
 （中文：**盒型、开窗、外盒印刷、背板质感**学第二张；**开窗里每一枚甲片的款式**必须**全部换成第一张图**里的对应甲片，禁止沿用第二张开窗里原有的美甲图案。）
 
 ${NAILS_IN_BOX_BOX_GEOMETRY_AND_PRINT_LOCK_EN}
-
+${longNailsBlock}
 ${NAILS_IN_BOX_WINDOW_SCALE_AND_CENTER_EN}
 
 ${NAILS_IN_BOX_WINDOW_TIGHT_AND_NAIL_FIDELITY_EN}

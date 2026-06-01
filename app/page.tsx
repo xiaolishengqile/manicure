@@ -198,6 +198,7 @@ export default function Home() {
   const [imageFluxSize, setImageFluxSize] = useState("1024x1024");
   const [nailBoxArrangement, setNailBoxArrangement] =
     useState<NailsInBoxArrangement>("vertical");
+  const [nailBoxLongNails, setNailBoxLongNails] = useState(false);
   const [nailShapeProfile, setNailShapeProfile] =
     useState<NailShapeProfileId>(DEFAULT_NAIL_SHAPE_PROFILE);
   /** 文本草稿：可删光再输入，提交时再解析成数字 */
@@ -1108,6 +1109,9 @@ export default function Home() {
         if (dualKind === "nails_box" && secondFile) {
           body.set("packagingBoxImage", secondFile);
           body.set("nailArrangement", nailBoxArrangement);
+          if (nailBoxLongNails) {
+            body.set("nailBoxLongNails", "1");
+          }
         }
         if (showsSameHandsOption) {
           body.set("sameHandsRow", sameHandsRow ? "1" : "0");
@@ -1887,6 +1891,20 @@ export default function Home() {
                         </span>
                       </label>
                     </div>
+                    <label className="mt-3 flex cursor-pointer items-start gap-2 border-t border-zinc-200 pt-3 text-sm text-zinc-800">
+                      <input
+                        type="checkbox"
+                        className="mt-0.5"
+                        checked={nailBoxLongNails}
+                        onChange={(e) => setNailBoxLongNails(e.target.checked)}
+                      />
+                      <span>
+                        <span className="font-medium">甲片偏长</span>
+                        <span className="block text-xs font-normal text-zinc-500">
+                          生成前先把款式图整组缩小并铺白底，避免模型为长甲把外盒拉高；盒体比例仍以包装盒参考图为准
+                        </span>
+                      </span>
+                    </label>
                   </fieldset>
                 ) : null}
               </div>

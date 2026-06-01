@@ -91,6 +91,10 @@ import {
   editDualSceneNailsRoute,
 } from "@/lib/image-edit-calls";
 import { loadMultiAngleFrontHandRef } from "@/lib/multi-angle-hand-ref";
+import {
+  compactLongNailArtForBoxWindow,
+  shouldCompactLongNailArtForBox,
+} from "@/lib/nails-in-box-preprocess";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -484,13 +488,23 @@ export async function POST(request: Request) {
     const arrangement = parseNailsInBoxArrangement(
       formData.get("nailArrangement"),
     );
+    const compactLongNails = shouldCompactLongNailArtForBox(
+      formData.get("nailBoxLongNails"),
+    );
+    let nailsBuffer = nailsRes.buffer;
+    let nailsMime = nailsRes.mime;
+    if (compactLongNails) {
+      nailsBuffer = await compactLongNailArtForBoxWindow(nailsRes.buffer);
+      nailsMime = "image/png";
+    }
     const boxMeta = await sharp(boxRes.buffer).metadata();
     const aspectPrefix = buildNailsInBoxBoxAspectApiPrefix(
       boxMeta.width ?? 1,
       boxMeta.height ?? 1,
     );
     const basePrompt = imageEditPrompt(
-      aspectPrefix + buildNailsInBoxPackagingPrompt(arrangement),
+      aspectPrefix +
+        buildNailsInBoxPackagingPrompt(arrangement, { compactLongNails }),
     );
     const jobs = collapseIdenticalPromptJobs([
       {
@@ -513,8 +527,8 @@ export async function POST(request: Request) {
           edit: async ({ prompt }) =>
             editDualSceneNailsRoute(
               imageCtx,
-              nailsRes.buffer,
-              nailsRes.mime,
+              nailsBuffer,
+              nailsMime,
               boxRes.buffer,
               boxRes.mime,
               prompt,
@@ -529,8 +543,8 @@ export async function POST(request: Request) {
         edit: async ({ prompt }) =>
           editDualSceneNailsRoute(
             imageCtx,
-            nailsRes.buffer,
-            nailsRes.mime,
+            nailsBuffer,
+            nailsMime,
             boxRes.buffer,
             boxRes.mime,
             prompt,
