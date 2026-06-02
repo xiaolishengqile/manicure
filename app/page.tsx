@@ -17,10 +17,17 @@ import {
   type DiagonalUploadRows,
 } from "@/lib/diagonal-packshot-config";
 import {
+  DEFAULT_WHITE_MARGIN_EXPAND_PCT,
+  MAX_WHITE_MARGIN_EXPAND_PCT,
+  MIN_WHITE_MARGIN_EXPAND_PCT,
+  parseWhiteMarginExpandPct,
+} from "@/lib/white-margin-expand-config";
+import {
   getDualUploadKind,
   modeIsDiagonalRowFlatlay,
   modeIsPhotoExtractToGrid,
   modeIsScatteredGridFlatlay,
+  modeIsExpandWhiteMargin,
   modeShowsWhiteGridLayoutPanel,
   modeSupportsSameHandsRowOption,
   sameHandsRowUsesGridFormFields,
@@ -118,6 +125,10 @@ function diagonalRotateDegDraftAfterBlur(raw: string): string {
   const t = raw.trim();
   if (t === "") return "";
   return String(parseDiagonalRotateDegDraft(t, DEFAULT_DIAGONAL_PACKSHOT_ROTATE_DEG));
+}
+
+function whiteMarginExpandPctDraftAfterBlur(raw: string): string {
+  return String(parseWhiteMarginExpandPct(raw));
 }
 
 /** 失焦后与提交一致：列缝/行缝、外留白不支持负数，会夹到合法区间 */
@@ -225,6 +236,8 @@ export default function Home() {
   const [diagonalUploadRows, setDiagonalUploadRows] =
     useState<DiagonalUploadRows>("one_row");
   const [skipDiagonalRowModel, setSkipDiagonalRowModel] = useState(false);
+  const [whiteMarginExpandPctDraft, setWhiteMarginExpandPctDraft] =
+    useState(String(DEFAULT_WHITE_MARGIN_EXPAND_PCT));
   const nailAspectLockRatioRef = useRef<number[]>([1, 1, 1, 1, 1]);
   const [gridPresets, setGridPresets] = useState<GridLayoutPreset[]>([]);
   const [gridPresetSelectedIndex, setGridPresetSelectedIndex] = useState<
@@ -1128,6 +1141,9 @@ export default function Home() {
             String(parseDiagonalRotateDegDraft(diagonalRotateDegDraft)),
           );
         }
+        if (modeIsExpandWhiteMargin(mode)) {
+          body.set("whiteMarginExpandPct", whiteMarginExpandPctDraft.trim());
+        }
         if (
           modeUsesWhiteGridFormFields(mode) ||
           sameHandsRowUsesGridFormFields(mode, sameHandsRow)
@@ -1367,6 +1383,7 @@ export default function Home() {
     diagonalRotateDegDraft,
     diagonalUploadRows,
     skipDiagonalRowModel,
+    whiteMarginExpandPctDraft,
     showsSameHandsOption,
     prepareResultUrlForDisplay,
     gatewayProvider,
@@ -1438,6 +1455,8 @@ export default function Home() {
               ? "产出（手模 · 指甲+饰品试戴）"
               : mode === "ten_singles_grid"
                 ? "产出（十枚单甲 · 一张合集）"
+                : mode === "expand_white_margin"
+                  ? "产出（白底扩留白 · 正方形 · 1张）"
                 : mode === "extract_ten_grid"
                   ? "产出（白底栅格 · 仅抠图 · 2张择优）"
                   : mode === "extract_diagonal_row"
@@ -1522,6 +1541,8 @@ export default function Home() {
           ? "点击选择包装刀模展开图"
         : mode === "complete_single_grid"
           ? "点击选择单枚甲片照片"
+          : mode === "expand_white_margin"
+            ? "点击选择要扩留白的图片"
           : modeIsDiagonalRowFlatlay(mode)
             ? diagonalUploadRows === "two_rows"
               ? "点击选择两行 / 2×5 美甲图"
@@ -1552,6 +1573,8 @@ export default function Home() {
             ? "上传刀模/展开结构图（含各面板印刷与折线）；输出 **1 张**全封闭 3D 盒白底 mockup（**无开窗**）；服务端自动提取稿面主色"
           : mode === "complete_single_grid"
             ? "请上传甲尖朝下、甲根朝上的单枚（或含一枚主款）；仅做 EXIF 转正后由模型抠出一枚高清单甲，再由服务端按五列相对宽度复制成 10 格"
+            : mode === "expand_white_margin"
+              ? `上传任意美甲/商品图；**不转正、不抠图**。先居中铺成正方形白底，再四周扩白（默认 **${DEFAULT_WHITE_MARGIN_EXPAND_PCT}%**）；纯服务端处理，每次 **1 张**`
             : mode === "single_row_to_grid"
               ? "上传一行五枚（拇→小，甲尖朝下）。模型抠出带白缝的一行，服务端**整行复制**成双排；「同一行相邻美甲间距」主要约束模型"
               : "支持常见图片格式";
@@ -1701,6 +1724,8 @@ export default function Home() {
                           ? "正在合成十甲白底合集…"
                           : mode === "complete_single_grid"
                             ? "正在生成单甲并拼成 10 枚…"
+                            : mode === "expand_white_margin"
+                              ? "正在扩大白底留白…"
                             : mode === "single_row_to_grid"
                               ? "正在规整单行并复制拼接 2×5…"
                               : mode === "extract_ten_grid"
@@ -1727,6 +1752,36 @@ export default function Home() {
             value={nailShapeProfile}
             onChange={setNailShapeProfile}
           />
+        ) : null}
+
+        {modeIsExpandWhiteMargin(mode) ? (
+          <label className="flex flex-col gap-1 rounded-xl border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-800 shadow-sm">
+            <span className="font-medium">扩大百分之多少</span>
+            <div className="mt-1 flex items-center gap-2">
+              <input
+                type="text"
+                inputMode="decimal"
+                className="max-w-[8rem] rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm tabular-nums outline-none ring-rose-500/30 focus:border-rose-400 focus:ring-2"
+                value={whiteMarginExpandPctDraft}
+                onChange={(e) => setWhiteMarginExpandPctDraft(e.target.value)}
+                onBlur={() =>
+                  setWhiteMarginExpandPctDraft((prev) =>
+                    whiteMarginExpandPctDraftAfterBlur(prev),
+                  )
+                }
+                aria-describedby="white-margin-expand-pct-hint"
+              />
+              <span className="text-zinc-600">%</span>
+            </div>
+            <span
+              id="white-margin-expand-pct-hint"
+              className="text-xs font-normal text-zinc-500"
+            >
+              先居中铺成正方形白底，再按此比例四周扩白；默认{" "}
+              {DEFAULT_WHITE_MARGIN_EXPAND_PCT}%，有效范围{" "}
+              {MIN_WHITE_MARGIN_EXPAND_PCT}–{MAX_WHITE_MARGIN_EXPAND_PCT}%。
+            </span>
+          </label>
         ) : null}
 
         <section className="flex flex-col gap-6 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm sm:p-8">

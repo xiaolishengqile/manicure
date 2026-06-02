@@ -95,6 +95,10 @@ import {
   compactLongNailArtForBoxWindow,
   shouldCompactLongNailArtForBox,
 } from "@/lib/nails-in-box-preprocess";
+import {
+  expandWhiteMarginSquare,
+} from "@/lib/white-margin-expand";
+import { parseWhiteMarginExpandPct } from "@/lib/white-margin-expand-config";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -834,6 +838,24 @@ export async function POST(request: Request) {
   const nailsOnly = await validateImageFile(formData.get("image"), "美甲图片（字段 image）");
   if (!nailsOnly.ok) {
     return Response.json({ error: nailsOnly.error }, { status: 400 });
+  }
+
+  if (mode === "expand_white_margin") {
+    try {
+      const expandPct = parseWhiteMarginExpandPct(
+        formData.get("whiteMarginExpandPct"),
+      );
+      const out = await expandWhiteMarginSquare(nailsOnly.buffer, expandPct);
+      const baseLabel = generationModeOption("expand_white_margin").label;
+      return Response.json({
+        imageUrls: [`data:image/png;base64,${out.toString("base64")}`],
+        labels: [`${baseLabel}（扩大 ${expandPct}%）`],
+      });
+    } catch (e) {
+      const message =
+        e instanceof Error ? e.message : "扩大白底留白失败。";
+      return Response.json({ error: message, imageUrls: [], labels: [] }, { status: 502 });
+    }
   }
 
   let buffer = nailsOnly.buffer;

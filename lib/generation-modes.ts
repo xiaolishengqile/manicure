@@ -19,6 +19,7 @@ export type GenerationMode =
   | "model_tryon"
   | "accessory_tryon"
   | "ten_singles_grid"
+  | "expand_white_margin"
   | "layer_editor";
 
 export type GenerationModeGroupId = "white_grid" | "tryon" | "packaging";
@@ -87,6 +88,14 @@ export const GENERATION_MODE_OPTIONS: {
     whenToUse: "已备好 10 张单枚文件，每格一枚",
     description:
       "每枚仅 **EXIF 转正**（不整图 180°）后拼成一张 2×5 参考图送模型出白底栅格；朝向与上传一致。**可选**：「白底栅格排版」调节五列宽、外留白、列缝/行缝；服务端会归一列宽并甲根对齐，缝过大时整行自动缩小以适配画布。提示词强调**保持各格甲型与长短**，竖直摆正与留白为主。",
+  },
+  {
+    value: "expand_white_margin",
+    label: "白底图 · 扩大外留白",
+    shortLabel: "扩留白 · 正方形",
+    whenToUse: "任意商品图，需要四周加白边并输出正方形",
+    description:
+      "上传任意美甲/商品图；**不转正、不抠图、不检测内容**。先居中铺到**正方形**白底（边长 = 原图长宽较大值），再按设定比例**四周扩白**（默认 **50%**）。纯服务端处理，**不调用模型**。每次 **1 张**。",
   },
   {
     value: "multi_angle",
@@ -164,6 +173,7 @@ export const GENERATION_MODE_GROUPS: {
       "complete_single_grid",
       "single_row_to_grid",
       "ten_singles_grid",
+      "expand_white_margin",
     ],
   },
   {
@@ -278,6 +288,11 @@ export function modeIsLayerEditor(mode: GenerationMode): boolean {
   return mode === "layer_editor";
 }
 
+/** 服务端 Sharp 扩白边（不调用模型） */
+export function modeIsExpandWhiteMargin(mode: GenerationMode): boolean {
+  return mode === "expand_white_margin";
+}
+
 /** @deprecated 使用 modeIsScatteredGridFlatlay */
 export function modeIsVerticalToScatteredFlatLay(mode: GenerationMode): boolean {
   return modeIsScatteredGridFlatlay(mode);
@@ -302,6 +317,7 @@ export function parseGenerationMode(raw: FormDataEntryValue | null): GenerationM
     s === "model_tryon" ||
     s === "accessory_tryon" ||
     s === "ten_singles_grid" ||
+    s === "expand_white_margin" ||
     s === "food_tryon" ||
     s === "layer_editor"
   ) {
@@ -1591,6 +1607,7 @@ export function promptsForMode(mode: GenerationMode): { prompt: string; label: s
     case "model_tryon":
     case "accessory_tryon":
     case "ten_singles_grid":
+    case "expand_white_margin":
     case "layer_editor":
       return [];
   }
